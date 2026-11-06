@@ -1,0 +1,474 @@
+package main
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Op is the single entry point the CLI uses (through the status socket) for
+// everything in the management layer.  The web GUI calls the same Mgmt
+// methods directly, so both front ends behave identically.
+func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
+	if strings.HasPrefix(cmd, "backup.") {
+		return m.backupOp(cmd, raw, actor)
+	}
+	if cmd == "device.raw" {
+		return m.deviceRaw(raw, actor)
+	}
+	if cmd == "device.capture" {
+		return m.deviceCapture(raw, actor)
+	}
+	if cmd == "device.troubleshoot" {
+		return m.deviceTroubleshoot(raw, actor)
+	}
+	if cmd == "device.signin_start" {
+		return m.deviceSigninStart(raw, actor)
+	}
+	if cmd == "device.signin_poll" {
+		return m.deviceSigninPoll(raw, actor)
+	}
+	if cmd == "device.change" {
+		return m.deviceChange(raw, actor)
+	}
+	if strings.HasPrefix(cmd, "alerts.") {
+		return m.alertsOp(cmd, raw, actor)
+	}
+	var a struct {
+		ID       string     `json:"id"`
+		A        string     `json:"a"`
+		B        string     `json:"b"`
+		Note     string     `json:"note"`
+		Config   string     `json:"config"`
+		CertPEM  string     `json:"cert_pem"`
+		KeyPEM   string     `json:"key_pem"`
+		CN       string     `json:"cn"`
+		DNS      []string   `json:"dns"`
+		IPs      []string   `json:"ips"`
+		Code     string     `json:"code"`
+		Addr     string     `json:"addr"`
+		Nodes    []string   `json:"nodes"`
+		Force    bool       `json:"force"`
+		Enabled  bool       `json:"enabled"`
+		Repo     string     `json:"repo"`
+		DataB64  string     `json:"data"`
+		Limit    int        `json:"limit"`
+		Hostname string     `json:"hostname"`
+		LogLevel string     `json:"level"`
+		LogText  string     `json:"q"`
+		LogSince string     `json:"since"`
+		LogN     string     `json:"n"`
+		QFrom    string     `json:"from"`
+		QTo      string     `json:"to"`
+		QOutcome string     `json:"outcome"`
+		QClient  string     `json:"client"`
+		NetKind  string     `json:"kind"`
+		QServer  string     `json:"server"`
+		QCMatch  string     `json:"cmatch"`
+		QGW      string     `json:"gw"` // host.cluster: only the nodes of this gateway (group number)
+		QSMatch  string     `json:"smatch"`
+		Lookup   string     `json:"lookup"`
+		Paused   bool       `json:"paused"`
+		Name     string     `json:"name"`
+		User     string     `json:"username"`
+		Password string     `json:"password"`
+		Expires  int64      `json:"expires"`
+		ReadOnly bool       `json:"read_only"`
+		Iface    string     `json:"iface"`
+		Filter   string     `json:"filter"`
+		Seconds  int        `json:"seconds"`
+		Group    int        `json:"group"`
+		Task     *SchedTask `json:"task"`
+		All      bool       `json:"all"`       // schedule.run: on every node of the task
+		Queue    bool       `json:"queue"`     // schedule.run: wait for the running job instead of refusing
+		DelaySec int        `json:"delay_sec"` // schedule.run with queue: not before this many seconds
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+	}
+	switch cmd {
+	case "tshoot.node":
+		b, err := m.TshootNode(a.Enabled, actor)
+		return map[string]any{"tgz": b}, err
+	case "tshoot.cluster":
+		b, err := m.TshootCluster(a.Enabled, actor)
+		return map[string]any{"tgz": b}, err
+	case "vmac.test":
+		return m.VmacTest(a.Group)
+	case "canvas.edit":
+		var e canvasEdit
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		msg, err := m.CanvasEdit(e, actor)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"message": msg}, nil
+	// configuration history
+	case "versions.list":
+		return m.VersionsList(), nil
+	case "versions.get":
+		meta, cfg, err := m.VersionGet(a.ID)
+		return map[string]any{"meta": meta, "config": cfg}, err
+	case "versions.diff":
+		return m.VersionDiff(a.A, a.B)
+	case "versions.snapshot":
+		return m.VersionSnapshot(a.Note, actor)
+	case "versions.restore":
+		dc, err := m.VersionRestore(a.ID, actor)
+		return map[string]any{"config": dc}, err
+	case "versions.export":
+		_, cfg, err := m.VersionGet(a.ID)
+		return map[string]any{"config": cfg}, err
+	case "config.import":
+		dc, err := m.ConfigImport([]byte(a.Config), actor, a.Note)
+		return map[string]any{"config": dc}, err
+
+	// SNMP
+	case "snmp.status":
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		return snmpStatus(dc.snmpSettings()), nil
+
+	// LLDP (Configure ▸ Settings ▸ General ▸ Neighbor discovery)
+	case "lldp.status":
+		dc, _, err := m.LiveConfig()
+		if err != nil {
+			return nil, err
+		}
+		return lldpStatus(dc.Settings.LLDP), nil
+	case "lldp.set":
+		if err := m.LLDPSet(a.Enabled, actor); err != nil {
+			return nil, err
+		}
+		return map[string]any{"enabled": a.Enabled}, nil
+
+	// certificate
+	case "tls.status":
+		return m.certs.Status(), nil
+	case "tls.install":
+		info, warns, err := m.TLSInstall(a.CertPEM, a.KeyPEM, actor)
+		return map[string]any{"info": info, "warnings": warns}, err
+	case "tls.csr":
+		csr, err := m.certs.GenerateCSR(a.CN, a.DNS, a.IPs)
+		return map[string]any{"csr": csr}, err
+	case "tls.revert":
+		info, err := m.TLSRevert(actor)
+		return info, err
+	case "tls.regenerate":
+		return m.certs.Regenerate(actor)
+
+	// cluster
+	case "cluster.status":
+		return m.cl.View(), nil
+	case "cluster.token":
+		code, exp, err := m.cl.MintJoinCode(actor)
+		return map[string]any{"code": code, "expires": exp}, err
+	case "cluster.join":
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		err := m.cl.Join(ctx, a.Code, actor)
+		return m.cl.View(), err
+	case "cluster.promote":
+		if m.pausedFn != nil && m.pausedFn() {
+			return nil, errors.New("this node is paused: resume it before making it the primary (the role stays on a node that is in service)")
+		}
+		snap, err := m.cl.Promote(actor)
+		return map[string]any{"epoch": snap.Epoch, "primary": snap.PrimaryAddr}, err
+	case "cluster.remove":
+		err := m.cl.RemovePeer(a.Addr, actor)
+		return m.cl.View(), err
+	case "cluster.delete":
+		err := m.cl.DeletePeer(a.Addr, actor)
+		return m.cl.View(), err
+	case "cluster.unremove":
+		err := m.cl.UnremovePeer(a.Addr, actor)
+		return m.cl.View(), err
+	case "cluster.leave":
+		err := m.cl.Leave(actor)
+		return m.cl.View(), err
+	case "cluster.sync":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := m.cl.SyncOnce(ctx)
+		return m.cl.View(), err
+
+	// bgp
+	case "bgp.status":
+		return m.BGPStatus()
+	case "bgp.set":
+		var c BGPConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.BGPSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.BGPStatus()
+	case "bgp.operate":
+		var o BGPOperateArgs
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.BGPOperate(o, actor); err != nil {
+			return nil, err
+		}
+		return m.BGPStatus()
+	// ospf
+	case "ospf.status":
+		return m.OSPFStatus()
+	case "ospf.set":
+		var c OSPFConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.OSPFSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.OSPFStatus()
+	case "ospf.operate":
+		var o OSPFOperateArgs
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.OSPFOperate(o, actor); err != nil {
+			return nil, err
+		}
+		return m.OSPFStatus()
+	// syslog forwarding
+	case "syslog.status":
+		return m.SyslogStatus()
+	case "syslog.set":
+		var c SyslogConfig
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		if err := m.SyslogSet(c, actor); err != nil {
+			return nil, err
+		}
+		return m.SyslogStatus()
+	case "syslog.test":
+		st, err := sysSink.SendTest(actor)
+		if err != nil {
+			return nil, err
+		}
+		return st, nil
+	// log
+	case "log.read", "log.view":
+		q, err := logQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)
+		if err != nil {
+			return nil, err
+		}
+		if cmd == "log.view" && (q.Limit == 0 || q.Limit > logReadMax) {
+			q.Limit = logReadMax // the GUI never gets more than this in one reply
+		}
+		return ReadLog(q)
+	// packet capture: this node's Capture page, a timed capture (also what each node runs for the cluster-wide one), and
+	// the capture on every node at once
+	case "capture.interfaces":
+		return m.captureInterfaces(), nil
+	case "capture.start":
+		return map[string]any{"started": true}, m.CaptureStart(a.Iface, a.Filter, actor)
+	case "capture.stop":
+		m.CaptureStop()
+		return map[string]any{"stopped": true}, nil
+	case "capture.clear":
+		m.CaptureClear()
+		return map[string]any{"cleared": true}, nil
+	case "capture.packets":
+		since, _ := strconv.ParseInt(a.LogSince, 10, 64)
+		return m.capture.since(since, 3000), nil
+	case "capture.run":
+		return m.CaptureRun(context.Background(), a.Iface, a.Filter, a.Seconds, actor)
+	case "capture.job.start":
+		return m.CaptureJobStart(a.ID, a.Iface, a.Filter, a.Seconds, actor)
+	case "capture.job.get":
+		return m.CaptureJobGet(a.ID)
+	case "capture.cluster.start":
+		gid := 0
+		if strings.TrimSpace(a.QGW) != "" {
+			var err error
+			if gid, err = strconv.Atoi(strings.TrimSpace(a.QGW)); err != nil || gid < 1 {
+				return nil, errors.New("bad gateway number")
+			}
+		}
+		return m.CaptureClusterStart(a.Iface, a.Filter, a.Seconds, gid, actor)
+	case "capture.cluster.bundle":
+		b, err := m.CaptureClusterBundle()
+		return map[string]any{"tgz": b}, err
+	case "capture.cluster.status":
+		if j := m.CaptureClusterStatus(); j != nil {
+			return j, nil
+		}
+		return map[string]any{"none": true}, nil
+	// nmap of a client
+	case "scan.start":
+		return scanStart(a.QClient, actor)
+	case "nettool.start":
+		return netToolStart(a.NetKind, a.QClient, actor)
+	case "scan.get":
+		return scanGet(a.QClient)
+	case "nettool.get":
+		return netToolGet(a.NetKind, a.QClient)
+	case "host.cluster":
+		from, to, err := hostRange(a.QFrom, a.QTo)
+		if err != nil {
+			return nil, err
+		}
+		gid := 0
+		if a.QGW != "" {
+			if gid, err = strconv.Atoi(a.QGW); err != nil || gid < 1 {
+				return nil, errors.New("bad gateway number")
+			}
+		}
+		return m.clusterHostGW(context.Background(), actor, from, to, gid)
+	// host statistics: CPU, memory, disk, network
+	case "host.get":
+		from, to, err := hostRange(a.QFrom, a.QTo)
+		if err != nil {
+			return nil, err
+		}
+		return hoststats.Query(from, to), nil
+	// whois of a domain (asked of the registry from this node, only when requested)
+	case "whois.get":
+		return whoisWithAddrs(a.Lookup)
+	// a name for an address (reverse lookup) or an address for a name
+	case "dns.lookup.full":
+		return lookupFull(a.Lookup)
+	case "schedule.status":
+		return m.sched.Status(), nil
+	case "schedule.set":
+		if a.Task == nil {
+			return nil, errors.New("no task given")
+		}
+		return m.SchedSet(*a.Task, actor)
+	case "schedule.del":
+		return map[string]any{"deleted": true}, m.SchedDel(a.ID, actor)
+	case "schedule.run":
+		if a.All {
+			return m.SchedRunAll(a.ID, actor)
+		}
+		if a.Queue {
+			if a.DelaySec < 0 || a.DelaySec > 3600 {
+				return nil, errors.New("delay_sec must be 0 to 3600")
+			}
+			if err := m.sched.RunQueued(a.ID, actor, time.Duration(a.DelaySec)*time.Second); err != nil {
+				return nil, err
+			}
+			return map[string]any{"queued": true}, nil
+		}
+		if err := m.sched.RunNow(a.ID, actor); err != nil {
+			return nil, err
+		}
+		return map[string]any{"started": true}, nil
+	case "host.lookup":
+		return hostLookup(a.Lookup)
+	// pause the whole node
+	case "node.status":
+		return m.NodePauseStatus()
+	case "node.pause":
+		msg, err := m.NodePause(a.Paused, actor)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"message": msg, "paused": a.Paused}, nil
+	// rename the host (operating system host name and /etc/hosts)
+	case "node.rename":
+		msg, err := m.NodeRename(a.Name, actor)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"message": msg}, nil
+	// console users
+	case "users.list":
+		return m.UsersList(), nil
+	case "users.add", "users.password", "users.expiry", "users.delete", "users.grant", "users.revoke", "users.access":
+		var msg string
+		var partial bool
+		var err error
+		switch cmd {
+		case "users.add":
+			msg, partial, err = m.UserAdd(a.User, a.Password, a.Expires, a.ReadOnly, actor)
+		case "users.password":
+			msg, partial, err = m.UserPassword(a.User, a.Password, actor)
+		case "users.expiry":
+			msg, partial, err = m.UserExpiry(a.User, a.Expires, actor)
+		case "users.grant":
+			msg, partial, err = m.UserGrant(a.User, a.ReadOnly, actor)
+		case "users.access":
+			msg, partial, err = m.UserAccess(a.User, a.ReadOnly, actor)
+		case "users.revoke":
+			msg, partial, err = m.UserRevoke(a.User, actor)
+		default:
+			msg, partial, err = m.UserDelete(a.User, actor)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"message": msg, "partial": partial}, nil
+	// power
+	case "power.status":
+		return m.PowerStatus(), nil
+	case "power.do":
+		var r PowerReq
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return nil, fmt.Errorf("bad arguments: %w", err)
+		}
+		return m.Power(r, actor)
+
+	// updates
+	case "update.status":
+		return m.UpdateStatus(), nil
+	case "update.history":
+		return m.upd.History(a.Limit), nil
+	case "update.upload":
+		body, err := base64.StdEncoding.DecodeString(a.DataB64)
+		if err != nil {
+			return nil, errors.New("upload is not valid base64")
+		}
+		ver, err := m.UpdateUpload(body, actor)
+		return map[string]any{"version": ver}, err
+	case "update.apply":
+		ver, err := m.UpdateApplyLocal(actor, a.Force)
+		return map[string]any{"target": ver, "started": err == nil}, err
+	case "update.push":
+		return m.UpdateStatus(), m.UpdatePush(resolveNodes(m, a.Nodes), actor)
+	case "update.cancel":
+		return m.UpdateStatus(), m.UpdateCancel(resolveNodes(m, a.Nodes), actor)
+	case "update.auto":
+		return m.UpdateStatus(), m.UpdateAuto(a.Enabled, actor)
+	case "update.repo":
+		return m.UpdateStatus(), m.UpdateRepo(a.Repo, actor)
+	}
+	return nil, fmt.Errorf("unknown command: %s", cmd)
+}
+
+// resolveNodes expands "all" and "self" to member addresses.
+func resolveNodes(m *Mgmt, in []string) []string {
+	var out []string
+	for _, n := range in {
+		switch strings.ToLower(strings.TrimSpace(n)) {
+		case "all":
+			for _, p := range m.cl.View().Peers {
+				out = append(out, p.Addr)
+			}
+		case "self", "this":
+			out = append(out, m.cl.selfAddrForEvents())
+		default:
+			if n = strings.TrimSpace(n); n != "" {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}

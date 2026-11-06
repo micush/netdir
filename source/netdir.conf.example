@@ -1,0 +1,66 @@
+{
+  "log_level": "info",
+  "groups": [
+    {
+      "group_id": 100,
+      "interface": "eth0",
+      "vip4": "10.0.0.50/24",
+      "priority": 100,
+      "lb_method": "roundrobin",
+      "real_macs": true,
+      "key": "change-me-to-a-long-random-key"
+    }
+  ],
+  "settings": {
+    "mcp_acl": ["10.0.0.0/24", "10.0.0.20 rw"],
+    "devices": [
+      {"name": "cat9300", "platform": "iosxe", "address": "10.0.0.2", "credential": "cat", "insecure": true, "tags": ["site=home", "role=access"]},
+      {"name": "fg100e", "platform": "fortios", "address": "10.0.0.1", "credential": "fgt", "insecure": true, "tags": ["site=home", "role=firewall"],
+       "options": {"vdom": "root"}},
+      {"name": "n9k", "platform": "nxos", "address": "10.0.0.3", "credential": "cat", "insecure": true, "tags": ["site=home", "role=core"]},
+      {"name": "pa440", "platform": "panos", "address": "10.0.0.4", "credential": "pan", "insecure": true, "tags": ["site=home", "role=firewall"],
+       "options": {"vsys": "vsys1"}},
+      {"name": "leaf1", "platform": "eos", "address": "10.0.0.10", "credential": "cat", "insecure": true, "tags": ["site=home", "role=core"]},
+      {"name": "ltm1", "platform": "bigip", "address": "10.0.0.12", "credential": "pan", "insecure": true, "tags": ["site=home", "role=lb"]},
+      {"name": "entra", "platform": "entra", "credential": "entraapp", "options": {"tenant": "contoso.onmicrosoft.com"}},
+      {"name": "pve", "platform": "proxmox", "address": "10.0.0.30", "credential": "pvetoken", "insecure": true},
+      {"name": "fabric", "platform": "afc", "address": "10.0.0.20", "credential": "afcuser", "insecure": true},
+      {"name": "meraki-org", "platform": "meraki", "address": "api.meraki.com", "credential": "merakikey"},
+      {"name": "meraki-sw1", "platform": "meraki", "address": "api.meraki.com", "credential": "merakikey", "options": {"serial": "Q2XX-XXXX-XXXX"}},
+      {"name": "dnsdir1", "platform": "dnsdir", "address": "10.0.0.13", "credential": "dirkey", "insecure": true, "tags": ["site=home", "role=ddi"]},
+      {"name": "ntpdir1", "platform": "ntpdir", "address": "10.0.0.14", "credential": "dirkey", "insecure": true, "tags": ["site=home"]},
+      {"name": "dns1", "platform": "technitium", "address": "10.0.0.11", "credential": "pan", "insecure": true, "tags": ["site=home", "role=ddi"]},
+      {"name": "cx6300", "platform": "aoscx", "address": "10.0.0.6", "credential": "cat", "insecure": true, "tags": ["site=home", "role=access"],
+       "options": {"api_version": "v10.09"}},
+      {"name": "ddi", "platform": "nios", "address": "10.0.0.7", "credential": "cat", "insecure": true, "tags": ["site=home", "role=ddi"]},
+      {"name": "pano", "platform": "panorama", "address": "10.0.0.5", "credential": "pan", "insecure": true, "options": {"device_group": "branches"}}
+    ],
+    "device_credentials": [
+      {"name": "cat", "username": "netdir", "password": "change-me"},
+      {"name": "fgt", "token": "change-me"},
+      {"name": "pan", "token": "change-me"},
+      {"name": "dirkey", "token": "an-mcp-key-made-on-the-director"},
+      {"name": "merakikey", "token": "a-dashboard-api-key"},
+      {"name": "entraapp", "username": "application-client-id", "password": "client-secret"},
+      {"name": "entrabrowser", "token": "rt:"},
+      {"name": "afcuser", "username": "admin", "password": "change-me"},
+      {"name": "pvetoken", "token": "netdir@pve!netdir=00000000-0000-0000-0000-000000000000"}
+    ]
+  },
+  "web": {
+    "listen": ":22161",
+    "group": "netdir",
+    "pam_service": "netdir",
+    "session_idle_minutes": 30,
+    "max_failed_logins": 3,
+    "failed_login_window_minutes": 1,
+    "lockout_minutes": 15,
+    "cert_file": "",
+    "key_file": ""
+  },
+  "cluster": {
+    "listen": ":22162",
+    "self": "10.0.0.5:22162",
+    "sync_interval_sec": 5
+  }
+}

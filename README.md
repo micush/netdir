@@ -1,1 +1,390 @@
-# netdir
+# MCP Network Director
+
+MCP Network Director (`netdir`) is a highly available [MCP](https://modelcontextprotocol.io) gateway to a network's switches and firewalls. An assistant such as Claude connects to one address and can ask any device, or all of them at once, for its facts, interfaces, neighbors and configuration.
+
+What you get:
+
+- **One address that survives a node failure.** Several nodes share a virtual IP (the gateway's **VIP**). The nodes elect a controller among themselves and spread clients across every node. A node can fail or restart without the assistant losing the gateway.
+- **Anycast over BGP or OSPF.** A gateway can also announce extra addresses to your routers through FRR, so every site reaches its nearest gateway. A node withdraws them when it cannot answer.
+- **One inventory for every vendor.** Devices and their logins live in the cluster's shared settings, so any node can answer for any device. Each platform is a small driver that speaks the device's own API.
+- **Read-only first, with guard rails.** Access is by address list or bearer key, and read-only is the default. Device passwords and tokens are never shown to an MCP caller. A device's configuration goes only to read-write callers, and `show` takes nothing that writes. Every call is logged.
+- **A cluster you manage from any node.** Shared settings, config history, certificates and software updates stay in step across the nodes, through a web GUI or the command line.
+
+## Contents
+
+- [Status](#status)
+- [How it works](#how-it-works)
+- [Install, upgrade, uninstall](#install-upgrade-uninstall)
+- [Managed devices](#managed-devices)
+- [Connecting an assistant](#connecting-an-assistant)
+- [MCP tools](#mcp-tools)
+- [Security](#security)
+- [Trying a device first: devprobe](#trying-a-device-first-devprobe)
+- [Clustering](#clustering)
+- [Anycast addresses, BGP and OSPF](#anycast-addresses-bgp-and-ospf)
+- [Neighbor discovery (LLDP)](#neighbor-discovery-lldp)
+- [Configuration file](#configuration-file)
+- [Build from source](#build-from-source)
+- [License](#license)
+
+## Status
+
+Version 1 is the first release of netdir. It was forked from the AnyTime NTP Director, and the NTP serving (chrony, upstream pools, query statistics) has been removed.
+
+| Area | State |
+|---|---|
+| VIP election, anycast, BGP, OSPF, LLDP, cluster, users, backups, scheduler, updates | carried over from the NTP Director |
+| Device inventory, credentials, MCP device tools | new in v1 |
+| Drivers | `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `dnsdir` and `ntpdir` (the DNS Director and NTP Director products, over their MCP endpoint) |
+| Writes to devices | typed port changes from plain English on Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches (`device_change`), and any configuration change on every platform (`device_change_raw`: REST request, PAN-OS action, or CLI lines); an `rw` key, ACL entry or GUI account may, `ro` may not; not yet run on real gear |
+| `show` commands, text running-configs | NX-OS, EOS and PAN-OS answer them over their APIs; IOS-XE, ArubaOS-CX and FortiOS need an SSH transport, not built yet; Infoblox and Technitium have none |
+| NX-OS, EOS, ArubaOS-CX, PAN-OS, Infoblox and Technitium drivers | built against vendor documentation and a test stub, not yet run on real gear (see the changelog) |
+| Web GUI | converted: Configure ▸ Devices edits the inventory and logins, Monitor ▸ Devices asks the devices and holds the network tools; the NTP and Statistics pages are gone. The daemon still refuses a configuration with the old `ntp` block. |
+
+## How it works
+
+A **gateway** is one shared address, its VIP (IPv4, IPv6 or both), served by several nodes. The nodes of a gateway find each other over multicast, or over a unicast list where multicast is blocked, and elect one **controller (AGC)**. The others are **forwarders (AFN)**. The controller answers ARP and IPv6 neighbor solicitations for the VIP with the MAC address of a node chosen by the gateway's load-balancing method, so clients are spread over all the nodes. The MAC is either a virtual one per node, which another node takes over when that node fails, or, in real-MAC mode (the default for a new gateway), the node's own.
+
+Every node that is active or forwarding answers on the VIP (and the other gateway addresses) with a listener of its own that serves only the MCP endpoint, `/mcp`, on port 443 by default (`settings.mcp_port`). The GUI does not answer on those addresses: it listens on port 22161 of the node's own addresses. A node whose MCP listener is not serving withdraws its anycast addresses, so traffic goes to a node that can answer.
+
+An MCP request for devices is answered by the node that receives it. That node opens the driver for each device the target picks, asks up to 16 devices at a time with a time limit per device, and returns one result per device.
+
+## Install, upgrade, uninstall
+
+Supported systems are Ubuntu, Debian, Fedora, RHEL, Rocky, Alma, Arch and Manjaro, and their derivatives. netdir is Linux-only (macvlan, AF_PACKET, inotify).
+
+```
+tar xzf netdir_v3.tgz && cd netdir
+sudo ./install.sh [--add-user NAME] [--no-start] [-y] [--dry-run]
+sudo netdir-uninstall [--purge]
+```
+
+The installer builds netdir from the source tree with Go 1.24 or newer (it fetches a toolchain when the distribution's is too old). It installs only the missing prerequisites: gcc and the PAM headers, iproute2, FRR, nmap, ping and mtr, snmpd and lldpd. Then it sets up the `netdir` group, the PAM service, the systemd unit and `/var/lib/netdir`. Running it again on a newer tree upgrades. A start that fails rolls back to the previous binary.
+
+`QUICKSTART.md` walks through a first gateway and connecting an assistant.
+
+## Managed devices
+
+Devices and their logins go in the shared `settings` block:
+
+```json
+"settings": {
+  "devices": [
+    {"name": "cat9300", "platform": "iosxe", "address": "10.0.0.2", "credential": "cat",
+     "insecure": true, "tags": ["site=home", "role=access"]},
+    {"name": "fg100e", "platform": "fortios", "address": "10.0.0.1", "credential": "fgt",
+     "insecure": true, "tags": ["site=home", "role=firewall"], "options": {"vdom": "root"}},
+    {"name": "n9k", "platform": "nxos", "address": "10.0.0.3", "credential": "cat", "insecure": true},
+    {"name": "leaf1", "platform": "eos", "address": "10.0.0.10", "credential": "cat", "insecure": true},
+    {"name": "dns1", "platform": "technitium", "address": "10.0.0.11", "credential": "pan", "insecure": true},
+    {"name": "cx6300", "platform": "aoscx", "address": "10.0.0.6", "credential": "cat", "insecure": true,
+     "options": {"api_version": "v10.09"}},
+    {"name": "ddi", "platform": "nios", "address": "10.0.0.7", "credential": "cat", "insecure": true},
+    {"name": "pa440", "platform": "panos", "address": "10.0.0.4", "credential": "pan", "insecure": true,
+     "options": {"vsys": "vsys1"}},
+    {"name": "pano", "platform": "panorama", "address": "10.0.0.5", "credential": "pan", "insecure": true,
+     "options": {"device_group": "branches"}}
+  ],
+  "device_credentials": [
+    {"name": "cat", "username": "netdir", "password": "…"},
+    {"name": "fgt", "token": "…"},
+    {"name": "pan", "token": "…"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | unique; letters, digits, `.`, `-`, `_` |
+| `platform` | `iosxe`, `nxos`, `eos`, `aoscx`, `fortios`, `panos`, `panorama`, `nios`, `technitium`, `bigip`, `meraki`, `entra`, `afc`, `proxmox`, `dnsdir` or `ntpdir` |
+| `address` | IP address or host name, no port or scheme |
+| `port` | the API port; default 443 |
+| `credential` | the name of an entry of `device_credentials` |
+| `tags` | free-form labels to target groups of devices: `site=dc1`, `edge` |
+| `insecure` | skip the certificate check (most devices ship a self-signed one) |
+| `ca_pem` | the CA the device's certificate must be signed by, instead of `insecure` |
+| `options` | per platform: `vdom` for FortiOS; `vsys` (default `vsys1`) and `device_group` for PAN-OS; `api_version` (default `v10.09`) for ArubaOS-CX; `wapi_version` (default `v2.12`) for Infoblox |
+| `disabled` | kept in the inventory, never contacted unless named on purpose |
+
+### Cisco Catalyst (IOS-XE, `iosxe`)
+
+RESTCONF, with HTTP basic authentication as a privilege-15 user. On the switch:
+
+```
+ip http secure-server
+ip http authentication local
+restconf
+username netdir privilege 15 secret <password>
+```
+
+- **Facts** come from the native and device-hardware models.
+- **Interfaces** come from interfaces-oper.
+- **Neighbors** are LLDP, plus CDP on ports LLDP has none for.
+- **Config** is the native YANG model as JSON, not `show running-config` text.
+
+### Fortinet FortiGate (FortiOS, `fortios`)
+
+The REST API with an API token. Make one under System ▸ Administrators ▸ Create New ▸ REST API Admin; a read-only profile is enough.
+
+- **Facts** come from system status.
+- **Interfaces** come from the monitor API, with descriptions and admin state from cmdb.
+- **Neighbors** are LLDP, which needs `set lldp-reception enable` on the interfaces.
+- **Config** is the backup file.
+
+### Cisco Nexus (NX-OS, `nxos`)
+
+NX-API with HTTP basic authentication as a user with the network-operator role. On the switch: `feature nxapi` (HTTPS on 443 by default; `nxapi https port` changes it).
+
+- Only `cli_show` and `cli_show_ascii` are ever sent, and every command goes through `CheckShow`: nothing that writes.
+- **Facts** are `show version` and `show inventory`; **Interfaces** and **Ports** (counters, rates) come from `show interface`.
+- **Neighbors** are LLDP and CDP detail, merged by port; a feature that is off is left out.
+- **Routes** are `show ip route vrf all` (and IPv6); **Routing** lists OSPF, BGP, EIGRP, IS-IS, RIP, BFD, HSRP, VRRP and more as parts, with `unavailable` saying what a switch did not answer.
+- **Firewall** is the ACLs with their match counters, object groups and CoPP; **Resources** are CPU, memory, fans, temperatures and power; **VLANs** are `show vlan brief`.
+- **Config** is `show running-config`; **Show** runs one show command as text.
+- **API** (`device_api_get`) is the NX-API REST object model (`/api/mo/…`, `/api/class/…`), read after a login whose session is closed again.
+
+### Arista EOS (`eos`)
+
+eAPI, the JSON-RPC interface at `/command-api`, with HTTP basic authentication as a user whose privilege level allows the commands (15 for the running configuration). On the switch: `management api http-commands`, `protocol https` and `no shutdown`.
+
+- Only `runCmds` with the format `json` or `text` is ever sent, one command per request, and every command goes through `CheckShow`: nothing that writes, and no `enable` or `configure`.
+- **Facts** are `show version` and `show hostname`; **Interfaces** and **Ports** (counters, rates) come from `show interfaces`; **Neighbors** are `show lldp neighbors detail`.
+- **Routes** are `show ip route vrf all` (and IPv6); **Routing** is BGP, OSPF, IS-IS, BFD, VRRP, MLAG, route maps and prefix lists as parts, with `unavailable` saying what a switch did not answer.
+- **Firewall** is the access lists (IP, IPv6, MAC) with their counters; **Resources** are memory, CPU (`show processes top once`), fans, temperatures and power supplies; **VLANs** carry their ports.
+- **Config** is `show running-config` and **Show** runs one show command, both as the text the CLI prints.
+- **API** (`device_api_get`) names a show command as a path and answers its JSON: `/eapi/show/ip/route/vrf/all` is `show ip route vrf all` (`%2F` for a `/` in a word, `?format=text` for text).
+
+### Aruba CX (ArubaOS-CX, `aoscx`)
+
+The REST API (10.04 and later) with a user name and password. The driver logs in once (the credentials in the form body, never in a URL; the login is the only POST), keeps the session and logs out when the request ends. On the switch: `https-server rest access-mode read-only` and `https-server vrf mgmt` (or the VRF it is reached on), and a user in a read-only group. The option `api_version` (default `v10.09`) names the REST version; a release that lacks it answers 404.
+
+- **Facts** are `/system` (status and configuration) and the chassis subsystem; **Interfaces** and **Ports** (statistics, status and configuration as properties) come from `/system/interfaces`.
+- **Neighbors** are LLDP, asked per front-panel port that is up.
+- **Routes** are every VRF's routes (one entry per next hop); **Routing** is each VRF's BGP, OSPF, OSPFv3 and static routes, route maps and prefix lists.
+- **Firewall** is the ACLs with their entries and hit counters, object groups, classes and policies.
+- **Resources** are CPU and memory from the subsystems' resource utilization, and fans, temperatures and power supplies; **VLANs** carry the ports of each VLAN.
+- **Config** is the running configuration as JSON (`fullconfigs/running-config`). `show` commands are not available: the REST API runs none.
+- **API** (`device_api_get`) reads any `/rest/<version>/...` resource; the login and logout resources are refused.
+
+### Infoblox NIOS (`nios`)
+
+The WAPI (`/wapi/<version>/`) with HTTP basic authentication as an admin whose group may read. Only GET is sent; function calls (`_function`), which change things or make backups, are refused. The option `wapi_version` (default `v2.12`) names the WAPI version.
+
+NIOS is a DNS, DHCP and IPAM appliance, not a switch or a firewall, so only what fits is answered:
+- **Facts** are the grid member whose VIP or host name is the device's address (the only member if there is one), with its hardware model and serial number and the NIOS version from its upgrade status; for an address that is no member's, the grid's name.
+- **Interfaces** are that member's LAN1, LAN2, MGMT and HA addresses (every member's, named `host/lan1`, when the address is no member's).
+- **Resources** are the capacity report (objects held against what the hardware is rated for, as storage) and the state of each member's services (DNS, DHCP, ...).
+- **API** reads any object type: networks, ranges, zones, records, leases, ... (`/wapi/v2.12/network?_max_results=50`); the catalog lists the types the release has.
+- Neighbors, routes, routing, firewall, VLANs, port counters, configuration and `show` answer "unsupported".
+
+### Technitium DNS Server (`technitium`)
+
+The HTTP API (Technitium 15.0 and later) on its HTTPS port, 53443 by default (turn on HTTPS for the web service in Settings ▸ Web Service; the plain-HTTP port is never used). The credential is an API token (Administration ▸ Sessions ▸ Create API Token), sent as `Authorization: Bearer`, never in a URL; or a user name and password, from which the driver logs in and logs out again.
+
+Technitium's API changes things with plain GET requests (a zone is deleted with one), so being a GET is no safeguard here: **only endpoints whose name is `get`, `list` or `query` (or begins with one: `getTop`, `listStoreApps`) are ever sent**, and a token or password parameter in a request is refused.
+
+Technitium is a DNS server and not a switch, so (as with Infoblox) only what fits is answered:
+- **Facts** are the server's name, version and uptime; **Interfaces** are the addresses it listens on; **Resources** are the dashboard's statistics for the last hour and day.
+- **API** reads everything it lists: zones, records, the cache, blocked and allowed domains, DHCP scopes and leases, apps, the query log (`/api/zones/list`, `/api/dashboard/stats/get?type=LastHour`).
+- Neighbors, routes, routing, firewall, VLANs, port counters, configuration (the backup is a file) and `show` answer "unsupported".
+
+### F5 BIG-IP (`bigip`)
+
+iControl REST (BIG-IP 13.1 and later) on port 443, with a user name and password (basic authentication) or an auth token as the credential's token. A user with the Guest or Auditor role reads; changes need an account that may make them. Facts come from `/mgmt/tm/cm/device`; Interfaces are the physical interfaces and the self IPs; Ports are the interface statistics (bits in and out become octets); Routes and Routing are the static routes, BGP, OSPF, BFD and route domains; VLANs carry their tag; Firewall is the AFM policies, rule lists, address and port lists and NAT policies; Resources are CPU, memory, disk and the failover state. The API request reads any `/mgmt/tm/...` path except util, authentication, UCS archives and file transfer. Neighbors, configuration text and `show` answer "unsupported".
+
+### DNS Director and NTP Director (`dnsdir`, `ntpdir`)
+
+The sibling products, managed through their own MCP endpoint (`POST /mcp` on the GUI port: 53853 for `dnsdir`, 12380 for `ntpdir`). The credential's token is an **MCP key** made on the director (Configure ▸ Monitoring ▸ MCP ▸ Keys); its `ro` or `rw` is the access, so a `ro` key reads and a `rw` key also changes. A password is not used. The option `node` names the cluster node the tools ask about (an address or host name from the director's node list); without it the node serving the endpoint answers.
+
+- **Facts** are the node and the release (`v635`) from `list_nodes`, with the number of nodes in the cluster; **Interfaces** and **Resources** (CPU, load, memory, swap, file systems, network rate) are the node's host statistics; **Neighbors** are its LLDP neighbors.
+- **Show** takes `show NAME [node=… range=… top=… gateway=… transport=…]`, where NAME is one of the director's read tools: `nodes`, `topology`, `gateways`, `alerts`, `log`, `query-stats`, `host-stats`, `server-stats`, `schedule`, `updates`, `node-status`, `lldp`, and `dns` (DNS Director) or `ntp` and `time` (NTP Director). **API** reads any `/api/…` route of the director's GUI API (the catalog lists them); **Config** is its configuration.
+- Each director hides its own secrets in every answer. No ports, routes, VLANs or firewall.
+- **Changes** (`device_change_raw`, rw key): method `SET` merges the JSON body into the director's configuration (`{"dns": {"cache_entries": 200000}}`; a dry run asks the director to check it without saving), and `POST` or `PUT` with a path under `/api/` calls a route of its GUI API. The director keeps every configuration change in its own history, which is the way back; netdir does not put it back itself. Login, logout, the session and sign-in routes are refused.
+
+### Microsoft Entra ID (`entra`)
+
+Microsoft Graph (`https://graph.microsoft.com/v1.0`), **read only**, for one question: which devices belong to a user. Address `graph.microsoft.com` (left empty it is that); `login_host` names another sign-in host for a national cloud (`login.microsoftonline.us` with address `graph.microsoft.us`). Two ways to log in:
+
+- **Browser sign-in** (nothing to register in Entra). Add the device with a **new login and leave user name, password and token empty**, then right-click the device ▸ **Sign in with Microsoft** (or `netdir --device-signin NAME`). The page shows a code and a link; you open it on any computer and sign in (multi-factor included). The device then sees what that account may see: delegated `User.Read.All` and `Device.Read.All` through Microsoft's public client "Microsoft Graph Command Line Tools", with no secret. By default any member of a tenant may read users and their devices; a tenant can restrict that or require consent for that client. The refresh token is kept in the login as `rt:…` (a login with only `rt:` is a login not yet signed in) and is renewed as it is used (saved at most once a day); sign in again when it is revoked or unused for 90 days. Option `tenant` (ID or domain) is optional here; without it the sign-in is to "organizations".
+- **Application** (unattended, no person). Register an app in Entra, add the **application** permissions `Device.Read.All` and `User.Read.All` (Microsoft Graph), grant admin consent and create a client secret. The login's **user name** is the application (client) ID and its **password** the secret; option `tenant` is the directory ID or a verified domain. The token is asked for once per connection.
+
+- **Facts**: the tenant's name and ID. No interfaces, neighbors or configuration.
+- **Show** `show devices user=<sign-in name | object ID | name>`: the devices the user has **registered** and the devices the user **owns**, each once with a `relation` list, sorted by name (id, deviceId, name, operating system and version, trust type, compliance, managed, last sign-in). A name that matches several users is refused with the candidates listed. `show user user=…` shows the user. The API request reads only `/organization`, `/users`, a user's `registeredDevices` and `ownedDevices`, and `/devices`.
+- No change of any kind is possible: the driver has no write path, only GET requests (and the token requests). Starting a sign-in changes a login, so it needs the access a device change needs (not a read-only account, and there is no MCP tool for it).
+
+### Proxmox VE (`proxmox`)
+
+Proxmox VE over its REST API (`https://<host>:8006/api2/json`; the port defaults to 8006, and a self-signed certificate needs *skip check*). The login is an **API token** (Datacenter ▸ Permissions ▸ API Tokens): the credential's token is `user@realm!id=secret`, or its user name is `user@realm!id` and its token the secret. A token whose user has only the `PVEAuditor` role reads and nothing more. Or a user name with its realm (`root@pam`) and a password, for which the driver takes a ticket and renews it (not for an account with two-factor login). Option `node` is the node that node-scoped reads ask when none is named (default: the node answering).
+
+- **Facts**: the cluster's name, its node count and the Proxmox VE version. **Interfaces**: the node's network (bridges, bonds, NICs, with address and active state). No neighbors or configuration text.
+- **Show** `show NAME [node=N] [vmid=ID]`: `version`, `cluster`, `resources`, `vms`, `storage`, `nodes`, `tasks`, `backups`, `not-backed-up`, `ha`, `ha-resources`, `firewall`, `firewall-options`, `options`, `log`, `pools`; per node `node-status`, `node-network`, `node-disks`, `node-services`, `node-tasks`, `node-storage`, `node-time`, `node-vms`, `node-cts`, `node-syslog`; per guest `vm-config`, `vm-status`, `vm-snapshots`, `vm-firewall`, `vm-agent`, `ct-config`, `ct-status`, `ct-snapshots`, `ct-firewall`, `ct-interfaces`. A guest's node is found from its `vmid`. The API request reads `/version`, `/cluster/…`, `/nodes/…`, `/pools` and `/storage`; accounts, tickets, consoles, ACME accounts, join information and the guest agent's commands and files are never read. Secrets by name (a guest's `cipassword` and the like) are hidden.
+- **Changes** (`device_change_raw`, rw key): `POST`, `PUT` or `DELETE` with a path below `/nodes`, `/cluster`, `/pools` or `/storage` and a JSON body: start, stop, shut down or reset a guest (`POST /nodes/pve1/qemu/100/status/start`), change its configuration (`PUT …/config`), snapshots, backups (`POST /nodes/pve1/vzdump`), migration, storage, network, HA and firewall settings. A change that starts a task is waited for (up to ten minutes) and answers with how the task ended; a failed task is an error with the last lines of its log. A dry run reads what the path holds now and sends nothing. A `PUT` is not put back on failure (the configuration's digest changes), the copy in `before` shows what was there.
+- **Never done here**: users, roles, permissions, tokens and realms; cluster create, join and removal; rebooting or shutting down a node, or stopping everything on it; stopping a node's services; consoles and shells; certificates; **deleting a VM or container, deleting a storage or its volumes; restoring a backup** (a body with `archive`) **or rolling back a snapshot**; removing or wiping disks; the guest agent's commands and files. They are refused before anything is sent.
+- Not run against a real Proxmox.
+
+### Aruba Fabric Composer (`afc`)
+
+The on-site controller for Aruba CX VXLAN/EVPN fabrics, over its REST API (`https://<host>/api/v1`). The login is a user name and password; the driver asks for a token (`POST /api/v1/auth/token`), sends it as the `Authorization` header, renews it when refused and deletes it when it is done (a user may hold ten). Port 443; a self-signed certificate needs *skip check*.
+
+- **Facts**: the fabrics the controller manages. **Show** `show <resource> [name=value …]` reads any resource collection (`show fabrics`, `show switches`, `show vrfs`, `show vlans`, `show vlan_groups`, `show switches name=leaf1`); the AFC's own API Explorer (the ? at the top right of its web page) lists the resources. The API request reads `/<resource>`, `/<resource>/<uuid>` and `/<resource>/<uuid>/<sub resource>`. Users, roles, authentication servers, tokens, keys, licences and backups are never read. Aruba's pages show the resources both below `/api/v1/` and below `/api/v1/api/`; a 404 at the first is tried at the second.
+- **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` or `DELETE` with a path below `/api/v1/` and a JSON body. A `PUT` keeps the old record and puts it back when the request fails in a way that may have changed something. Not changed: users, roles, authentication, certificates, keys, licences, backups and restores, upgrades, reboots and resets. Not run against a real controller.
+
+NetEdit has no documented API, so it has no driver; the Aruba CX switches it manages can be added directly as `aoscx`.
+
+### Cisco Meraki (`meraki`)### Cisco Meraki (`meraki`)
+
+The Dashboard API (`https://api.meraki.com/api/v1`), with an **API key** as the credential's token (a dashboard administrator with read-only access makes a key that only reads). Address `api.meraki.com` (left empty it is that). A Meraki network is a cloud, so a device here is one of two things:
+
+- **An organization** (no options; option `org` is its ID and may be left out when the key sees only one): **Facts** are the organization's name and its device count; **Interfaces** are the MX uplinks of every appliance (`Q2XX-… wan1`, status, address); **Show** takes `show NAME [network=ID] [serial=SERIAL]` with `networks`, `devices`, `statuses`, `uplinks`, `inventory`, `changes` (the dashboard's change log), `clients`, `ssids`, `vlans`, `firewall`, `device`, `switchports`, `portstatus` and `lldp`; **the API request** reads any `/organizations/…`, `/networks/…` or `/devices/…` path. Administrators, SAML, SNMP, VPN and license paths are refused over MCP, and keys, pre-shared keys and community strings are hidden.
+- **One Meraki device** (option `serial=Q2XX-XXXX-XXXX`): its facts (name, model, firmware), a switch's **ports** (name, enabled, status, speed, uplink flag) and interfaces, its LLDP and CDP **neighbors**, and **typed port changes** in plain English with ports as Meraki numbers them (`change the description for ports 1-8 to read "desks"`, `shut down 12`). A switch's uplink port is never shut down, because it would cut the switch off from its dashboard.
+
+**Changes** (`device_change_raw`, rw key): `POST`, `PUT` or `DELETE` with a path below `/organizations/`, `/networks/` or `/devices/` and a JSON body. Meraki has no commit: a change is live at once. A `PUT` keeps the copy of what the path held and puts it back when the request fails in a way that may have changed something (a 5xx, a lost connection); a `POST` or `DELETE` is not undone. Refused: administrators, SAML, login security, SNMP, licenses, the management interface, firmware, reboot, claim, remove, release, clone, combine, split, and deleting an organization, network or device. Options are set in the device dialog (Options) or as `"options": {"serial": "Q2XX-XXXX-XXXX"}` in `devices`. Rate limits (HTTP 429) are waited out twice; lists are asked with `perPage=1000` and further pages are not fetched; the redirect to a regional shard (`nNNN.meraki.com`) is followed with the key, to a `meraki.com`, `.cn`, `.ca` or `.in` host over https only.
+
+### Palo Alto Networks (PAN-OS, `panos`, and Panorama, `panorama`)
+
+The XML API at `/api/`, with an admin's API key as the credential's token, or a user name and password from which a key is made (the only POST sent, with the password in the body, never in a URL). The key travels in the `X-PAN-KEY` header and never reaches an error text. Give the admin an XML API role that allows Operational Requests and Configuration, read only.
+
+- Platform `panos` recognises a Panorama from its system information; `panorama` forces it. Options: `vsys` (default `vsys1`) and, for a Panorama, `device_group`.
+- **Facts** are `show system info`; **Interfaces** and **Ports** are `show interface all` and the interface counters, with comments and link state from the configuration; the management interface is included.
+- **Neighbors** are LLDP; **Routes** and **Routing** (BGP, OSPF, RIP, BFD, multicast and the virtual routers' configuration) are a firewall's.
+- **Firewall** is the rules' hit counters (security, NAT, PBF, decryption, application override), sessions and the policy and object configuration. On a Panorama it is the managed devices, device groups, templates, and shared and device-group rules and objects.
+- **Resources** are CPU and memory (from `show system resources`), disks and the environmentals; **VLANs** are the VLAN interfaces.
+- **Config** is the running configuration as XML. **Show** takes an operational command as typed on the CLI (`show system info`; a double-quoted word is a value) and is converted to XML; pipes are refused.
+- **API** reads `type=op` (a `<show>` command) or `type=config` with `action=show` or `get`; other types, a `key` parameter and anything that writes are refused.
+- A Panorama answers no routes, routing or VLANs (`unsupported`). PAN-OS's advanced routing engine's live state is not read.
+
+### Adding a platform
+
+A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.
+
+## Connecting an assistant
+
+1. **Allow the caller.**
+   - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change things (rw is for single addresses only).
+   - Or with a key that works from any address: Configure ▸ MCP ▸ Keys ▸ right-click ▸ **Add key** makes one and shows it once. In the file, `{"name": "laptop", "access": "rw", "key": "<at least 32 random characters>"}` in `settings.mcp_keys` does the same. Only a SHA-256 hash of the key is kept.
+2. **Give the gateway a certificate the client trusts.** The GUI starts with a self-signed one; install yours with `netdir --tls-install --cert-file F --key-file F`. The primary's certificate is copied to every node.
+3. **Point the client at the VIP.** For Claude Code:
+
+```
+claude mcp add --transport http netdir https://GATEWAY/mcp --header "Authorization: Bearer KEY"
+```
+
+The endpoint is MCP over streamable HTTP with JSON answers (protocol versions 2024-11-05 to 2025-11-25). Requests from a browser page on another origin are refused.
+
+## MCP tools
+
+| Tool | What it does |
+|---|---|
+| `list_devices` | the inventory (never the credentials) and the platforms that have a driver |
+| `device_facts` | host name, vendor, model, OS version, serial number and uptime |
+| `device_interfaces` | name, description, admin and link state, speed, MAC, IPv4 address |
+| `device_ports` | every port with its counters (octets, packets by kind, errors, discards, rates, flaps; `counters.all` has every statistic the device returned) and all its other properties |
+| `device_neighbors` | LLDP (and CDP) neighbors: local port, remote name, port and address |
+| `device_neighbor_details` | the same neighbors with every field the device reports about each |
+| `device_routes` | the routing table: protocol, prefix, next hop, interface, metric, distance, VRF, and the entry as the device reported it |
+| `device_routing` | the state and configuration of each routing protocol (OSPF, BGP, EIGRP, IS-IS, RIP, BFD, static, policy routes); `unavailable` says what a device did not answer |
+| `device_firewall` | firewall rules with their hit counters, address and service objects, NAT, zones, shapers |
+| `device_resources` | CPU, memory and storage utilization, and power supplies, fans and temperatures (state and reading) |
+| `device_vlans` | VLAN IDs, names, status and member ports (a firewall: its VLAN interfaces) |
+| `device_api_catalog` | what a device's own API offers (IOS-XE: the top-level node of every YANG model; FortiOS: how its paths are built; NX-OS: its REST object model; Arista: how show commands are named as paths; ArubaOS-CX: how its REST resources are read; PAN-OS: how its XML API is asked; Infoblox: the object types of its WAPI; Technitium: its read endpoints) |
+| `device_api_get` | `GET` any path of the device's API (`/restconf/data/...`, `/api/v2/monitor|cmdb|log/...`, NX-OS `/api/mo/...`, Arista `/eapi/show/<command words>`, ArubaOS-CX `/rest/<version>/system/...`, PAN-OS `/api/?type=op&cmd=<show>...`, Infoblox `/wapi/<version>/<type>`, Technitium `/api/zones/list`): everything the named tools do not cover. Only GET is sent; JSON has keys and passwords hidden; a text answer is refused |
+| `device_show` | one `show …` command; NX-OS and PAN-OS run it; an error per device on platforms whose API runs no commands (IOS-XE, FortiOS) |
+| `device_change_raw` | **rw callers only.** Any configuration change on any platform, in the platform's own terms: `method`, `path` and `body` for a REST platform (IOS-XE RESTCONF, AOS-CX, Aruba Fabric Composer, Proxmox VE, FortiOS cmdb, Infoblox WAPI, F5 iControl, Technitium, Meraki), the action and XPath for PAN-OS and Panorama, `lines` of configuration for Arista EOS and NX-OS; `dry_run` shows what the path holds now (EOS: the switch's own diff) and changes nothing; `save` keeps it over a reboot |
+| `device_capture` | **rw callers only.** Capture packets for a few seconds on the DNS Director, NTP Director, Arista EOS or F5 BIG-IP and return a summary (`target`, `interface`, `filter`, `seconds`, `packets`): the busiest address pairs and the protocols counted, the first packets one line each (headers only, no payload) |
+| `device_change` | **rw callers only.** Change ports of Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches: `text` in plain English (`change the description for ports gi1/0/1-24 to read "devices"`, `clear the description on …`, `shut down …`, `no shutdown …`) or typed `action`, `ports`, `value`; `dry_run` plans without changing; read back and put back on failure |
+| `list_nodes`, `get_topology`, `get_gateways` | the gateway itself: nodes, election, anycast addresses |
+| `get_alerts`, `get_log`, `get_host_stats`, `get_lldp`, `get_schedule`, `get_updates` | monitoring |
+| `get_config`, `edit_config` | the configuration, with secrets as `(hidden)`; `edit_config` merges a change, checks it and keeps it in the history |
+| `list_api`, `api_get`, `api_request` | any route of the GUI's API |
+
+Every device tool takes a `target`: a device name, `tag:TAG`, `platform:PLATFORM` or `all`, several separated by commas. A term that matches no device is an error, so a typo never quietly asks fewer devices. Each device's answer carries `ok`, `error`, `data` and the time it took. **No MCP caller sees a public IP address, a public AS number, an e-mail address or a serial number** (the assistant is a public service): every answer of every tool is scrubbed, each such value is replaced by a token like `PUBLIC-IP-3fa91c` that is the same for the same value (a keyed hash with a salt made at start-up: it cannot be reversed and changes at a restart and between nodes), and a token sent back in `edit_config` keeps the real value. Private, link-local, CGNAT and documentation addresses and private AS numbers are shown. Host names, MAC addresses and free text are not scrubbed. **No MCP caller, read-only or read-write, is handed a device's secrets**: the whole running configuration is not offered over MCP (the GUI's Monitor ▸ Devices ▸ Configuration has it), keys, passwords, communities and PEM keys in answers read `(hidden)`, `device_show` output is scrubbed line by line, text answers of `device_api_get` are refused, and the parts of a device's API for users, keys, certificates, SNMP and AAA are refused (ArubaOS-CX's `fullconfigs`, `accounts` and users, Infoblox's admin users, authentication services and keys, and EOS's running configuration, users, SNMP, AAA and `show tech-support`, also when the CLI word is abbreviated (`show run`), included; Technitium's admin and user endpoints; for PAN-OS this is checked in the query: a whole-configuration xpath, `show config` and the management, authentication and key parts are refused). This works by name and by path, so it hides more than it has to and is a safeguard, not a guarantee: keep read-only, least-privilege logins on the devices.
+
+**Changing devices** is the one thing here that writes. There are two ways. The typed one (`device_change`, below) is narrow on purpose; the raw one (`device_change_raw`, further down) sends any configuration change. A change is one of four typed actions on a range of ports (set or clear the description, shut down, no shutdown). English becomes that typed change in a small fixed grammar, with no model in the daemon, so what will happen is what the plan shows; anything the grammar does not know is refused. Nothing a caller types is sent to a device as it is: each driver builds its own request from the validated fields (RESTCONF PATCH and DELETE of the interface leaves on IOS-XE; one configuration session, committed at the end, on EOS; one PATCH of each interface on Aruba CX, which keeps the rest of its `user_config`), after checking every port against the device's own list. A change is planned first, written to the ports that differ, read back, and put back as it was if the device refuses it or does not hold it. A port that holds the address the gateway reaches the device on is never shut down. Permission is the access you already give: an MCP key or ACL entry with `rw`, or a GUI account outside the read-only group, may change devices; `ro` may not, and has no `device_change` tool. There is no separate switch. Each change is written to the Log with who made it and what every port held before and after. The same change is on the GUI (Monitor ▸ Devices ▸ Change ports: Plan, then Apply), the CLI (`netdir --device-change "…" --target sw1 [--dry-run] [--yes]`) and the API (`POST /api/devices/change`).
+
+**Any configuration change** (`device_change_raw`, `POST /api/devices/raw`, `netdir --device-raw "PATCH /restconf/data/…" --device-body '{…}' --target sw1`, `netdir --device-lines FILE --target eos1`, and Monitor ▸ Devices ▸ Change ports ▸ Advanced) sends what the platform itself takes: a REST request (`method` POST, PUT, PATCH or DELETE, `path` and `body`) on IOS-XE, ArubaOS-CX, FortiOS, Infoblox, F5 BIG-IP and Technitium; an XML API action (`set`, `edit`, `delete`, `rename`, `move`, XPath, element) on PAN-OS and Panorama; lines of configuration on Arista EOS and NX-OS; `SET` with a JSON object of settings, or `POST` and `PUT` of an `/api/` route, on the DNS and NTP Directors. The same permission applies (`rw`; `ro` has no tool and is refused). What the daemon still does: the path must be inside the platform's configuration tree (not RESTCONF operations, login, users, key files, file operations or reload), CLI lines that end the session, reload, erase, copy files, run a shell or turn off the management API or interface are refused, a dry run reads what the path holds now (`before`; EOS: the switch's own diff) and changes nothing, and every real change is logged with who made it, to which device, the request and the old state. Putting it back: a REST PUT or PATCH that fails in a way that may have changed something, or after which the device stops answering, is put back with the saved copy; EOS commits with a three-minute commit timer and confirms it only when the switch answers again; NX-OS takes a checkpoint and rolls back to it. What it does not do: a POST (create) or a DELETE over REST, a PAN-OS action and a Technitium call are not undone by the daemon (the result says so and shows the old state), and no change is read back for equality because devices normalise what they store. `save` makes the change survive a reboot (IOS-XE and BIG-IP save, EOS `write memory`, NX-OS `copy running-config startup-config`, PAN-OS commit)  and is off by default.
+
+**Packet capture** (`device_capture`, `POST /api/devices/capture`, `netdir --device-capture IFACE --target ns1 [--capture-filter "udp and port 53"] [--capture-seconds 5]`, and Monitor ▸ Devices ▸ Capture packets) runs a timed capture on a DNS Director, an NTP Director, an Arista EOS switch or an F5 BIG-IP and returns a summary instead of the file: protocol and address-pair counts, and the first 100 packets one line each with the headers only. A capture shows other people's traffic, so it takes the same permission as a change (`rw`; `ro` has no tool). Limits: 30 seconds, 2000 packets, the first 96 bytes of each packet, 10 devices at once; the filter is tcpdump syntax made of words, numbers and `. : / ( ) _ -` (it is put inside quotes in a shell command, so nothing else is allowed). How each does it: a director runs its own timed capture into a private buffer (`/api/capture/job`, through its MCP key); EOS runs `tcpdump` in the switch's shell through eAPI (`bash`), where Linux sees only traffic to or from the switch's CPU, so it suits the management plane and control protocols and not what is switched in hardware; BIG-IP runs `tcpdump` through iControl `util/bash` (interface `0.0` is every VLAN). The capture file is read back as text, decoded here, and removed from the device again, also when the capture failed. Not available: PAN-OS and FortiOS (their capture is global debug state on the box), NX-OS, IOS-XE, Aruba CX, Infoblox and Technitium; they answer that they cannot. The management session is not excluded from the capture: write the filter to leave it out when it matters.
+
+**Troubleshoot a user** (`device_troubleshoot_user`, `GET /api/devices/troubleshoot?user=…&hours=6&devices=1`, `netdir tshoot msmith [6]` (the same as `--troubleshoot-user msmith [--troubleshoot-hours 6]`; the user is a sign-in name, an account name such as `msmith`, an object ID or a name; `--tshoot` alone is still the node's troubleshooting bundle); GUI: right-click an Entra device ▸ *Troubleshoot user*; read only, so `ro` keys and read-only accounts may use it). It looks the user up in Entra, takes the device with the latest sign-in (`devices=` up to 3), finds it among the Meraki clients of the last `hours` hours (1 to 168, default 6; every network of the organization, or one with `network=L_…`), and reports: the Entra device (OS, management type such as MDM, compliance, last sign-in); the Meraki client (IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage), its usage history and device policy; for a Wi-Fi client the connection statistics, latency, connectivity events and failed connections; for a wired client the status of its switch port (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. A part the dashboard does not have is marked unavailable and the rest is still given. The two systems are matched by name: the Entra device name against the host name the client gave on the network (case and domain ignored), so a phone with another host name is reported as not seen. With several Entra or several Meraki organization devices, `entra=` and `meraki=` name the one to use.
+
+**Microsoft sign-in** (Entra devices with a browser login): right-click the device ▸ *Sign in with Microsoft*, or `netdir --device-signin NAME` (`POST /api/devices/signin`, then `POST /api/devices/signin/poll`). It changes a login, so a read-only account is refused and there is no MCP tool.
+
+
+The same queries are on the API: `GET /api/devices` and `GET /api/devices/query?target=…&op=facts|interfaces|ports|neighbors|neighbor_details|routes|routing|firewall|resources|vlans|api_catalog|api[&path=…]|config|show[&cmd=…]`.
+
+## Security
+
+- **Read-only by default.** A caller is read-only unless its address entry or key says `rw`. A read-only caller is refused a device's configuration, as a read-only GUI account is refused the GUI's own config versions.
+- **Secrets never reach a caller.** Device passwords and tokens, SNMP communities, keys and join codes read `(hidden)` to every MCP caller, read-write included. A read-only GUI account sees `(hidden)` too. Sending `(hidden)` back in `edit_config` keeps the current value. Secrets are also scrubbed from device error messages.
+- **Commands are gated.** `show` accepts one line starting with `show`, optionally with output filters (`| include`, `exclude`, `begin`, `section`, `count`, `json`). It refuses `;`, redirection, `| tee`, `| redirect` and anything else.
+- **TLS to devices** checks the certificate against the system's roots, or `ca_pem`, unless the device is marked `insecure`. Redirects are never followed with credentials, and answers are capped at 32 MB.
+- **Everything is logged.** Each device query is logged with the caller's name (`KEYNAME@ADDRESS` or the address) and the target. Each configuration change goes into the history under the caller's name.
+- **Treat answers as data.** Whatever a device answers is data for the assistant, never instructions. The MCP server says so in its instructions to the client.
+- **Where credentials live.** They are kept in the configuration file (`/var/lib/netdir/netdir.conf`, mode 0600, root) and replicated to the cluster's nodes over the pinned, signed cluster channel.
+
+## Trying a device first: devprobe
+
+In the GUI, Monitor ▸ Devices asks the devices of a target for their facts, interfaces, port counters, neighbors, routes, routing protocols, firewall rules, configuration or a show command, and Configure ▸ Devices edits the inventory and the logins.
+
+`source/tools/devprobe` runs the same drivers from any machine, macOS included, against an inventory file. It's the quickest way to check a device before it goes into a gateway:
+
+```
+cd source
+cp tools/devprobe/lab.json.example lab.json      # edit the addresses
+export CAT_PASSWORD='…' FGT_TOKEN='…'             # "env:NAME" in the file reads these
+go run ./tools/devprobe -inventory lab.json -target all -op facts
+go run ./tools/devprobe -inventory lab.json -target fg100e -op config > fg100e.conf
+```
+
+## Clustering
+
+Several nodes are managed as one cluster. The cluster is for management and is independent of the gateway election.
+
+- **Roles.** One node is the primary and the others are replicas.
+- **Shared and per-node settings.** The `settings` block, the gateways' VIPs, keys and timers, the web login groups and the sign-in rules are shared. They can be edited on any node and are applied on the primary. Interface, priority, weight and the web and cluster blocks stay per node.
+- **Joining.** Create a join code on a member (`--cluster-token`) and use it on the new node (`--cluster-join CODE`). A code works once, for an hour.
+- **Trust.** Nodes pin each other's certificates and sign every request.
+- **Promotion and failover.** Promotion is explicit (`--cluster-promote`). With three or more members there is also automatic failover after 5 minutes, and the primary role is handed over before a planned restart.
+- **Updates.** Upload a release archive on any node (`--update-upload`). Each node then builds it, swaps its binary and restarts, one node at a time, with automatic rollback.
+
+## Anycast addresses, BGP and OSPF
+
+A gateway's anycast addresses (`extra_vips`) are held on `lo` of every node that runs the gateway, with a 10 s lifetime renewed every 3 s. FRR announces them over BGP (with BFD) or OSPF. An address is withdrawn when:
+
+- the node's listener is not serving,
+- the gateway is paused or stops,
+- no BGP neighbor of its family is established (and OSPF is not carrying it), or
+- netdir stops.
+
+A `kill -9` takes it away within the lifetime. BGP and OSPF settings are per node: `--asn`, `--bgp-neighbor-add`, `--ospf-interface-add`; see `netdir --help`.
+
+## Neighbor discovery (LLDP)
+
+With `settings.lldp` on, every node runs lldpd. The switches then see the nodes, and each node reports the switch port it is on (`netdir --lldp`, MCP `get_lldp`). This is reporting only. The devices' own neighbor tables come from `device_neighbors`.
+
+## Configuration file
+
+`/var/lib/netdir/netdir.conf` (JSON, mode 0600). Changes apply live: the daemon watches the file. `source/netdir.conf.example` is a starting point, and `netdir --help` lists every key. The top-level blocks are:
+
+- `groups`: the gateways
+- `settings`: shared by the cluster
+- `web`: the GUI and MCP listener
+- `cluster`, `bgp`, `ospf`, `snmp`, `syslog`, `log_level`
+
+Every change from any source is kept as a version in `/var/lib/netdir/versions`: `--versions`, `--version-diff`, `--version-restore`.
+
+## Build from source
+
+From `source/`:
+
+```
+go build -o netdir .
+go test ./device             # the drivers: runs on any OS
+go test ./...                # the daemon: Linux only
+```
+
+netdir uses Go's standard library only. The GUI's PAM login needs cgo and the PAM headers. A build without cgo serves no GUI, and with it no MCP endpoint.
+
+## License
+
+GPL-3.0; see `LICENSE`.

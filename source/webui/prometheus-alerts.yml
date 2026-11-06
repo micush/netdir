@@ -1,0 +1,117 @@
+# Example Prometheus alert rules for netdir.  Copy this file next to prometheus.yml, list it under rule_files:, and adjust the
+# thresholds.  The first rule expects the scrape job to be called "netdir"; change that name to match yours.
+groups:
+  - name: netdir
+    rules:
+      - alert: NetdirNodeDown
+        expr: up{job="netdir"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} cannot be scraped"
+      - alert: NetdirChronyNotRunning
+        expr: netdir_chrony_running == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: chrony is not running"
+      - alert: NetdirNotSynchronised
+        expr: netdir_chrony_synchronised == 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: the clock is not synchronised"
+      - alert: NetdirClockOffset
+        expr: abs(netdir_chrony_offset_ms) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: the clock is more than 100 ms off"
+      - alert: NetdirHighStratum
+        expr: netdir_chrony_stratum >= 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: stratum {{ $value }}"
+      - alert: NetdirNoReachableSource
+        expr: sum by (instance) (netdir_chrony_source_reach) == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: chrony has not heard from any source"
+      - alert: NetdirNoActiveGateway
+        expr: sum by (group, af) (netdir_gateway_active) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No node is the active gateway of group {{ $labels.group }} ({{ $labels.af }})"
+      - alert: NetdirGatewayNotListening
+        expr: netdir_gateway_service_up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: the NTP listener of group {{ $labels.group }} is down"
+      - alert: NetdirUpstreamDown
+        expr: netdir_upstream_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: upstream server {{ $labels.server }} is down"
+      - alert: NetdirFalseticker
+        expr: netdir_upstream_falseticker == 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: upstream server {{ $labels.server }} disagrees with the others"
+      - alert: NetdirCriticalAlertOpen
+        expr: netdir_alerts_active{severity="critical"} > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: a critical alert has been open for 10 minutes (see Monitor ▸ Alerts)"
+      - alert: NetdirCertificateExpiresSoon
+        expr: netdir_certificate_expires_in_seconds < 14 * 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: the {{ $labels.certificate }} certificate expires in less than 14 days"
+      - alert: NetdirCertificateExpiresVerySoon
+        expr: netdir_certificate_expires_in_seconds < 3 * 86400
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }}: the {{ $labels.certificate }} certificate expires in less than 3 days"
+      - alert: NetdirHostCPU
+        expr: netdir_host_cpu_percent > 90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: CPU above 90% for 15 minutes"
+      - alert: NetdirHostMemory
+        expr: netdir_host_memory_used_bytes / netdir_host_memory_total_bytes > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: more than 90% of the memory is in use"
+      - alert: NetdirFilesystemFull
+        expr: netdir_host_filesystem_used_percent > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.mount }} is more than 90% full"

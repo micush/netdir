@@ -1,0 +1,6 @@
+# /etc/pam.d/netdir — Debian / Ubuntu
+# Password check for the netdir web GUI. Group membership (default group "netdir")
+# is enforced by netdir itself; PAM only proves who the user is and that the
+# account is valid.
+@include common-auth
+@include common-account
