@@ -1195,7 +1195,7 @@
     // ── the gateway's devices (the squares under the circle) ──
     // The inventory and the logins are the cluster's (settings.devices, settings.device_credentials); a gateway lists the devices it is
     // for by name (its devices list).  The same device may be on several gateways: copy it on one, paste it on another.
-    const PLATFORMS = ["afc", "aoscx", "bigip", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"];   // the drivers in device/; the daemon checks the name when the page saves
+    const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"];   // the drivers in device/; the daemon checks the name when the page saves
     const inventory = () => (cv.cfg.settings = cv.cfg.settings || {}, cv.cfg.settings.devices = cv.cfg.settings.devices || []);
     const logins = () => (cv.cfg.settings.device_credentials = cv.cfg.settings.device_credentials || []);
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
@@ -2255,7 +2255,7 @@
     { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags pick groups of devices for a request (tag:site=dc1). Skip check when the device has a self-signed certificate." },
   ];
   const DEVCRED_FIELDS = [
-    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric). Never shown to an MCP caller." },
+    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric); Aviatrix uses a user name and password. Never shown to an MCP caller." },
   ];
   const MCP_FIELDS = [
     { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, hint: "Empty is 443." },
@@ -2492,7 +2492,7 @@
     // device of the same name (devExtra, filled in when the page is drawn).
     devices: {
       key: "devices", empty: "No devices.", wide: true,
-      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: ["afc", "aoscx", "bigip", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"] }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443" },
+      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: ["afc", "aoscx", "aviatrix", "bigip", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"] }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443" },
         { name: "Login", ph: "a login's name" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
       parse: (d) => {
         if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || "iosxe", f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }

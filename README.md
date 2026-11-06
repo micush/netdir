@@ -277,6 +277,17 @@ The REST API of IP Fabric (`https://HOST/api/<version>/`), over HTTPS, port 443.
 
 The column names are those IP Fabric documents for these tables. A column a release does not have is refused by the server (the driver then retries with a minimal set); pick columns with `columns=`. Secrets found by name in an answer are hidden. IP Fabric was written against its documentation only and has not been run against a live IP Fabric; the sign-in with a user name and password in particular.
 
+### Aviatrix (`aviatrix`)
+
+The Aviatrix Controller's API (`https://HOST/v2/api`; option `api_path` for another, such as `/v1/api`), over HTTPS, port 443. Every call is an *action* with parameters, sent as a form; the answer is `{"return": true|false, "results": …, "reason": "…"}`. The credential is the controller's **user name and password**: the driver asks for an API token (`get_api_token`), signs in with it (`login`, header `X-Access-Key`), keeps the session ID (CID) and sends it in the form of each call (never in a URL; reads are POSTs too). An expired session is renewed once. The device is the controller:
+
+- **Facts**: the release and how many gateways it manages. **Interfaces**: the gateways, with state, addresses, size, cloud and region.
+- **Show** (`device_show`): `show gateways|transit|spoke|peerings`, **`show gateway NAME`** (summary, details and transit peerings of one gateway in one answer) and `show ACTION [name=value …]` for any read action (`list_…`, `get_…`, `show_…`).
+- **API request** (`device_api_get`): `/ACTION?name=value`, the same reads. Actions whose names speak of users, administrators, passwords, keys, certificates, tokens, SAML, LDAP, single sign-on, licences or backups are refused.
+- **Changes** (`device_change_raw`, rw key): method `POST`, body `{"action": "edit_gw_config", "gateway_name": "gw1", …}` or `action=…&name=value`; the session ID is added. Login, users and administrators, credentials, backups and restores, and deleting a gateway are refused, as is any parameter named like a password, key or token. A dry run returns the gateway's details when a `gateway_name` is given; nothing is put back automatically. No reboot: no action for it is known.
+
+The action names and result fields are those of Aviatrix's Terraform provider. This driver has been tested against a stub only, never a real controller.
+
 ### Adding a platform
 
 A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.

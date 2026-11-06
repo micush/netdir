@@ -1,5 +1,17 @@
 # Changelog
 
+## [v36] - 2026-11-06 — Aviatrix platform
+
+### Added
+- **`aviatrix` platform** (`source/device/aviatrix.go`): the Aviatrix Controller's action API (`/v2/api`, option `api_path`) with the controller's user name and password (`get_api_token`, then `login` with `X-Access-Key`, session ID renewed once when it expires; every call is a POST form, nothing in a URL). Facts, interfaces (the gateways), `device_show` (`show gateways|transit|spoke|peerings`, **`show gateway NAME`**, `show ACTION name=value` for `list_`/`get_`/`show_` reads), `device_api_get` (`/ACTION?name=value`) and `device_change_raw` (POST with `{"action": ..., ...}`). Refused: actions and parameters about users, administrators, passwords, keys, certificates, tokens, SSO, licences, backups and restores, login, deleting a gateway.
+- GUI platform lists (alphabetical), help, README, `netdir.conf.example`, `tools/devprobe/lab.json.example`, `CLAUDE.md`; `TestEveryPlatformIsWritable` includes it.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and `CGO_ENABLED=0 go vet ./...` / `CGO_ENABLED=0 go test -count=1 .` pass; `help.js` and `app.js` parse. New tests use a stub controller: token and login, facts, interfaces, session renewal, `show gateway` (valid JSON, secrets hidden, peerings filtered), refused reads, dry run, applied change (the caller's CID is replaced), refused changes.
+
+### Not verified
+- Never run against a real controller. Action names and result fields come from Aviatrix's Terraform provider (`list_vpcs_summary`, `get_gateway_info`, `list_inter_transit_gateway_peering`, `get_api_token`, `login`, `edit_gw_config`); `list_version_info` for the release is a guess. No gateway reboot is offered: no action for it is documented in the sources used.
+
 ## [v35] - 2026-11-06 — IP Fabric platform
 
 ### Added

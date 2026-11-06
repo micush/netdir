@@ -14,6 +14,7 @@
     {"name": "dnsdir1", "platform": "dnsdir", "address": "192.168.1.13", "credential": "dirkey", "insecure": true},
     {"name": "ntpdir1", "platform": "ntpdir", "address": "192.168.1.14", "credential": "dirkey", "insecure": true},
     {"name": "dns1", "platform": "technitium", "address": "192.168.1.11", "credential": "pan", "insecure": true},
+    {"name": "aviatrix", "platform": "aviatrix", "address": "192.168.1.17", "credential": "avxadmin", "insecure": true},
     {"name": "ipfabric", "platform": "ipfabric", "address": "192.168.1.16", "credential": "ipfkey", "insecure": true},
     {"name": "observium", "platform": "observium", "address": "192.168.1.15", "credential": "obskey", "insecure": true},
     {"name": "cx6300", "platform": "aoscx", "address": "192.168.1.6", "credential": "cat", "insecure": true},
@@ -28,6 +29,7 @@
     {"name": "merakikey", "token": "env:MERAKI_KEY"},
     {"name": "obskey", "token": "env:OBSERVIUM_TOKEN"},
     {"name": "ipfkey", "token": "env:IPFABRIC_TOKEN"},
+    {"name": "avxadmin", "username": "admin", "password": "env:AVIATRIX_PASSWORD"},
     {"name": "entraapp", "username": "env:ENTRA_APP_ID", "password": "env:ENTRA_SECRET"},
     {"name": "afcuser", "username": "admin", "password": "env:AFC_PASSWORD"},
     {"name": "pvetoken", "token": "env:PVE_TOKEN"}
