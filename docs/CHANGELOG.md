@@ -1,5 +1,18 @@
 # Changelog
 
+## [v40] - 2026-11-06 — IP Fabric 7.5 and later: no version in the URL
+
+### Fixed
+- **IP Fabric 8.1: every request except `/api/version` answered `404 API_NOT_FOUND`.** Since IP Fabric 7.5 an endpoint has no version in its URL (`/api/snapshots`, `/api/tables/inventory/devices`, `/api/auth/login`); the version is the header `X-API-Version`, whose default is used when it is left out. The old path form (`/api/v8.1/snapshots`) is refused in 8.1. The driver sent the path form only. It now reads the release from `/api/version`, tries the unversioned form first for 7.5 and later (and the versioned forms `/api/v<major>.<minor>`, `/api/v<major>`, `/api/v1` after it; for older releases the versioned first) and uses the first that answers something other than 404 on `/os/version` or `/snapshots`. The sign-in (`POST …/auth/login`) is tried the same way.
+- The option `api_version` forces one form: `none` for `/api/…` or `v7.3` for `/api/v7.3/…`. A path given to `device_api_get` or `device_change_raw` may carry either prefix (`/api/snapshots`, `/api/v8.1/snapshots`, `/snapshots`).
+- `show diagnose` tries each form in turn and prints what it answered; the all-404 error names every path tried.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass. A stub that behaves like 8.1 (only `/api/…` answers, the versioned paths give `API_NOT_FOUND`) is read with a token and with a login: facts, a nested table, `/snapshots` under three spellings, a change; the order of forms is tested for 7.3, 7.5, 8.1 and an unknown release.
+
+### Not verified
+- Not run against a real IP Fabric 8.1; the cause comes from the `show diagnose` output of one (every versioned path `404 API_NOT_FOUND`, `/api/version` 200) and IP Fabric's versioning page. The `X-API-Version` header is not sent, so each endpoint answers in its default version; if a table's columns or shapes differ from the ones in use, pick `columns=`.
+
 ## [v39] - 2026-11-06 — IP Fabric: `show diagnose`
 
 ### Added

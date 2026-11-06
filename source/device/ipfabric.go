@@ -46,7 +46,8 @@ type ipfabric struct {
 	snap string
 
 	mu     sync.Mutex
-	ver    string // "v7.3"
+	ver    string // option api_version: v7.3, none, or empty
+	base   string // the API prefix found: /api, or /api/v7.3
 	rel    string // "7.3.4+0"
 	auth   bool   // a token is set (or the login was done)
 	ready_ bool   // the version is settled and the API answers below it
@@ -72,8 +73,8 @@ func newIPFabric(d Device, c Credential) (Driver, error) {
 	if !ipfSnapRE.MatchString(p.snap) {
 		return nil, fmt.Errorf("device %s: option snapshot is $last, $prev, $lastLocked or a snapshot ID", d.Name)
 	}
-	if p.ver != "" && !ipfVerRE.MatchString(p.ver) {
-		return nil, fmt.Errorf("device %s: option api_version is like v7.3", d.Name)
+	if p.ver != "" && p.ver != "none" && !ipfVerRE.MatchString(p.ver) {
+		return nil, fmt.Errorf("device %s: option api_version is like v7.3, or none", d.Name)
 	}
 	api, err := newAPIClient(d, 443)
 	if err != nil {
@@ -88,8 +89,47 @@ func newIPFabric(d Device, c Credential) (Driver, error) {
 	return p, nil
 }
 
-// ready finds the API version, signs in (a user name and password) and checks that the API answers below /api/<version>: when the
-// version /api/version names gets a 404, the release's major.minor, its major and v1 are tried before giving up.
+// ipfBases are the URL prefixes of the API to try, best first.  Since IP Fabric 7.5 an endpoint has no version in its URL: it is
+// https://HOST/api/snapshots, and the version is the header X-API-Version (the endpoint's default when it is left out); the older
+// https://HOST/api/v7.3/snapshots still works in 7.5 to 7.x and is refused (404 API_NOT_FOUND) in 8.1.  The option api_version
+// names one (v7.3, or "none" for the unversioned form); otherwise the release decides which comes first.
+func ipfBases(opt, apiVer, rel string) []string {
+	switch {
+	case opt == "none":
+		return []string{"/api"}
+	case opt != "":
+		return []string{"/api/" + opt}
+	}
+	var versioned []string
+	add := func(v string) {
+		if !ipfVerRE.MatchString(v) {
+			return
+		}
+		for _, x := range versioned {
+			if x == "/api/"+v {
+				return
+			}
+		}
+		versioned = append(versioned, "/api/"+v)
+	}
+	add(apiVer)
+	newer := true // no release number: the unversioned form first
+	if m := ipfRelRE.FindStringSubmatch(rel); m != nil {
+		maj, _ := strconv.Atoi(m[1])
+		min, _ := strconv.Atoi(m[2])
+		newer = maj > 7 || (maj == 7 && min >= 5)
+		add("v" + m[1] + "." + m[2])
+		add("v" + m[1])
+	}
+	add("v1")
+	if newer {
+		return append([]string{"/api"}, versioned...)
+	}
+	return append(versioned, "/api")
+}
+
+// ready finds the API prefix (see ipfBases), signs in (a user name and password) and checks that the API answers below the
+// prefix: /os/version or /snapshots must be something other than a 404.
 func (p *ipfabric) ready(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -104,59 +144,50 @@ func (p *ipfabric) ready(ctx context.Context) error {
 		return fmt.Errorf("IP Fabric: reading /api/version: %w", err)
 	}
 	p.rel = firstOf(rel.Rel, "unknown")
-	cands := []string{p.ver}
-	if p.ver == "" {
-		cands = []string{rel.API}
-		if m := ipfRelRE.FindStringSubmatch(rel.Rel); m != nil {
-			cands = append(cands, "v"+m[1]+"."+m[2], "v"+m[1])
-		}
-		cands = append(cands, "v1")
-	}
+	bases := ipfBases(p.ver, rel.API, rel.Rel)
 	if !p.auth {
-		ver := ""
-		for _, c := range cands {
-			if ipfVerRE.MatchString(c) {
-				ver = c
-				break
+		signed := false
+		for _, b := range bases {
+			body, err := p.api.do(ctx, http.MethodPost, b+"/auth/login", map[string]string{"username": p.user, "password": p.pass}, nil)
+			var se *statusError
+			if err != nil && errors.As(err, &se) && se.Code == http.StatusNotFound {
+				continue
 			}
+			if err != nil {
+				return fmt.Errorf("IP Fabric: sign-in failed (POST %s/auth/login): %w", b, err)
+			}
+			var t struct {
+				Access string `json:"accessToken"`
+			}
+			if json.Unmarshal(body, &t) != nil || t.Access == "" {
+				return errors.New("IP Fabric: sign-in: the answer holds no access token")
+			}
+			p.api.hdr.Set("Authorization", "Bearer "+t.Access)
+			p.auth, signed = true, true
+			break
 		}
-		if ver == "" {
-			return errors.New("IP Fabric: /api/version names no API version: set the option api_version (v8.1)")
+		if !signed {
+			return fmt.Errorf("IP Fabric %s: sign-in failed: POST /auth/login answered 404 below %s", p.rel, strings.Join(bases, ", "))
 		}
-		b, err := p.api.do(ctx, http.MethodPost, "/api/"+ver+"/auth/login", map[string]string{"username": p.user, "password": p.pass}, nil)
-		if err != nil {
-			return fmt.Errorf("IP Fabric: sign-in failed (POST /api/%s/auth/login): %w", ver, err)
-		}
-		var t struct {
-			Access string `json:"accessToken"`
-		}
-		if json.Unmarshal(b, &t) != nil || t.Access == "" {
-			return errors.New("IP Fabric: sign-in: the answer holds no access token")
-		}
-		p.api.hdr.Set("Authorization", "Bearer "+t.Access)
-		p.auth = true
 	}
 	var tried []string
-	for _, c := range cands {
-		if !ipfVerRE.MatchString(c) {
-			continue
-		}
+	for _, b := range bases {
 		for _, probe := range []string{"/os/version", "/snapshots"} {
-			_, err := p.api.do(ctx, http.MethodGet, "/api/"+c+probe, nil, nil)
+			_, err := p.api.do(ctx, http.MethodGet, b+probe, nil, nil)
 			var se *statusError
 			if err == nil || (errors.As(err, &se) && se.Code != http.StatusNotFound) {
-				p.ver = c // the route exists (a refused token is reported by the first real request)
+				p.base = b // the route exists (a refused token is reported by the first real request)
 				p.ready_ = true
 				return nil
 			}
-			tried = append(tried, "/api/"+c+probe)
+			tried = append(tried, b+probe)
 		}
 	}
-	return fmt.Errorf("IP Fabric %s answered 404 for %s: set the option api_version to the version in the API paths of this release (the GUI's Settings ▸ API documentation, /api/rapidoc/, shows them)", p.rel, strings.Join(tried, ", "))
+	return fmt.Errorf("IP Fabric %s answered 404 for %s: set the option api_version to v8.1 (the form /api/v8.1/…) or none (the form /api/…, as /api/rapidoc/ shows)", p.rel, strings.Join(tried, ", "))
 }
 
 func (p *ipfabric) path(rest string) string {
-	return "/api/" + p.ver + "/" + strings.TrimPrefix(rest, "/")
+	return p.base + "/" + strings.TrimPrefix(rest, "/")
 }
 
 // tableReq is one read of a table.
@@ -448,15 +479,17 @@ func (p *ipfabric) deviceAll(ctx context.Context, name string) (map[string]any, 
 
 // ---- reading through the API ----
 
-// ipfRead turns a path into what to ask: the part below /api/<version>, and for /tables/... the query as a table read.
+// ipfRead turns a path into what to ask: the part below the API prefix, and for /tables/... the query as a table read.  The prefix
+// may be given (/api/snapshots, /api/v8.1/snapshots).
 func (p *ipfabric) ipfRead(path string) (string, url.Values, error) {
 	pp, q, _ := strings.Cut(path, "?")
-	if s, ok := strings.CutPrefix(pp, "/api/"); ok {
-		_, rest, _ := strings.Cut(s, "/")
-		pp = "/" + rest
-		if s == "version" {
-			pp = "/api/version"
-		}
+	parts := strings.SplitN(pp, "/", 4) // "", "api", "v8.1", "snapshots/..."
+	switch {
+	case pp == "/api/version":
+	case len(parts) == 4 && parts[1] == "api" && ipfVerRE.MatchString(parts[2]):
+		pp = "/" + parts[3]
+	case strings.HasPrefix(pp, p.base+"/"):
+		pp = pp[len(p.base):]
 	}
 	vals, err := url.ParseQuery(q)
 	if err != nil || strings.Contains(pp, "..") || strings.ContainsAny(pp, " \r\n\x00") {
@@ -476,11 +509,11 @@ func (p *ipfabric) ipfRead(path string) (string, url.Values, error) {
 }
 
 func (p *ipfabric) APIGet(ctx context.Context, path string) (any, bool, error) {
-	pp, q, err := p.ipfRead(path)
-	if err != nil {
+	if err := p.ready(ctx); err != nil {
 		return nil, false, err
 	}
-	if err := p.ready(ctx); err != nil {
+	pp, q, err := p.ipfRead(path)
+	if err != nil {
 		return nil, false, err
 	}
 	if strings.HasPrefix(pp, "/tables/") {
@@ -560,8 +593,8 @@ func (p *ipfabric) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, e
 	if err := p.ready(ctx); err != nil {
 		return RawResult{DryRun: dry}, err
 	}
-	if s, ok := strings.CutPrefix(r.Path, "/api/"+p.ver); ok {
-		r.Path = s
+	if s, ok := strings.CutPrefix(r.Path, p.base+"/"); ok {
+		r.Path = "/" + s
 	}
 	return restRaw(ctx, restSpec{
 		api: p.api, hdr: jsonHdr(), json: true,
@@ -615,24 +648,26 @@ func (p *ipfabric) diagnose(ctx context.Context) string {
 	send(noAuth, "none", "GET", "/api/version", nil, nil)
 	var v struct {
 		API string `json:"apiVersion"`
+		Rel string `json:"releaseVersion"`
 	}
 	_ = p.api.getJSON(ctx, "/api/version", &v)
-	ver := firstOf(p.d.Options["api_version"], v.API, "v1")
+	bases := ipfBases(p.ver, v.API, v.Rel)
 	creds := "token (X-API-Token)"
 	if p.user != "" {
 		creds = "user name and password"
 		if err := p.ready(ctx); err != nil {
-			out = append(out, probe{Request: "POST /api/" + ver + "/auth/login", Auth: creds, Status: "error", Body: RedactText(err.Error())})
+			out = append(out, probe{Request: "POST " + bases[0] + "/auth/login", Auth: creds, Status: "error", Body: RedactText(err.Error())})
 		}
 	}
-	base := "/api/" + ver
-	send(p.api, creds, "GET", base+"/os/version", nil, nil)
-	send(noAuth, "none", "GET", base+"/os/version", nil, nil)
-	send(p.api, creds, "GET", base+"/snapshots", nil, nil)
-	send(p.api, creds, "POST", base+"/tables/inventory/sites", map[string]any{"columns": []string{"id"}, "pagination": map[string]any{"limit": 1, "start": 0}, "snapshot": "$last"}, nil)
-	send(p.api, creds, "POST", base+"/tables/management/snapshots", map[string]any{"columns": []string{"id"}, "pagination": map[string]any{"limit": 1, "start": 0}}, nil)
-	send(p.api, creds, "GET", "/api/", nil, nil)
-	b, _ := json.MarshalIndent(map[string]any{"driver_version": ver, "release": p.rel, "probes": out,
+	for i, base := range bases {
+		send(p.api, creds, "GET", base+"/os/version", nil, nil)
+		if i == 0 {
+			send(noAuth, "none", "GET", base+"/os/version", nil, nil)
+		}
+		send(p.api, creds, "GET", base+"/snapshots", nil, nil)
+		send(p.api, creds, "POST", base+"/tables/inventory/sites", map[string]any{"columns": []string{"id"}, "pagination": map[string]any{"limit": 1, "start": 0}, "snapshot": "$last"}, nil)
+	}
+	b, _ := json.MarshalIndent(map[string]any{"prefix_in_use": p.base, "tried_in_order": bases, "release": v.Rel, "probes": out,
 		"how_to_read": "200: works. 401/403: the credential is refused or lacks a role. 404 with and without the credential: the path is wrong or something in front of IP Fabric hides it; 404 only with it: the credential is not accepted for this path."}, "", "  ")
 	return string(b)
 }
