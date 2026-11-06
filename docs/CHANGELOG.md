@@ -1,5 +1,20 @@
 # Changelog
 
+## [v35] - 2026-11-06 — IP Fabric platform
+
+### Added
+- **`ipfabric` platform** (`source/device/ipfabric.go`): IP Fabric's REST API over HTTPS with an API token (`X-API-Token`) or a user name and password (`POST /auth/login`). The API version comes from `GET /api/version` (option `api_version` overrides); option `snapshot` (default `$last`). Facts (release, devices in the snapshot), interfaces (`hostname:interface`), `device_show` (`show devices|interfaces|sites|hosts|arp|snapshots`, `show tables/<section>/<table>`, filters `column=value`, `columns=`, `limit=`, `start=`, `sort=`), **`show device NAME`** (record, interfaces and ARP entries of one discovered device), `device_api_get` for `/tables/...` (sent as the POST read IP Fabric needs), `/snapshots`, `/jobs`, `/version`, and `device_change_raw` (POST/PUT/PATCH/DELETE below `/api/<version>`; users, tokens, login, SSO, licences and the system refused).
+- GUI platform lists (alphabetical), help, README, `netdir.conf.example`, `tools/devprobe/lab.json.example`, `CLAUDE.md`; `TestEveryPlatformIsWritable` includes it.
+
+### Fixed
+- **`webui/help.js` was not valid JavaScript in v34**: the Proxmox help text held `{"command":"reboot"}` with unescaped quotes, which breaks the GUI's help. Escaped. Both `help.js` and `app.js` now parse (`node --check`-style load).
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and `CGO_ENABLED=0 go vet ./...` / `CGO_ENABLED=0 go test -count=1 .` pass. New tests use a TLS stub of IP Fabric 7.3: token and login, facts, interfaces with the column fallback, `show device` (valid JSON, secrets hidden, ambiguous and unknown names), show filters and limits, API reads and refusals, dry-run and applied changes, refused paths.
+
+### Not verified
+- Never run against a live IP Fabric. Written from IP Fabric's public documentation: the table paths and columns (`inventory/devices`, `inventory/interfaces`, `inventory/sites`, `inventory/hosts`, `addressing/arp`, `management/snapshots`), the `l1`/`l2` interface state columns, the `/auth/login` answer (`accessToken`) and the write paths of snapshot management are best effort. Use `show tables/...` with `columns=`, `device_api_get`, and `tools/devprobe` against a lab instance to check.
+
 ## [v34] - 2026-11-06 — Reboots on every platform that can
 
 ### Added

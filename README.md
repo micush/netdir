@@ -266,6 +266,17 @@ The **API request** (`device_api_get`) reads `/devices/…`, `/ports/…` and th
 
 The documentation of the API gives the shape of an answer for devices only. The driver finds the rows of any answer whatever its wrapper, reads each field under the names Observium's database uses, and **keeps the whole row** next to what it reads from it (`properties`, `detail`, `raw`, `details`), so a field it does not know is still there. **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` or `DELETE` with a path below `/api/v0` and a JSON body (`PATCH /devices/12/`). Users, tokens and login are refused. Observium's documented API is read-only, so whether a request is accepted depends on the edition and build; a refused request changes nothing, and nothing is put back automatically.
 
+### IP Fabric (`ipfabric`)
+
+The REST API of IP Fabric (`https://HOST/api/<version>/`), over HTTPS, port 443. The credential is an **API token** (sent as `X-API-Token`) or a **user name and password** (`POST /auth/login`, then a Bearer token); neither is ever put in a URL. The API version is read from `GET /api/version` unless the option `api_version` (`v7.3`) names it; the option `snapshot` (default `$last`) picks the snapshot the tables are read from. IP Fabric models a whole network, so the device here is the IP Fabric server:
+
+- **Facts**: the release and how many devices the snapshot holds. **Interfaces**: the interfaces table, named `hostname:interface` (up to 5000 rows). No neighbors, routes or configuration through the named tools.
+- **Show** (`device_show`): `show devices|interfaces|sites|hosts|arp|snapshots [snapshot=ID] [columns=a,b] [limit=N] [start=N] [sort=col|-col] [column=value ...]` (`*` in a value is a substring match), `show tables/<section>/<table>` for any other table, and **`show device NAME`**: the record, interfaces and ARP entries of one discovered device in one answer.
+- **API request** (`device_api_get`): `/tables/<section>/<table>?columns=a,b&limit=100&snapshot=$last&column=value` (IP Fabric reads tables with POST; the driver sends that read), `/snapshots`, `/jobs`, `/version`, `/os/version`.
+- **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` or `DELETE` with a path below `/api/<version>` and a JSON body: lock, unlock, load, unload and delete snapshots, start a discovery, add or rediscover devices. Users, tokens, login, single sign-on, licences and the system are refused. A dry run returns the copy of what the path holds; nothing is put back automatically.
+
+The column names are those IP Fabric documents for these tables. A column a release does not have is refused by the server (the driver then retries with a minimal set); pick columns with `columns=`. Secrets found by name in an answer are hidden. IP Fabric was written against its documentation only and has not been run against a live IP Fabric; the sign-in with a user name and password in particular.
+
 ### Adding a platform
 
 A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.
