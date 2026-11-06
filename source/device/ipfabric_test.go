@@ -14,6 +14,7 @@ import (
 )
 
 type ipfState struct {
+	badVer string // what /api/version claims, when it is wrong
 	mu     sync.Mutex
 	reqs   []string
 	bodies []string
@@ -43,7 +44,7 @@ func ipfStub(t *testing.T, st *ipfState) Device {
 			t.Errorf("a credential is in the URL: %s", r.URL)
 		}
 		if r.URL.Path == "/api/version" {
-			send(200, J{"apiVersion": "v7.3", "releaseVersion": "7.3.4+0"})
+			send(200, J{"apiVersion": firstOf(st.badVer, "v7.3"), "releaseVersion": "7.3.4+0"})
 			return
 		}
 		if r.URL.Path == "/api/v7.3/auth/login" {
@@ -105,6 +106,10 @@ func ipfStub(t *testing.T, st *ipfState) Device {
 				t.Errorf("snapshots table got snapshot %q", q.Snapshot)
 			}
 			send(200, J{"data": []J{{"id": "s1", "status": "done"}}, "_meta": J{"count": 1}})
+		case r.Method == "GET" && p == "/os/version":
+			send(200, J{"version": "v7.3.4"})
+		case r.Method == "POST" && p == "/tables/routing/protocols/bgp/neighbors":
+			send(200, J{"data": []J{{"id": "b1", "hostname": "core1", "neiIp": "10.0.0.2"}}, "_meta": J{"count": 1}})
 		case r.Method == "GET" && p == "/snapshots":
 			send(200, []J{{"id": "s1"}})
 		case r.Method == "PATCH" || r.Method == "POST" || r.Method == "DELETE":
@@ -158,7 +163,7 @@ func TestIPFabric(t *testing.T) {
 	if err != nil || !strings.Contains(out, `"count": 42`) {
 		t.Fatalf("devices %v %s", err, out)
 	}
-	for _, bad := range []string{"show", "show nothing", "show devices limit=5000", "show devices siteName", "show devices x=a b", "show devices snapshot=../x", "show devices | include x", "show tables/a/b/c/d/e"} {
+	for _, bad := range []string{"show", "show nothing", "show devices limit=5000", "show devices siteName", "show devices x=a b", "show devices snapshot=../x", "show devices | include x", "show tables/a/b/c/d/e/f/g"} {
 		if _, err := drv.Show(ctx, bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -214,5 +219,41 @@ func TestIPFabricLoginAndChange(t *testing.T) {
 	}
 	if _, err := Open(Device{Name: "x", Platform: "ipfabric", Address: "h"}, Credential{}); err == nil {
 		t.Error("no credential accepted")
+	}
+}
+
+// The version /api/version names gets a 404 (IP Fabric 8.1 was reported so): the release's own major.minor is tried, and a nested
+// table (BGP neighbors) is read.
+func TestIPFabricWrongVersion(t *testing.T) {
+	st := &ipfState{badVer: "v9.9"}
+	d := ipfStub(t, st)
+	ctx := context.Background()
+	drv := open(t, d, Credential{Token: "TOK"})
+	v, _, err := drv.(APIer).APIGet(ctx, "/tables/routing/protocols/bgp/neighbors?columns=hostname,neiIp&hostname=core1")
+	if err != nil || !strings.Contains(toJSON(v), "10.0.0.2") {
+		t.Fatalf("nested table: %v %v\n%s", err, v, st.joined())
+	}
+	if !strings.Contains(st.joined(), "GET /api/v9.9/os/version") || !strings.Contains(st.joined(), "POST /api/v7.3/tables/routing/protocols/bgp/neighbors") {
+		t.Errorf("probing:\n%s", st.joined())
+	}
+	// nothing answers: the error says which paths were tried
+	dead := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/version" {
+			_, _ = w.Write([]byte(`{"apiVersion":"v8.1","releaseVersion":"8.1.8+0"}`))
+			return
+		}
+		w.WriteHeader(404)
+		_, _ = w.Write([]byte(`{"message":"Requested Resource Not Found"}`))
+	}))
+	t.Cleanup(dead.Close)
+	h, port, _ := net.SplitHostPort(dead.Listener.Addr().String())
+	pn, _ := strconv.Atoi(port)
+	drv2 := open(t, Device{Name: "d", Platform: "ipfabric", Address: h, Port: pn, Insecure: true}, Credential{Token: "TOK"})
+	_, err = drv2.Facts(ctx)
+	if err == nil || !strings.Contains(err.Error(), "/api/v8.1/os/version") || !strings.Contains(err.Error(), "/api/v8/snapshots") || !strings.Contains(err.Error(), "api_version") {
+		t.Errorf("dead: %v", err)
+	}
+	if _, err := drv2.Show(ctx, "show devices"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("show on a dead API: %v", err)
 	}
 }

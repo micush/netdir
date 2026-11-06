@@ -45,18 +45,20 @@ type ipfabric struct {
 	pass string
 	snap string
 
-	mu   sync.Mutex
-	ver  string // "v7.3"
-	rel  string // "7.3.4+0"
-	auth bool   // a token is set (or the login was done)
+	mu     sync.Mutex
+	ver    string // "v7.3"
+	rel    string // "7.3.4+0"
+	auth   bool   // a token is set (or the login was done)
+	ready_ bool   // the version is settled and the API answers below it
 }
 
 var (
+	ipfRelRE  = regexp.MustCompile(`^([0-9]{1,2})\.([0-9]{1,2})`)
 	ipfVerRE  = regexp.MustCompile(`^v[0-9]{1,2}(\.[0-9]{1,2})?$`)
 	ipfSnapRE = regexp.MustCompile(`^(\$last|\$prev|\$lastLocked|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
 	ipfColRE  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.]{0,63}$`)
 	ipfValRE  = regexp.MustCompile(`^[A-Za-z0-9._:@/*+-]{1,128}$`)
-	ipfTabRE  = regexp.MustCompile(`^tables(/[A-Za-z0-9_-]{1,64}){1,3}$`)
+	ipfTabRE  = regexp.MustCompile(`^tables(/[A-Za-z0-9_-]{1,64}){1,6}$`)
 )
 
 func newIPFabric(d Device, c Credential) (Driver, error) {
@@ -86,30 +88,44 @@ func newIPFabric(d Device, c Credential) (Driver, error) {
 	return p, nil
 }
 
-// ready finds the API version and, for a user name and password, signs in.
+// ready finds the API version, signs in (a user name and password) and checks that the API answers below /api/<version>: when the
+// version /api/version names gets a 404, the release's major.minor, its major and v1 are tried before giving up.
 func (p *ipfabric) ready(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.rel == "" {
-		var v struct {
-			API string `json:"apiVersion"`
-			Rel string `json:"releaseVersion"`
+	if p.ready_ {
+		return nil
+	}
+	var rel struct {
+		API string `json:"apiVersion"`
+		Rel string `json:"releaseVersion"`
+	}
+	if err := p.api.getJSON(ctx, "/api/version", &rel); err != nil {
+		return fmt.Errorf("IP Fabric: reading /api/version: %w", err)
+	}
+	p.rel = firstOf(rel.Rel, "unknown")
+	cands := []string{p.ver}
+	if p.ver == "" {
+		cands = []string{rel.API}
+		if m := ipfRelRE.FindStringSubmatch(rel.Rel); m != nil {
+			cands = append(cands, "v"+m[1]+"."+m[2], "v"+m[1])
 		}
-		if err := p.api.getJSON(ctx, "/api/version", &v); err != nil {
-			return fmt.Errorf("IP Fabric: reading /api/version: %w", err)
-		}
-		p.rel = firstOf(v.Rel, "unknown")
-		if p.ver == "" {
-			p.ver = v.API
-		}
-		if !ipfVerRE.MatchString(p.ver) {
-			return errors.New("IP Fabric: /api/version names no API version: set the option api_version (v7.3)")
-		}
+		cands = append(cands, "v1")
 	}
 	if !p.auth {
-		b, err := p.api.do(ctx, http.MethodPost, "/api/"+p.ver+"/auth/login", map[string]string{"username": p.user, "password": p.pass}, nil)
+		ver := ""
+		for _, c := range cands {
+			if ipfVerRE.MatchString(c) {
+				ver = c
+				break
+			}
+		}
+		if ver == "" {
+			return errors.New("IP Fabric: /api/version names no API version: set the option api_version (v8.1)")
+		}
+		b, err := p.api.do(ctx, http.MethodPost, "/api/"+ver+"/auth/login", map[string]string{"username": p.user, "password": p.pass}, nil)
 		if err != nil {
-			return fmt.Errorf("IP Fabric: sign-in failed: %w", err)
+			return fmt.Errorf("IP Fabric: sign-in failed (POST /api/%s/auth/login): %w", ver, err)
 		}
 		var t struct {
 			Access string `json:"accessToken"`
@@ -120,7 +136,23 @@ func (p *ipfabric) ready(ctx context.Context) error {
 		p.api.hdr.Set("Authorization", "Bearer "+t.Access)
 		p.auth = true
 	}
-	return nil
+	var tried []string
+	for _, c := range cands {
+		if !ipfVerRE.MatchString(c) {
+			continue
+		}
+		for _, probe := range []string{"/os/version", "/snapshots"} {
+			_, err := p.api.do(ctx, http.MethodGet, "/api/"+c+probe, nil, nil)
+			var se *statusError
+			if err == nil || (errors.As(err, &se) && se.Code != http.StatusNotFound) {
+				p.ver = c // the route exists (a refused token is reported by the first real request)
+				p.ready_ = true
+				return nil
+			}
+			tried = append(tried, "/api/"+c+probe)
+		}
+	}
+	return fmt.Errorf("IP Fabric %s answered 404 for %s: set the option api_version to the version in the API paths of this release (the GUI's Settings ▸ API documentation, /api/rapidoc/, shows them)", p.rel, strings.Join(tried, ", "))
 }
 
 func (p *ipfabric) path(rest string) string {
@@ -166,7 +198,7 @@ func (p *ipfabric) read(ctx context.Context, q tableReq) (tableAns, error) {
 	}
 	b, err := p.api.do(ctx, http.MethodPost, p.path(q.table), body, nil)
 	if err != nil {
-		return tableAns{}, err
+		return tableAns{}, fmt.Errorf("POST %s: %w", p.path(q.table), err)
 	}
 	var a struct {
 		Data []map[string]any `json:"data"`
@@ -205,7 +237,7 @@ var ipfTables = map[string]struct {
 	min  []string
 	snap string
 }{
-	"devices":    {"tables/inventory/devices", []string{"id", "hostname", "siteName", "loginIp", "vendor", "family", "platform", "model", "version", "sn", "uptime", "devType"}, []string{"id", "hostname"}, ""},
+	"devices":    {"tables/inventory/devices", []string{"id", "hostname", "siteName", "loginIpv4", "vendor", "family", "platform", "model", "version", "sn", "uptime", "devType"}, []string{"id", "hostname"}, ""},
 	"interfaces": {"tables/inventory/interfaces", []string{"id", "hostname", "intName", "dscr", "primaryIp", "mac", "mtu", "speed", "duplex", "l1", "l2"}, []string{"id", "hostname", "intName"}, ""},
 	"sites":      {"tables/inventory/sites", []string{"id", "siteName", "devicesCount", "usersCount", "networksCount"}, []string{"id", "siteName"}, ""},
 	"hosts":      {"tables/inventory/hosts", []string{"id", "hostname", "ip", "mac", "siteName"}, []string{"id", "ip"}, ""},
@@ -499,7 +531,7 @@ func (p *ipfabric) APIGet(ctx context.Context, path string) (any, bool, error) {
 	}
 	b, err := p.api.do(ctx, http.MethodGet, wire, nil, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("GET %s: %w", wire, err)
 	}
 	var v any
 	if json.Unmarshal(b, &v) == nil {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [v38] - 2026-11-06 — IP Fabric: every read answered 404 on 8.1
+
+### Fixed
+- **IP Fabric 8.1.8: every read came back "Requested Resource Not Found" (404)**, including `/snapshots`, `/version`, `/os/version` and `/tables/inventory/devices`, while the health check (which only reads `/api/version`) passed. The driver now checks that the API answers below `/api/<version>` before the first real request. If the version `/api/version` names gets a 404 for both `/os/version` and `/snapshots`, it tries the release's own major.minor (`v8.1`), its major (`v8`) and `v1`, and uses the first one the server knows. If none does, the error lists every path tried and says to set the option `api_version` (the paths of the release are in `/api/rapidoc/`), instead of failing quietly later.
+- Errors from IP Fabric now say which request failed (`POST /api/v8.1/tables/inventory/devices: HTTP 404 …`).
+- **Nested tables are readable**: `routing/protocols/bgp/neighbors`, `interfaces/transceivers/inventory` and the like. The table path may now have up to six parts after `tables/` (was three).
+- The devices table asks for `loginIpv4` instead of `loginIp` (replaced in IP Fabric 7.3 and removed in 8.0).
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass. New test: `/api/version` claims a version the server does not have (404), the release's own version is found, a nested BGP table is read; and a server that answers 404 to everything gives an error naming every path tried.
+
+### Not verified
+- Not run against a real IP Fabric 8.1. The 404 cause is inferred from the report: if the paths of 8.1 are not under `/api/v8.1`, `/api/v8` or `/api/v1`, set the option `api_version` to the right one. The nested table names and their columns are IP Fabric's, unchanged: pass `columns=` (the table's ? ▸ Table description in the GUI lists them).
+
 ## [v37] - 2026-11-06 — Serial numbers show their last four characters
 
 ### Changed
