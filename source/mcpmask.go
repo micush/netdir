@@ -24,7 +24,8 @@ import (
 //
 // This is done to everything a tool answers (mcp.go) by walking the answer, so a new tool is covered without anyone
 // remembering to.  What it cannot find (a public address written as a host name, an address split across fields, a
-// serial number under a name it does not know) is not hidden.
+// serial number under a name it does not know) is not hidden.  A serial number (under a name that says so) is shown by its last
+// four characters, ****1234.
 
 var maskSalt = func() []byte { b := make([]byte, 32); _, _ = rand.Read(b); return b }()
 
@@ -142,8 +143,35 @@ func asPathKey(k string) bool {
 	return k == "as-path" || k == "aspath" || k == "as-paths" || strings.HasSuffix(k, "-as-path")
 }
 
-var idKeys = map[string]bool{"serial": true, "serial-number": true, "serial-num": true, "serialnumber": true, "chassis-serial": true,
-	"snmp-contact": true, "snmp-location": true, "sys-contact": true, "sys-location": true, "syscontact": true, "syslocation": true}
+var idKeys = map[string]bool{"snmp-contact": true, "snmp-location": true, "sys-contact": true, "sys-location": true, "syscontact": true, "syslocation": true}
+
+// serialKey says whether a key names a serial number.  Its value is shown by its last four characters (****1234), which is enough
+// to tell two units apart or to read one out to the vendor, and not enough to register or claim a device.
+func serialKey(k string) bool {
+	n := normKey(k)
+	switch n {
+	case "sn", "snhw", "serial", "entphysicalserialnum":
+		return true
+	}
+	for _, suf := range []string{"serial", "serial-number", "serial-num", "serial-no", "serialnumber", "serialno", "serialnum"} {
+		if strings.HasSuffix(n, suf) {
+			return !strings.HasSuffix(n, "-port")
+		}
+	}
+	return false
+}
+
+// serialTail is a serial number with all but its last four characters hidden.
+func serialTail(s string) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= 4 {
+		return "****"
+	}
+	return "****" + string(r[len(r)-4:])
+}
+
+// reSerialTail is what serialTail makes; sent back in a change it keeps the real value, like a token.
+var reSerialTail = regexp.MustCompile(`^\*{4}[A-Za-z0-9 ._/-]{0,4}$`)
 
 // maskValue walks a decoded JSON value (numbers kept as json.Number).
 func maskValue(v any, key string) any {
@@ -179,6 +207,8 @@ func maskValue(v any, key string) any {
 			}
 		}
 		switch {
+		case serialKey(key) && t != "":
+			return serialTail(t)
 		case idKeys[normKey(key)] && t != "":
 			return maskTag("MASKED-ID", t)
 		case asnKey(key):
@@ -227,7 +257,7 @@ func mcpUnmask(v any) any {
 			t[i] = mcpUnmask(x)
 		}
 	case string:
-		if reToken.MatchString(t) {
+		if reToken.MatchString(t) || reSerialTail.MatchString(t) {
 			return mcpHidden
 		}
 	}

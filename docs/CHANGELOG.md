@@ -1,5 +1,18 @@
 # Changelog
 
+## [v37] - 2026-11-06 — Serial numbers show their last four characters
+
+### Changed
+- **An MCP caller now sees the last four characters of a serial number** (`****X0AB`) instead of a `MASKED-ID-xxxxxx` token. Keys that count as a serial number: `serial`, `sn`, `snHw`, `entPhysicalSerialNum`, and any key ending in `serial`, `serial-number`, `serial-num`, `serial-no` (not `-port`), in any case and with `_` or `-`. A value of four characters or fewer shows as `****`. Public IP addresses, public AS numbers and e-mail addresses are still replaced by tokens, and SNMP contact and location are still `MASKED-ID` tokens.
+- A `****X0AB` value sent back in `edit_config` or `api_request` is treated like a token: it keeps the real value instead of overwriting it.
+- Tool descriptions, help and README say so.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass (see below). `TestMaskJSON` and the Observium end-to-end test check `****` plus the last four characters and that nothing earlier leaks.
+
+### Not verified
+- A serial number in free text (a `show` line such as `Serial number: ABC123`) or under a key name that does not say so (`id`, `uuid`, `asset`) is still not found by name, so it is shown whole, as before. The GUI is unchanged: it shows full serial numbers to people who may see them.
+
 ## [v36] - 2026-11-06 — Aviatrix platform
 
 ### Added

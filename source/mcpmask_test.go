@@ -37,12 +37,12 @@ func TestMaskJSON(t *testing.T) {
 	in := `{"remote-as":15169,"local_as":"65001","asn":4200000001,"serial":"FOC1234X0AB","as-path":"65001 3356 15169","big":9007199254740993,
 		"addresses":["203.0.114.7/24","10.0.0.1/24"],"8.8.4.4":{"ok":1},"snmp_contact":"noc@corp.example","n":5}`
 	out := string(mcpMaskJSON([]byte(in)))
-	for _, leak := range []string{"15169", "FOC1234X0AB", "3356", "203.0.114.7", "8.8.4.4", "noc@corp.example"} {
+	for _, leak := range []string{"15169", "FOC1234X0AB", "FOC1234", "3356", "203.0.114.7", "8.8.4.4", "noc@corp.example"} {
 		if strings.Contains(out, leak) {
 			t.Errorf("%q leaked: %s", leak, out)
 		}
 	}
-	for _, keep := range []string{`"local_as":"65001"`, "4200000001", "65001 PUBLIC-AS-", "10.0.0.1/24", "9007199254740993", `"n":5`} {
+	for _, keep := range []string{`"local_as":"65001"`, "4200000001", "65001 PUBLIC-AS-", "10.0.0.1/24", "9007199254740993", `"n":5`, `"serial":"****X0AB"`} {
 		if !strings.Contains(out, keep) {
 			t.Errorf("%q was hidden or changed: %s", keep, out)
 		}

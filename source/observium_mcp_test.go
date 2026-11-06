@@ -66,8 +66,8 @@ func TestMCPObserviumShowDevice(t *testing.T) {
 			t.Errorf("the answer shows %q: %s", secret, txt)
 		}
 	}
-	if !strings.Contains(txt, "PUBLIC-IP-") || !strings.Contains(txt, "MASKED-ID-") {
-		t.Errorf("the public address and the serial number are not replaced by tokens: %s", txt)
+	if !strings.Contains(txt, "PUBLIC-IP-") || !strings.Contains(txt, "****T-12") {
+		t.Errorf("the public address is not a token or the serial number is not shown by its last four characters: %s", txt)
 	}
 	// the other reads of the same driver
 	_, m = post(mcpCall("device_facts", `{"target":"obs"}`))
