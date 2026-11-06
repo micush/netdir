@@ -257,3 +257,18 @@ func TestIPFabricWrongVersion(t *testing.T) {
 		t.Errorf("show on a dead API: %v", err)
 	}
 }
+
+func TestIPFabricDiagnose(t *testing.T) {
+	st := &ipfState{}
+	d := ipfStub(t, st)
+	drv := open(t, d, Credential{Token: "TOK"})
+	out, err := drv.Show(context.Background(), "show diagnose")
+	if err != nil || !json.Valid([]byte(out)) || strings.Contains(out, `"TOK"`) {
+		t.Fatalf("diagnose %v\n%s", err, out)
+	}
+	for _, want := range []string{"GET /api/version", "GET /api/v7.3/os/version", "POST /api/v7.3/tables/inventory/sites", `"auth": "none"`, "401"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+}

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v39] - 2026-11-06 — IP Fabric: `show diagnose`
+
+### Added
+- **`show diagnose`** on an `ipfabric` device (`device_show`): sends `GET /api/version` (no credential), `GET /api/<ver>/os/version` with and without the credential, `GET /snapshots`, a one-row read of `inventory/sites` and of `management/snapshots`, and `GET /api/`, and prints for each the request, whether the credential was sent, the HTTP status and the start of the answer (secrets hidden, the credential never printed). Reading it tells a wrong path (404 with and without the credential) from a refused credential (401/403) or one that is hidden (404 only with it). Nothing is changed.
+- Why: with the correct version (`v8.1`) IP Fabric 8.1.8 still answered 404 to every real request in the field, which v38's version probing cannot explain; the next step needs the answers themselves.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass. A stub test checks the probes, the answer is JSON and the token does not appear.
+
+### Not verified
+- Not run against a real IP Fabric.
+
 ## [v38] - 2026-11-06 — IP Fabric: every read answered 404 on 8.1
 
 ### Fixed

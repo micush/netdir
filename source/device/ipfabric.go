@@ -296,7 +296,7 @@ func (p *ipfabric) Interfaces(ctx context.Context) ([]Interface, error) {
 func (p *ipfabric) Neighbors(context.Context) ([]Neighbor, error) { return nil, ErrUnsupported }
 func (p *ipfabric) Config(context.Context) (string, error)        { return "", ErrUnsupported }
 
-const ipfUsage = "show NAME [snapshot=ID] [columns=a,b] [limit=N] [start=N] [sort=col|-col] [column=value ...] | show device NAME | show tables/<section>/<table> ...; names: "
+const ipfUsage = "show diagnose | show NAME [snapshot=ID] [columns=a,b] [limit=N] [start=N] [sort=col|-col] [column=value ...] | show device NAME | show tables/<section>/<table> ...; names: "
 
 func ipfFilter(v string) any {
 	switch v {
@@ -322,6 +322,9 @@ func (p *ipfabric) Show(ctx context.Context, cmd string) (string, error) {
 		return "", errors.New(ipfUsage + ipfNames())
 	}
 	name := f[1]
+	if strings.EqualFold(name, "diagnose") && len(f) == 2 {
+		return p.diagnose(ctx), nil
+	}
 	if strings.EqualFold(name, "device") {
 		if len(f) != 3 || !ipfValRE.MatchString(f[2]) {
 			return "", errors.New("show device NAME: the host name of a discovered device (show devices lists them)")
@@ -577,3 +580,59 @@ func (p *ipfabric) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, e
 }
 
 func (p *ipfabric) Close(context.Context) { p.api.close() }
+
+// diagnose sends a fixed set of requests and says, for each, what was asked and what IP Fabric answered, so that a "404 on
+// everything" can be told from a refused token, a wrong path or a proxy.  It sends no change, and the credential is not printed.
+func (p *ipfabric) diagnose(ctx context.Context) string {
+	type probe struct {
+		Request string `json:"request"`
+		Auth    string `json:"auth"`
+		Status  any    `json:"status"`
+		Body    string `json:"body,omitempty"`
+	}
+	var out []probe
+	noAuth, err := newAPIClient(p.d, 443)
+	if err != nil {
+		return "diagnose: " + err.Error()
+	}
+	defer noAuth.close()
+	send := func(c *apiClient, auth, method, path string, body any, hdr http.Header) {
+		b, err := c.do(ctx, method, path, body, hdr)
+		pr := probe{Request: method + " " + path, Auth: auth, Status: 200}
+		var se *statusError
+		switch {
+		case errors.As(err, &se):
+			pr.Status, b = se.Code, []byte(se.Body)
+		case err != nil:
+			pr.Status, b = "error", []byte(err.Error())
+		}
+		pr.Body = RedactText(strings.Join(strings.Fields(string(b)), " "))
+		if len(pr.Body) > 240 {
+			pr.Body = pr.Body[:240] + "…"
+		}
+		out = append(out, pr)
+	}
+	send(noAuth, "none", "GET", "/api/version", nil, nil)
+	var v struct {
+		API string `json:"apiVersion"`
+	}
+	_ = p.api.getJSON(ctx, "/api/version", &v)
+	ver := firstOf(p.d.Options["api_version"], v.API, "v1")
+	creds := "token (X-API-Token)"
+	if p.user != "" {
+		creds = "user name and password"
+		if err := p.ready(ctx); err != nil {
+			out = append(out, probe{Request: "POST /api/" + ver + "/auth/login", Auth: creds, Status: "error", Body: RedactText(err.Error())})
+		}
+	}
+	base := "/api/" + ver
+	send(p.api, creds, "GET", base+"/os/version", nil, nil)
+	send(noAuth, "none", "GET", base+"/os/version", nil, nil)
+	send(p.api, creds, "GET", base+"/snapshots", nil, nil)
+	send(p.api, creds, "POST", base+"/tables/inventory/sites", map[string]any{"columns": []string{"id"}, "pagination": map[string]any{"limit": 1, "start": 0}, "snapshot": "$last"}, nil)
+	send(p.api, creds, "POST", base+"/tables/management/snapshots", map[string]any{"columns": []string{"id"}, "pagination": map[string]any{"limit": 1, "start": 0}}, nil)
+	send(p.api, creds, "GET", "/api/", nil, nil)
+	b, _ := json.MarshalIndent(map[string]any{"driver_version": ver, "release": p.rel, "probes": out,
+		"how_to_read": "200: works. 401/403: the credential is refused or lacks a role. 404 with and without the credential: the path is wrong or something in front of IP Fabric hides it; 404 only with it: the credential is not accepted for this path."}, "", "  ")
+	return string(b)
+}
