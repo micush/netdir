@@ -22,7 +22,8 @@ const mcpHidden = "(hidden)"
 // mcpSecretExtra are the keys hidden from MCP besides those a read-only GUI account is not shown (secretKeys): lists of
 // secrets (SNMP communities, device tokens), private keys, join codes and cluster tokens.
 var mcpSecretExtra = map[string]bool{"keys": true, "snmp_communities": true, "communities": true, "key_pem": true,
-	"private_key": true, "token": true, "tokens": true, "code": true, "server_password": true, "psk": true, "csrf": true, "cookie": true}
+	"private_key": true, "token": true, "tokens": true, "code": true, "server_password": true, "psk": true, "csrf": true, "cookie": true,
+	"snmp_community": true, "snmp_authpass": true, "snmp_cryptopass": true, "snmp_authname": true} // Observium device rows
 
 func mcpSecret(k string) bool {
 	k = strings.ToLower(k)

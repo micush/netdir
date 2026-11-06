@@ -240,7 +240,7 @@ func TestProxmoxChange(t *testing.T) {
 	for _, bad := range []Raw{
 		{Method: "POST", Path: "/access/users", Body: `{}`},
 		{Method: "PUT", Path: "/access/acl", Body: `{}`},
-		{Method: "POST", Path: "/nodes/pve1/status", Body: `{"command":"reboot"}`},
+		{Method: "POST", Path: "/nodes/pve1/status", Body: `{"command":"shutdown"}`},
 		{Method: "POST", Path: "/nodes/pve1/stopall", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/services/pveproxy/stop", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/termproxy", Body: `{}`},

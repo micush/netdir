@@ -1,5 +1,41 @@
 # Changelog
 
+## [v34] - 2026-11-06 — Reboots on every platform that can
+
+### Added
+- **`device_change_raw` accepts a reboot** on every platform whose API has one, matched exactly so the rest of the management tree stays guarded: IOS-XE (`POST /restconf/operations/Cisco-IOS-XE-rpc:reload`), AOS-CX (`POST /rest/<ver>/boot?image=primary|secondary`), FortiOS (`POST /api/v2/monitor/system/os/reboot`), BIG-IP (`POST /mgmt/tm/sys` with `{"command":"reboot"}`), Meraki (`POST /devices/<serial>/reboot`), Proxmox (`POST /nodes/<node>/status` with `{"command":"reboot"}`), PAN-OS and Panorama (method `reboot`, the operational command `request restart system`), EOS (`reload now`) and NX-OS (`reload` after `terminal dont-ask`). `save: true` writes the configuration first (and aborts the reboot if that fails). A dry run sends nothing. After a reboot nothing is read and nothing is put back, and a connection that ends after the request counts as the device restarting.
+- Not offered, because their APIs have no restart: Infoblox NIOS, Technitium, Aruba Fabric Composer, dnsdir, ntpdir, Observium, Entra. Halt and shutdown are still refused everywhere.
+
+### Changed
+- A BIG-IP body with the command `reboot` and a Proxmox `POST /nodes/N/status` with `reboot` are no longer refused (`halt`, `shutdown`, `load`, `install` and a Proxmox shutdown still are). Meraki `/devices/<serial>/reboot` is no longer refused.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and `CGO_ENABLED=0 go vet ./...` / `CGO_ENABLED=0 go test -count=1 .` all pass. New tests: every reboot request is recognised and near misses (other methods, paths, commands, extra lines) are not; a reboot skips guard, aliveness check and put-back and a dropped connection counts as a restart; EOS and PAN-OS reboot with save.
+
+### Not verified
+- No reboot was sent to a real device. The IOS-XE, AOS-CX, FortiOS, BIG-IP, Meraki and Proxmox endpoints are as documented by their vendors; the AOS-CX `boot` path and EOS `reload now` over eAPI in particular should be tried on a lab device first.
+
+## [v33] - 2026-11-06 — Observium driver; every driver can be written
+
+### Added
+- **`observium` platform** (`source/device/observium.go`): Observium's REST API (`/api/v0`) over HTTPS with a Bearer token or a user name and password (never in a URL). A device is either the Observium server (option-less) or one monitored device (option `device`); option `prefix` for a sub-path install. Facts, interfaces with counters, neighbors (LLDP/CDP), resources, ports, `device_api_get` (`/openapi.json` included) and `device_show`.
+- **`show device NAME`** (`device_show`): everything Observium knows about one monitored device in one answer (record, ports, addresses, neighbours, sensors, status, storage, mempools, processors, inventory, counters, probes, alerts, alert log). Also `show NAME [device=NAME] [filter=value]` for the other lists.
+- **Every driver is now writable through `device_change_raw`.** Observium (`POST/PUT/PATCH/DELETE` below `/api/v0`; users, tokens and login refused) and Microsoft Entra (`POST/PUT/PATCH/DELETE` at `/users`, `/devices`, `/groups`, `/organization`; sign-in methods, passwords, keys, roles, consent, mail and files refused) were the two without one. Who may write is still decided by the MCP key (`rw`) or the GUI account, as for every other platform. A dry run returns the "before" copy; neither platform puts a change back automatically.
+- `TestEveryPlatformIsWritable` / `allwrite_test.go`: every registered platform must implement `RawChanger` (afc, aoscx, bigip, dnsdir, entra, eos, fortios, iosxe, meraki, nios, ntpdir, nxos, observium, panorama, panos, proxmox, technitium); a new platform without a write path fails the build.
+- GUI platform lists, help, README, `netdir.conf.example`, `tools/devprobe/lab.json.example`.
+
+### Changed
+- **Add device ▸ Platform list is alphabetical** (and so is the platform column of the devices table editor).
+- SNMP communities and SNMP v3 passwords (`snmp_community`, `snmp_authpass`, `snmp_cryptopass`, `snmp_authname`) are secret words everywhere.
+- `RedactText` keeps a line of JSON as JSON (`"key": "(hidden)"`) instead of cutting off its quotes and comma.
+- MCP masking now also applies to text that is itself a JSON document (a `show` answer), so serial numbers and public addresses inside it become tokens.
+
+### Verified
+- `gofmt -l .` (empty), `go build ./...`, `go vet ./...`, `go test -count=1 ./...` (ok), `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test -count=1 .` (ok). New tests use TLS stubs: Observium server/device/show/lists/api/prefix/throttle/new, an end-to-end `device_show` through MCP (secrets hidden, public addresses and serials tokenised), and `RawChange` for Observium and Entra (dry run, apply, refused paths).
+
+### Not verified
+- Never run against a real Observium or Entra tenant. Observium field names are best effort from its database schema; its API is a Subscription Edition feature and its documentation gives response shapes for devices only (use `device_api_get /openapi.json` and `tools/devprobe` to check). Observium's documented API has no write calls, so a build may refuse every `device_change_raw`. Entra writes need an application permission such as `Device.ReadWrite.All`.
+
 ## [v32] - 2026-11-06 — MCP: a tool's answer may be as large as a request (1 MiB)
 
 ### Changed

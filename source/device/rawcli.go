@@ -33,6 +33,9 @@ const eosConfirmWindow = "00:03:00"
 
 func (e *eos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {
 	res := RawResult{DryRun: dry}
+	if cmd, ok := rebootLine(r.Lines); ok && r.Method == "" && r.Path == "" && r.Body == "" {
+		return e.reload(ctx, cmd, r.Save, dry)
+	}
 	lines, err := checkLines(r, eosRawDeny)
 	if err != nil {
 		return res, err
@@ -121,6 +124,9 @@ func (x *nxos) nxSend(ctx context.Context, typ string, cmds []string) error {
 
 func (x *nxos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {
 	res := RawResult{DryRun: dry}
+	if cmd, ok := rebootLine(r.Lines); ok && r.Method == "" && r.Path == "" && r.Body == "" {
+		return x.reload(ctx, cmd, r.Save, dry)
+	}
 	lines, err := checkLines(r, nxosRawDeny)
 	if err != nil {
 		return res, err
@@ -168,5 +174,46 @@ func (x *nxos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error
 		}
 		res.Saved = true
 	}
+	return res, nil
+}
+
+// reload restarts the switch: the one command, sent alone (no session, no timer, nothing read afterwards).  Save writes the
+// configuration first.
+func (e *eos) reload(ctx context.Context, cmd string, save, dry bool) (RawResult, error) {
+	res := RawResult{DryRun: dry}
+	if dry {
+		res.Note = "would send " + cmd + "; nothing was changed"
+		return res, nil
+	}
+	if save {
+		if _, err := e.post(ctx, []string{"write memory"}, "json"); err != nil {
+			return res, fmt.Errorf("saving the configuration before the restart failed (nothing was restarted): %w", err)
+		}
+		res.Saved = true
+	}
+	if _, err := e.post(ctx, []string{cmd}, "json"); err != nil && !connEnded(err) {
+		return res, fmt.Errorf("the switch refused the restart: %w", err)
+	}
+	res.Applied, res.Note = true, rebootNote
+	return res, nil
+}
+
+// reload restarts the switch (terminal dont-ask, so that it does not wait for a confirmation).
+func (x *nxos) reload(ctx context.Context, cmd string, save, dry bool) (RawResult, error) {
+	res := RawResult{DryRun: dry}
+	if dry {
+		res.Note = "would send " + cmd + "; nothing was changed"
+		return res, nil
+	}
+	if save {
+		if err := x.nxSend(ctx, "cli_show_ascii", []string{"copy running-config startup-config"}); err != nil {
+			return res, fmt.Errorf("saving the configuration before the restart failed (nothing was restarted): %w", err)
+		}
+		res.Saved = true
+	}
+	if err := x.nxSend(ctx, "cli_show_ascii", []string{"terminal dont-ask", "reload"}); err != nil && !connEnded(err) {
+		return res, fmt.Errorf("the switch refused the restart: %w", err)
+	}
+	res.Applied, res.Note = true, rebootNote
 	return res, nil
 }

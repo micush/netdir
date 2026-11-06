@@ -97,6 +97,8 @@ var secretWords = []string{"password", "passwd", "secret", "md5", "psk", "token"
 	// NX-OS's object model ("pwd"), PAN-OS ("phash", "private-key", "pre-shared-key", "snmp-community-string") and API keys
 	"pwd", "phash", "private-key", "private_key", "privatekey", "pre-shared", "pre_shared", "api-key", "api_key", "apikey",
 	"community-string", "community_string",
+	// Observium (a device's SNMP community, and its SNMP authentication and privacy passwords and user name)
+	"snmp_community", "snmp-community", "authpass", "cryptopass", "snmp_authname",
 	// Infoblox WAPI (zone transfer and DDNS keys: tsig_key, tsig_key_name, ...)
 	"tsig_key", "tsig-key"}
 

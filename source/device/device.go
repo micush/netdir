@@ -42,7 +42,7 @@ type Device struct {
 	// certificate (or chain) the device's certificate must be signed by instead.
 	Insecure bool   `json:"insecure,omitempty"`
 	CAPEM    string `json:"ca_pem,omitempty"`
-	// Options are platform-specific settings: "api_version" for ArubaOS-CX ("v10.09"), "vdom" for FortiOS, "vsys" and "device_group" for PAN-OS, "wapi_version" for Infoblox, "node" for dnsdir and ntpdir, "org" and "serial" for Meraki, "tenant" and "login_host" for Entra, none for afc, "node" for proxmox (the cluster node the tools ask about).  Technitium and EOS take none.
+	// Options are platform-specific settings: "api_version" for ArubaOS-CX ("v10.09"), "vdom" for FortiOS, "vsys" and "device_group" for PAN-OS, "wapi_version" for Infoblox, "node" for dnsdir and ntpdir, "org" and "serial" for Meraki, "tenant" and "login_host" for Entra, none for afc, "node" for proxmox (the cluster node the tools ask about), "device" (a monitored device's host name or ID) and "prefix" (the path it is served below) for Observium.  Technitium and EOS take none.
 	Options map[string]string `json:"options,omitempty"`
 	// Disabled devices stay in the inventory but are never contacted.
 	Disabled bool `json:"disabled,omitempty"`

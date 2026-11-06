@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Microsoft Entra ID (Azure AD) through Microsoft Graph, read only.  What it answers: which devices belong to a user.
+// Microsoft Entra ID (Azure AD) through Microsoft Graph.  What it answers: which devices belong to a user.
 //
 // The credential is an app registration with the application permissions Device.Read.All and User.Read.All (admin consent given):
 // the credential's Username is the application (client) ID and its Password the client secret; the tenant is the option
@@ -24,8 +24,9 @@ import (
 // "login_host" (default login.microsoftonline.com; login.microsoftonline.us for US Government), and the device's Address is the Graph
 // host (default graph.microsoft.com; graph.microsoft.us).
 //
-// Nothing here writes: the driver has no change interface, only GET is sent to Graph (the one POST is the token request), and APIGet
-// reads only users, their devices, devices, and the organization.
+// Reading sends only GET and APIGet reads only users, their devices, devices, and the organization.  A change is RawChange (rawmon.go:
+// POST, PUT, PATCH, DELETE at /users, /devices, /groups, /organization; rw keys only; sign-in methods, passwords, keys, roles, consent,
+// mail and files are refused).
 //
 //	show devices user=<user principal name | object ID | name>   the user's registered and owned devices, merged
 //	show user user=<...>                                          the user (or the users that match a name)
@@ -395,7 +396,7 @@ func (e *entra) APICatalog(context.Context) (any, error) {
 	return map[string]any{
 		"how": "GET Microsoft Graph v1.0 paths: /users?$filter=startswith(displayName,'Ali')&$select=id,displayName,userPrincipalName, /users/{id or user principal name}, " +
 			"/users/{id}/registeredDevices, /users/{id}/ownedDevices, /devices?$filter=displayName eq 'LAPTOP-01', /devices/{id}/registeredOwners, /organization. " +
-			"Only GET is sent. The simplest question is the Show command: show devices user=alice@contoso.com.",
+			"Reading sends only GET (changes are device_change_raw). The simplest question is the Show command: show devices user=alice@contoso.com.",
 		"examples": []string{"/users/alice@contoso.com/registeredDevices", "/devices?$filter=startswith(displayName,'LAPTOP')&$select=id,displayName,operatingSystem", "/organization"},
 	}, nil
 }

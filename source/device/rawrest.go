@@ -38,6 +38,7 @@ func (x *iosxe) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 			_, err := x.api.do(ctx, http.MethodPost, "/restconf/operations/cisco-ia:save-config", nil, h)
 			return err
 		},
+		reboot: iosxeReboot,
 	}, r, dry)
 }
 
@@ -57,6 +58,7 @@ func (a *aoscx) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 			return nil
 		},
 		prep:    a.login,
+		reboot:  aoscxReboot(root),
 		restore: func(b []byte) (any, bool) { return b, len(b) > 0 },
 		alive:   func(ctx context.Context) error { _, err := a.get(ctx, "/system?attributes=hostname"); return err },
 	}, r, dry)
@@ -90,7 +92,8 @@ func (f *fortios) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, er
 			}
 			return a.Results, a.Results != nil
 		},
-		alive: func(ctx context.Context) error { _, err := f.get(ctx, "/api/v2/monitor/system/status"); return err },
+		alive:  func(ctx context.Context) error { _, err := f.get(ctx, "/api/v2/monitor/system/status"); return err },
+		reboot: fortiosReboot,
 	}, r, dry)
 }
 
@@ -126,7 +129,7 @@ func (n *nios) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error
 
 func (b *bigip) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {
 	h := jsonHdr()
-	if err := bigipBodyCheck(r); err != nil {
+	if err := bigipBodyCheck(r); err != nil && !bigipReboot(r) {
 		return RawResult{DryRun: dry}, err
 	}
 	return restRaw(ctx, restSpec{
@@ -142,6 +145,7 @@ func (b *bigip) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 		},
 		restore: func(s []byte) (any, bool) { return s, len(s) > 0 },
 		alive:   func(ctx context.Context) error { _, err := b.get(ctx, "/mgmt/tm/sys/version"); return err },
+		reboot:  bigipReboot,
 		save: func(ctx context.Context) error {
 			_, err := b.api.do(ctx, http.MethodPost, "/mgmt/tm/sys/config", map[string]any{"command": "save"}, h)
 			return err

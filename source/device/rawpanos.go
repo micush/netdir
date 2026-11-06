@@ -17,10 +17,13 @@ import (
 func (p *panos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {
 	res := RawResult{DryRun: dry}
 	act := strings.ToLower(strings.TrimSpace(r.Method))
+	if act == "reboot" {
+		return p.reboot(ctx, r, dry)
+	}
 	switch act {
 	case "set", "edit", "delete", "rename", "move":
 	default:
-		return res, fmt.Errorf("method %q: use set, edit, delete, rename or move", r.Method)
+		return res, fmt.Errorf("method %q: use set, edit, delete, rename, move or reboot", r.Method)
 	}
 	if len(r.Lines) > 0 {
 		return res, errors.New("lines: PAN-OS is changed with an action, an XPath and an element")
@@ -89,5 +92,40 @@ func (p *panos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 	} else {
 		res.Note = "the change is in the candidate configuration and is not active until it is committed"
 	}
+	return res, nil
+}
+
+// reboot restarts the firewall or Panorama: the operational command "request restart system".  Save commits first.
+func (p *panos) reboot(ctx context.Context, r Raw, dry bool) (RawResult, error) {
+	res := RawResult{DryRun: dry}
+	if len(r.Lines) > 0 || r.Path != "" || strings.TrimSpace(r.Body) != "" {
+		return res, errors.New("reboot takes no path, body or lines")
+	}
+	if dry {
+		res.Note = "would restart the device (request restart system); nothing was changed"
+		return res, nil
+	}
+	if r.Save {
+		cb, err := p.fetch(ctx, url.Values{"type": {"commit"}, "cmd": {"<commit></commit>"}})
+		if err == nil {
+			_, err = panResult(cb)
+		}
+		if err != nil {
+			return res, fmt.Errorf("committing before the restart failed (nothing was restarted): %w", err)
+		}
+		res.Saved = true
+	}
+	b, err := p.fetch(ctx, url.Values{"type": {"op"}, "cmd": {"<request><restart><system></system></restart></request>"}})
+	if connEnded(err) {
+		res.Applied, res.Note = true, rebootNote
+		return res, nil
+	}
+	if err != nil {
+		return res, fmt.Errorf("restart: %w", err)
+	}
+	if _, err := panResult(b); err != nil {
+		return res, fmt.Errorf("restart: %w", err)
+	}
+	res.Applied, res.Answer, res.Note = true, rawTrunc(b), rebootNote
 	return res, nil
 }

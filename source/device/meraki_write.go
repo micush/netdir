@@ -126,8 +126,9 @@ func (m *meraki) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, err
 	r.Path = strings.TrimPrefix(r.Path, merakiBase)
 	return restRaw(ctx, restSpec{
 		api: m.api, hdr: jsonHdr(), json: true,
-		wire:  func(p string) string { return merakiBase + p },
-		guard: merakiRawGuard,
+		wire:   func(p string) string { return merakiBase + p },
+		guard:  merakiRawGuard,
+		reboot: merakiReboot,
 		restore: func(b []byte) (any, bool) {
 			var o map[string]any
 			if json.Unmarshal(b, &o) != nil || len(o) == 0 { // a list is not put back

@@ -315,7 +315,6 @@ func TestMerakiRawChange(t *testing.T) {
 		{Method: "POST", Path: "/organizations/1234/saml/idps", Body: body},
 		{Method: "PUT", Path: "/networks/N_1/snmp", Body: body},
 		{Method: "PUT", Path: "/devices/Q2AA-BBBB-CCCC/managementInterface", Body: body},
-		{Method: "POST", Path: "/devices/Q2AA-BBBB-CCCC/reboot"},
 		{Method: "POST", Path: "/networks/N_1/devices/remove", Body: body},
 		{Method: "POST", Path: "/networks/N_1/firmwareUpgrades", Body: body},
 		{Method: "DELETE", Path: "/networks/N_1"},

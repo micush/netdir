@@ -167,6 +167,17 @@ func maskValue(v any, key string) any {
 		}
 		return t
 	case string:
+		if tt := strings.TrimSpace(t); len(tt) > 1 && (tt[0] == '{' || tt[0] == '[') {
+			// text that is itself a JSON document (a show command answers so): masked by its key names, and kept indented
+			d := json.NewDecoder(strings.NewReader(tt))
+			d.UseNumber()
+			var inner any
+			if d.Decode(&inner) == nil && !d.More() {
+				if b, err := json.MarshalIndent(maskValue(inner, ""), "", "  "); err == nil {
+					return string(b)
+				}
+			}
+		}
 		switch {
 		case idKeys[normKey(key)] && t != "":
 			return maskTag("MASKED-ID", t)

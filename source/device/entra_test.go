@@ -202,8 +202,8 @@ func TestEntraUserDevices(t *testing.T) {
 	if _, err := drv.Interfaces(ctx); err != ErrUnsupported {
 		t.Errorf("interfaces: %v", err)
 	}
-	if _, ok := drv.(RawChanger); ok {
-		t.Error("the Entra driver can write")
+	if _, ok := drv.(RawChanger); !ok {
+		t.Error("the Entra driver can be changed with device_change_raw")
 	}
 	if _, ok := drv.(Changer); ok {
 		t.Error("the Entra driver can change ports")

@@ -446,7 +446,7 @@ func pveRawGuard(method, p string) error {
 	last := strings.ToLower(segs[len(segs)-1])
 	// /nodes/N/status: reboot and shutdown of the node; /nodes/N/services/S/stop: a node's services
 	if method == http.MethodPost && len(segs) == 3 && segs[0] == "nodes" && last == "status" {
-		return errors.New("path: rebooting or shutting down a node is not done here")
+		return errors.New("path: shutting down a node is not done here (a reboot is)")
 	}
 	if len(segs) == 5 && segs[0] == "nodes" && segs[2] == "services" && (last == "stop" || last == "restart" || last == "reload") && method == http.MethodPost {
 		return errors.New("path: a node's services are not stopped or restarted here")
@@ -500,6 +500,7 @@ func (p *proxmox) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, er
 		api: p.api, hdr: h, auth: auth, json: true,
 		wire:    func(path string) string { return pveBase + path },
 		guard:   pveRawGuard,
+		reboot:  pveReboot,
 		restore: nil, // the configuration's digest changes with the change, so the old copy cannot be put back as it is
 		alive:   func(ctx context.Context) error { _, err := p.get(ctx, "/version"); return err },
 	}, r, dry)

@@ -75,7 +75,7 @@ func TestRawGuards(t *testing.T) {
 		{"fortios", Credential{Token: "T"}, Raw{Method: "POST", Path: "/api/v2/monitor/system/reboot"}, "cmdb"},
 		{"nios", rawAny, Raw{Method: "POST", Path: "/wapi/v2.12/fileop?_function=restartservices"}, "file operations"},
 		{"bigip", rawAny, Raw{Method: "POST", Path: "/mgmt/tm/sys/ucs", Body: "{}"}, "not touched"},
-		{"bigip", rawAny, Raw{Method: "POST", Path: "/mgmt/tm/sys", Body: `{"command":"reboot"}`}, "reboot"},
+		{"bigip", rawAny, Raw{Method: "POST", Path: "/mgmt/tm/sys", Body: `{"command":"halt"}`}, "halt"},
 		{"technitium", Credential{Token: "T"}, Raw{Method: "POST", Path: "/api/user/create"}, "users"},
 		{"panos", Credential{Token: "KEYKEYKEY"}, Raw{Method: "set", Path: "/config/mgt-config/users", Body: "<entry/>"}, "mgt-config"},
 		{"panos", Credential{Token: "KEYKEYKEY"}, Raw{Method: "set", Path: "/config/devices", Body: "no xml"}, "XML"},

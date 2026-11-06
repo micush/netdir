@@ -1,6 +1,8 @@
 package device
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,39 +16,82 @@ import (
 
 // secretTokens: a word of a line that holds one of these, or is one of secretWords, hides the rest of the line.
 var secretTokenParts = []string{"password", "passwd", "secret", "psk", "passphrase", "md5", "encrypted", "token", "key-string",
-	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass"}
+	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass", "cryptopass", "snmp_community"}
 var secretTokenExact = map[string]bool{"key": true, "community": true, "ro": false}
 
 var (
 	pemBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE|PGP)[A-Z ]*-----.*?(-----END [^\n]*-----|$)`)
-	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s]+)`)
+	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass|cryptopass|snmp_community)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s]+)`)
 )
 
+// jsonMember is one line of indented JSON that holds a member with a plain value: "key": "value",
+var jsonMember = regexp.MustCompile(`^(\s*)("(?:[^"\\]|\\.)*")(\s*:\s*)("(?:[^"\\]|\\.)*"|-?[0-9][0-9.eE+-]*|true|false|null)(\s*,?\s*)$`)
+
+// jsonQuote writes s as a JSON string, without escaping < > and &.
+func jsonQuote(s string) string {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// secretWord says whether a word names a secret: one of secretTokenParts is in it, or it is one of secretTokenExact.
+func secretWord(lw string) bool {
+	hit := secretTokenExact[lw]
+	for _, p := range secretTokenParts {
+		hit = hit || strings.Contains(lw, p)
+	}
+	return hit
+}
+
+// redactLine hides what follows a secret word on one line of text: the rest of the line reads "(hidden)".
+func redactLine(ln string) string {
+	fs := strings.Fields(ln)
+	for j, w := range fs {
+		if !secretWord(strings.ToLower(strings.TrimRight(w, ":="))) || j == len(fs)-1 {
+			continue
+		}
+		// keep the indentation and the words up to and including the keyword
+		idx := 0
+		for k := 0; k <= j; k++ {
+			idx = strings.Index(ln[idx:], fs[k]) + idx + len(fs[k])
+		}
+		return ln[:idx] + " (hidden)"
+	}
+	return ln
+}
+
+// redactJSONMember does for a line of JSON what redactLine does for text, and leaves it JSON: the value of a member named like a
+// secret is "(hidden)", and a text value is hidden from a secret word on, inside its quotes.  A number or a boolean is left.
+func redactJSONMember(m []string) string {
+	var key, val string
+	if json.Unmarshal([]byte(m[2]), &key) != nil || json.Unmarshal([]byte(m[4]), &val) != nil {
+		return m[0] // the value is not a string (a number, true, null): nothing to hide in it
+	}
+	switch {
+	case val == "" || val == "(hidden)":
+	case secretWord(strings.ToLower(key)):
+		val = "(hidden)"
+	default:
+		val = redactLine(val)
+	}
+	return m[1] + m[2] + m[3] + jsonQuote(val) + m[5]
+}
+
 // RedactText hides the secrets in the text of a show command: after a word such as password, secret, key, community or
-// md5 the rest of the line reads "(hidden)", and PEM blocks are removed.  It hides more than it has to.
+// md5 the rest of the line reads "(hidden)", and PEM blocks are removed.  A line of JSON ("key": "value",) is hidden inside its
+// quotes, so an answer that is JSON stays JSON.  It hides more than it has to.
 func RedactText(s string) string {
 	s = pemBlock.ReplaceAllString(s, "(hidden: key or certificate)")
 	s = jsonSec.ReplaceAllString(s, `${1}"(hidden)"`)
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
-		fs := strings.Fields(ln)
-		for j, w := range fs {
-			lw := strings.ToLower(strings.TrimRight(w, ":="))
-			hit := secretTokenExact[lw]
-			for _, p := range secretTokenParts {
-				hit = hit || strings.Contains(lw, p)
-			}
-			if !hit || j == len(fs)-1 {
-				continue
-			}
-			// keep the indentation and the words up to and including the keyword
-			idx := 0
-			for k := 0; k <= j; k++ {
-				idx = strings.Index(ln[idx:], fs[k]) + idx + len(fs[k])
-			}
-			lines[i] = ln[:idx] + " (hidden)"
-			break
+		if m := jsonMember.FindStringSubmatch(ln); m != nil {
+			lines[i] = redactJSONMember(m)
+			continue
 		}
+		lines[i] = redactLine(ln)
 	}
 	return strings.Join(lines, "\n")
 }

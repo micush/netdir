@@ -105,6 +105,7 @@ type restSpec struct {
 	restore func(snapshot []byte) (any, bool) // what to PUT to put the old state back
 	alive   func(ctx context.Context) error   // a read that must still work after the change
 	save    func(ctx context.Context) error
+	reboot  func(Raw) bool // says that the request is a restart (rawreboot.go): no guard, no read before or after, no put-back
 }
 
 func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error) {
@@ -119,8 +120,11 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 	if r.Method != http.MethodDelete && strings.TrimSpace(r.Body) == "" && r.Method != http.MethodPost {
 		return res, fmt.Errorf("body: %s needs one", r.Method)
 	}
-	if err := s.guard(r.Method, r.Path); err != nil {
-		return res, err
+	rb := s.reboot != nil && s.reboot(r)
+	if !rb {
+		if err := s.guard(r.Method, r.Path); err != nil {
+			return res, err
+		}
 	}
 	if s.prep != nil {
 		if err := s.prep(ctx); err != nil {
@@ -134,7 +138,7 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 		return p
 	}
 	var snap []byte
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodPost && !rb {
 		b, err := s.api.do(ctx, http.MethodGet, wire(r.Path), nil, s.hdr)
 		var se *statusError
 		switch {
@@ -155,7 +159,17 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 	if r.Body != "" {
 		hdr = s.hdr
 	}
+	if rb && r.Save && s.save != nil {
+		if err := s.save(ctx); err != nil {
+			return res, fmt.Errorf("saving the configuration before the restart failed (nothing was restarted): %w", err)
+		}
+		res.Saved = true
+	}
 	ans, err := s.api.do(ctx, r.Method, wire(r.Path), r.Body, hdr)
+	if rb && connEnded(err) {
+		res.Applied, res.Note = true, rebootNote
+		return res, nil
+	}
 	if err != nil {
 		var se *statusError
 		// a refused request (4xx) changed nothing; any other failure may have
@@ -166,6 +180,10 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 	}
 	res.Applied = true
 	res.Answer = rawTrunc(ans)
+	if rb {
+		res.Note = rebootNote
+		return res, nil
+	}
 	if s.alive != nil {
 		if aerr := s.alive(ctx); aerr != nil {
 			s.putBack(ctx, r, snap, wire, &res)
