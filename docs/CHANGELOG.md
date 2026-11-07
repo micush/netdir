@@ -1,5 +1,22 @@
 # Changelog
 
+## [v63] - 2026-11-07 — far fewer device checks: only the primary, slower when nobody is looking
+
+### Changed
+- **Only the cluster primary checks the devices** (a node outside a cluster checks its own). The other nodes read the health from the primary with `GET /api/devices/health` over the cluster channel (cached 10 s) for the Devices page, Topology and the Device down alert; a look on any node sends `?look=1` so the primary uses the short intervals. A node that is not the primary asks itself every 15 s whether it has become it.
+- Each node used to connect to every device every 30 s and ask its facts every 5 min, whoever was looking (with 8 nodes, 8 times that). Now, while nobody is looking, it connects every **180 s** and asks the facts every **360 min**. "Looking" is a Monitor ▸ Devices or Topology page being open, or a device request over MCP, in the last 10 minutes; then it is 30 s and 5 min as before, and the first look after a quiet time checks at once.
+- The facts are still asked when a device is first seen and when it answers again after being down, so a wrong login is found at once, and otherwise within 6 hours (5 minutes while someone looks).
+
+### Added
+- **Configure ▸ Devices ▸ Checks**: four intervals. Quiet: `settings.device_check_s` (30 to 3600 s, empty 180) and `settings.device_facts_min` (5 to 1440 min, empty 360). While someone looks: `settings.device_live_check_s` (10 to 600 s, empty 30) and `settings.device_live_facts_min` (1 to 60 min, empty 5). A quiet value shorter than the looking one is the looking one.
+- Help page and README text on how often the devices are looked at.
+
+### Verified
+- Tests of the intervals (quiet, tuned, watched, never shorter than watched), facts not asked after 30 quiet minutes, asked again 6 minutes after a look, a first look waking the checks once, the settings' limits, an inactive (non-primary) node not checking and starting when it becomes active, and the health handler.
+
+### Not verified
+- Not looked at in a browser (the Checks fields). The primary-to-node health relay is tested only on a standalone node (the cluster relay itself is unchanged and not run with two real nodes); if a primary fails over, the new one starts checking within 15 s, and until then devices show not checked. A device that goes down is now noticed within 3 minutes (not 30 s) when nobody is looking, so the **Device down** alert can take that much longer to open.
+
 ## [v62] - 2026-11-07 — Monitor ▸ MCP: the charts take the colours of their tiles
 
 ### Fixed

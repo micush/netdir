@@ -435,6 +435,9 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	go applyLLDP(dc.Settings.LLDP)
 	go lldpWatch(ctx, sup)
 	go memguard.Run(ctx.Done())
+	healthMg = mg
+	devHealth.Tune = sup.deviceTuning
+	devHealth.Active = checksHere
 	go devHealth.Run(ctx, sup.deviceInventory)
 	go mg.sched.Run(ctx)
 

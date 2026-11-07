@@ -69,7 +69,7 @@ func (e *AlertEngine) sampleNode(now time.Time) []alertSample {
 			out = append(out, alertSample{Rule: "listener_down", Subject: subj, Bad: !up[k], Message: "this node serves " + subj + " but its MCP and web listener is not serving"})
 		}
 	}
-	for name, h := range devHealth.Snapshot() {
+	for name, h := range deviceHealth(false) {
 		switch h.Status {
 		case "bad", "warn":
 			out = append(out, alertSample{Rule: "device_down", Subject: name, Bad: true, Message: name + ": " + h.Detail})

@@ -468,6 +468,16 @@ type Settings struct {
 	// MCPMaxResultMB is the most one MCP answer may be, in megabytes (1 to 8; 0 is the default, 1).  A longer answer is cut.  It is
 	// capped at what the cluster relay carries between nodes.
 	MCPMaxResultMB int `json:"mcp_max_result_mb,omitempty"`
+	// DeviceCheckSec and DeviceFactsMin are how often each node looks at the devices while nobody is looking at them (device.Monitor):
+	// a TCP connect every DeviceCheckSec seconds (30 to 3600; 0 is the default, 180) and the facts every DeviceFactsMin minutes (5 to
+	// 1440; 0 is the default, 360).  While someone has the Devices or Topology page open, or asks a device over MCP, it is every 30 s
+	// and 5 min.
+	DeviceCheckSec int `json:"device_check_s,omitempty"`
+	DeviceFactsMin int `json:"device_facts_min,omitempty"`
+	// DeviceLiveCheckSec and DeviceLiveFactsMin are the same while someone is looking: 10 to 600 seconds (0 is the default, 30) and
+	// 1 to 60 minutes (0 is the default, 5).
+	DeviceLiveCheckSec int `json:"device_live_check_s,omitempty"`
+	DeviceLiveFactsMin int `json:"device_live_facts_min,omitempty"`
 	// Devices are the switches and firewalls the gateway manages, and DeviceCredentials the logins they use (devices.go,
 	// device/).
 	Devices           []device.Device     `json:"devices,omitempty"`
@@ -691,6 +701,18 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if dc.Settings.Privacy, err = normPrivacy(dc.Settings.Privacy); err != nil {
 			return err
+		}
+		if n := dc.Settings.DeviceCheckSec; n != 0 && (n < 30 || n > 3600) {
+			return fmt.Errorf("settings.device_check_s: 30 to 3600 seconds (empty is %d)", int(device.DefaultIdleReach/time.Second))
+		}
+		if n := dc.Settings.DeviceLiveCheckSec; n != 0 && (n < 10 || n > 600) {
+			return fmt.Errorf("settings.device_live_check_s: 10 to 600 seconds (empty is 30)")
+		}
+		if n := dc.Settings.DeviceLiveFactsMin; n != 0 && (n < 1 || n > 60) {
+			return fmt.Errorf("settings.device_live_facts_min: 1 to 60 minutes (empty is 5)")
+		}
+		if n := dc.Settings.DeviceFactsMin; n != 0 && (n < 5 || n > 1440) {
+			return fmt.Errorf("settings.device_facts_min: 5 to 1440 minutes (empty is %d)", int(device.DefaultIdleFacts/time.Minute))
 		}
 		if n := dc.Settings.MCPMaxResultMB; n < 0 || n > mcpMaxResultMB {
 			return fmt.Errorf("mcp: the largest answer is 1 to %d MB", mcpMaxResultMB)

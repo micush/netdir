@@ -44,18 +44,32 @@ func (s *Supervisor) deviceInventory() ([]device.Device, []device.Credential) {
 	return append([]device.Device(nil), s.dc.Settings.Devices...), append([]device.Credential(nil), s.dc.Settings.DeviceCredentials...)
 }
 
+// deviceTuning is how often the devices are looked at (settings.device_check_s, device_facts_min, device_live_check_s, device_live_facts_min).
+func (s *Supervisor) deviceTuning() device.Tuning {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dc == nil {
+		return device.Tuning{}
+	}
+	st := &s.dc.Settings
+	return device.Tuning{Reach: time.Duration(st.DeviceCheckSec) * time.Second, Facts: time.Duration(st.DeviceFactsMin) * time.Minute,
+		LiveReach: time.Duration(st.DeviceLiveCheckSec) * time.Second, LiveFacts: time.Duration(st.DeviceLiveFactsMin) * time.Minute}
+}
+
 func (w *WebServer) handleDevices(rw http.ResponseWriter, r *http.Request, s *session) {
+	health := deviceHealth(true) // someone is looking: the checks speed up
 	devs, _ := w.status.sup.deviceInventory()
 	if devs == nil {
 		devs = []device.Device{}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"devices": devs, "platforms": device.Platforms(), "health": devHealth.Snapshot()}})
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"devices": devs, "platforms": device.Platforms(), "health": health}})
 }
 
 // deviceOps are the requests a device can be asked; the bool says the op hands over secrets (refused to read-only).
 var deviceOps = map[string]bool{"facts": false, "interfaces": false, "neighbors": false, "neighbor_details": false, "ports": false, "routes": false, "routing": false, "firewall": false, "resources": false, "api": false, "api_catalog": false, "vlans": false, "show": false, "config": true}
 
 func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s *session) {
+	lookAtDevices()
 	q := r.URL.Query()
 	op := q.Get("op")
 	secret, known := deviceOps[op]

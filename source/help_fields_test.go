@@ -41,6 +41,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"LLDP_FIELDS", "config_general"},
 		{"DEVICE_FIELDS", "config_devices"},
 		{"DEVCRED_FIELDS", "config_devices"},
+		{"DEVCHECK_FIELDS", "config_devices"},
 		{"CLUSTER_FIELDS", "config_cluster"},
 		{"LOG_FIELDS", "config_logs"},
 		{"SYSLOG_FIELDS", "config_logs"},

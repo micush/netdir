@@ -382,6 +382,10 @@ The device is the vCenter server:
 
 Fields named like a secret are hidden. This driver has been tested against a stub only, never a real vCenter: the paths and field names are those of VMware's API reference, and the likeliest places for a difference are the old `/rest` mode, the appliance health names, and a large inventory (lists are asked in one call, without paging).
 
+### How often the devices are looked at
+
+Only the cluster's primary checks the devices (a node outside a cluster checks its own), for the colours in the GUI and the device alerts: a plain TCP connect to its API port (no login), and now and then a real request for its facts (which also shows that the login still works). While **nobody is looking** (no Monitor ▸ Devices or Topology page open and no device request over MCP in the last 10 minutes) a node connects every **180 seconds** and asks for the facts every **360 minutes**; someone looking brings it to every 30 seconds and every 5 minutes, and the first look checks at once. The facts are also asked when a device is first seen and when it answers again after being down. **Configure ▸ Devices ▸ Checks** changes the intervals: `device_check_s` (30 to 3600) and `device_facts_min` (5 to 1440) when nobody looks, `device_live_check_s` (10 to 600) and `device_live_facts_min` (1 to 60) while someone looks. The other nodes read the health from the primary (`GET /api/devices/health`, over the cluster channel, cached 10 s), so a device is reached once per interval however many nodes there are, and a look on any node speeds up the primary. If the primary cannot be reached the devices show as not checked until a new primary takes over.
+
 ### Adding a platform
 
 A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.

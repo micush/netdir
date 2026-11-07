@@ -2275,8 +2275,14 @@
   const DEVICE_FIELDS = [
     { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags pick groups of devices for a request (tag:site=dc1). Skip check when the device has a self-signed certificate." },
   ];
+  const DEVCHECK_FIELDS = [
+    { shared: true, k: "device_live_check_s", l: "Check every (seconds) while someone looks", t: "int", min: 10, max: 600, hint: "Empty is 30." },
+    { shared: true, k: "device_live_facts_min", l: "Ask for facts every (minutes) while someone looks", t: "int", min: 1, max: 60, hint: "Empty is 5." },
+    { shared: true, k: "device_check_s", l: "Check every (seconds) while nobody looks", t: "int", min: 30, max: 3600, hint: "Empty is 180." },
+    { shared: true, k: "device_facts_min", l: "Ask for facts every (minutes) while nobody looks", t: "int", min: 5, max: 1440, hint: "Empty is 360." },
+  ];
   const DEVCRED_FIELDS = [
-    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Juniper, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric, Centreon); Aviatrix uses a user name and password. Never shown to an MCP caller." },
+    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Juniper, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric, Centreon, NS1, RcodeZero); vCenter uses a Single Sign-On user name (user@vsphere.local) and password; Aviatrix uses a user name and password. Never shown to an MCP caller." },
   ];
   const MCP_FIELDS = [
     { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, hint: "Empty is 443." },
@@ -3229,6 +3235,8 @@
       devExtra = Object.fromEntries((set.devices || []).map((d) => { const { options, ca_pem, disabled } = d; return [d.name, { ...(options ? { options } : {}), ...(ca_pem ? { ca_pem } : {}), ...(disabled ? { disabled } : {}) }]; }));
       const devices = fieldset(DEVICE_FIELDS, { devices: set.devices });
       const devcreds = fieldset(DEVCRED_FIELDS, { device_credentials: set.device_credentials });
+      const devcheck = fieldset(DEVCHECK_FIELDS, { device_check_s: set.device_check_s, device_facts_min: set.device_facts_min, device_live_check_s: set.device_live_check_s, device_live_facts_min: set.device_live_facts_min });
+      const devcheckShared = () => { const c = devcheck.get(), o = {}; for (const k of ["device_live_check_s", "device_live_facts_min", "device_check_s", "device_facts_min"]) if (c[k] > 0) o[k] = c[k]; return o; };
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: set.snmp_communities, snmp_acl: set.snmp_acl, snmp_contact: set.snmp_contact, location: (cfg.snmp || {}).location });
       const prom = fieldset(PROM_FIELDS, { metrics_acl: set.metrics_acl });
@@ -3299,7 +3307,7 @@
         ...logs.get(),
         // keep what this form has no fields for (pauses, removed nodes, the order of the nodes, anycast addresses)
         groups: groups.map((g) => ({ ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...keptDevices(g.orig), ...g.fs.get() })),
-        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...snmpShared(), ...lldpShared(), ...privShared(), ...alertsShared(), ...backupShared() },
+        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...devcheckShared(), ...snmpShared(), ...lldpShared(), ...privShared(), ...alertsShared(), ...backupShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),
@@ -3425,7 +3433,7 @@
       const panels = [
         ["general", "Settings", settingsTabs()],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
-        ["devices", "Devices", h("div", {}, section("Devices", devices.el), section("Logins", devcreds.el))],
+        ["devices", "Devices", h("div", {}, section("Devices", devices.el), section("Logins", devcreds.el), section("Checks", devcheck.el))],
         ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
         ["sso", "SSO", section("Single sign-on",
           sso.el)],

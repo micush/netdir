@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,14 +40,95 @@ type Monitor struct {
 	mu    sync.Mutex
 	state map[string]Health
 
-	ReachEvery time.Duration // how often the API port is tried (default 30 s)
-	FactsEvery time.Duration // how often the facts are asked (default 5 min); also at once when a device comes back
+	ReachEvery time.Duration // how often the API port is tried while someone is looking (default 30 s)
+	FactsEvery time.Duration // how often the facts are asked while someone is looking (default 5 min); also at once when a device comes back
 	Timeout    time.Duration // the time a reach check may take (default 4 s); a facts request gets 5 times that
 	Parallel   int           // devices checked at once (default 16)
+
+	// While nobody is looking (no GUI page of the devices or the topology, no MCP device request for WatchFor) the checks are
+	// slower: IdleReach and IdleFacts (0 is the same as ReachEvery and FactsEvery).  Tune, when set, gives all four from the settings.
+	IdleReach    time.Duration
+	IdleFacts    time.Duration
+	WatchFor     time.Duration
+	Tune         func() Tuning // the settings; 0 in a field is the default of that one
+	Active       func() bool   // false: this node does not do the checks now (it is not the cluster's primary); nil is always
+	InactiveWait time.Duration // how long an inactive node waits before it asks again (default 15 s)
+
+	seen atomic.Int64 // unix time of the last Touch
+	wake chan struct{}
 }
 
 func NewMonitor() *Monitor {
-	return &Monitor{state: map[string]Health{}, ReachEvery: 30 * time.Second, FactsEvery: 5 * time.Minute, Timeout: 4 * time.Second, Parallel: 16}
+	return &Monitor{state: map[string]Health{}, ReachEvery: 30 * time.Second, FactsEvery: 5 * time.Minute, Timeout: 4 * time.Second, Parallel: 16,
+		IdleReach: DefaultIdleReach, IdleFacts: DefaultIdleFacts, WatchFor: 10 * time.Minute, wake: make(chan struct{}, 1)}
+}
+
+// What the checks do while nobody is looking: a TCP connect to each device every 3 minutes and its facts every 6 hours (and the
+// facts at once when a device is first seen or answers again).  Someone looking is the GUI's Devices or Topology page, or a device
+// request through MCP: Touch.
+const (
+	DefaultIdleReach = 3 * time.Minute
+	DefaultIdleFacts = 6 * time.Hour
+)
+
+// Tuning is the four intervals the settings can change; 0 keeps the default of that one.
+type Tuning struct {
+	Reach, Facts         time.Duration // while nobody is looking
+	LiveReach, LiveFacts time.Duration // while someone is
+}
+
+// Touch says that someone is looking at the devices.  The first look after a quiet time checks at once.
+func (m *Monitor) Touch() {
+	was := m.seen.Swap(time.Now().Unix())
+	if m.wake != nil && time.Since(time.Unix(was, 0)) > m.watchFor() {
+		select {
+		case m.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (m *Monitor) watchFor() time.Duration {
+	if m.WatchFor > 0 {
+		return m.WatchFor
+	}
+	return 10 * time.Minute
+}
+
+func (m *Monitor) watched(now time.Time) bool {
+	return now.Sub(time.Unix(m.seen.Load(), 0)) <= m.watchFor()
+}
+
+// intervals are how often the reach and the facts checks are due at this moment.
+func (m *Monitor) intervals(now time.Time) (reach, facts time.Duration) {
+	var t Tuning
+	if m.Tune != nil {
+		t = m.Tune()
+	}
+	reach, facts = m.ReachEvery, m.FactsEvery
+	if t.LiveReach > 0 {
+		reach = t.LiveReach
+	}
+	if t.LiveFacts > 0 {
+		facts = t.LiveFacts
+	}
+	if m.watched(now) {
+		return
+	}
+	ir, ifa := m.IdleReach, m.IdleFacts
+	if t.Reach > 0 {
+		ir = t.Reach
+	}
+	if t.Facts > 0 {
+		ifa = t.Facts
+	}
+	if ir > reach { // never quicker than while someone is looking
+		reach = ir
+	}
+	if ifa > facts {
+		facts = ifa
+	}
+	return
 }
 
 // Snapshot is the health of every device checked so far, by name.
@@ -119,7 +201,8 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 	}
 	conn.Close()
 	wasDown := h.Status != "ok" && h.Status != "warn"
-	if wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= m.FactsEvery {
+	_, factsEvery := m.intervals(now)
+	if wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= factsEvery {
 		h.FactsAt = now.Unix()
 		f, err := m.facts(ctx, d, c)
 		if err != nil {
@@ -150,17 +233,26 @@ func (m *Monitor) facts(ctx context.Context, d Device, c Credential) (Facts, err
 	return drv.Facts(ctx)
 }
 
-// Run checks the devices every ReachEvery until ctx ends; list gives the inventory as it is at that moment.
+// Run checks the devices until ctx ends, as often as intervals says; list gives the inventory as it is at that moment.
 func (m *Monitor) Run(ctx context.Context, list func() ([]Device, []Credential)) {
-	t := time.NewTicker(m.ReachEvery)
-	defer t.Stop()
 	for {
-		devs, creds := list()
-		m.Check(ctx, devs, creds, time.Now())
+		wait := m.InactiveWait
+		if wait <= 0 {
+			wait = 15 * time.Second
+		}
+		if m.Active == nil || m.Active() {
+			devs, creds := list()
+			m.Check(ctx, devs, creds, time.Now())
+			wait, _ = m.intervals(time.Now())
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
+		case <-m.wake: // someone began to look after a quiet time
+			t.Stop()
 		}
 	}
 }

@@ -178,7 +178,7 @@ func mergeFamilyMembers(gs []CanvasGateway, names map[string]string) {
 
 // buildCanvas combines the running configuration with what the engines currently report.
 func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
-	health := devHealth.Snapshot()
+	health := deviceHealth(true)
 	out := make([]CanvasGateway, 0, len(dc.Groups))
 	for i := range dc.Groups {
 		g := &dc.Groups[i]

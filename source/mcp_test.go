@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"netdir/device"
 )
 
 func TestMCPACLNormalised(t *testing.T) {
@@ -164,5 +167,33 @@ func TestMCPResultLimitSetting(t *testing.T) {
 	dc.Settings.MCPMaxResultMB = 1
 	if err := dc.Validate(); err != nil || dc.Settings.MCPMaxResultMB != 0 {
 		t.Errorf("1 MB is the default and is not written: %v %d", err, dc.Settings.MCPMaxResultMB)
+	}
+}
+
+func TestDeviceCheckSettings(t *testing.T) {
+	e, _ := mcpEnv(t, "127.0.0.1")
+	sup := e.ws.status.sup
+	if tu := sup.deviceTuning(); tu != (device.Tuning{}) {
+		t.Fatalf("default tuning %+v", tu)
+	}
+	sup.mu.Lock()
+	st := &sup.dc.Settings
+	st.DeviceCheckSec, st.DeviceFactsMin, st.DeviceLiveCheckSec, st.DeviceLiveFactsMin = 600, 120, 20, 2
+	sup.mu.Unlock()
+	if tu := sup.deviceTuning(); tu != (device.Tuning{Reach: 10 * time.Minute, Facts: 2 * time.Hour, LiveReach: 20 * time.Second, LiveFacts: 2 * time.Minute}) {
+		t.Errorf("tuning %+v", tu)
+	}
+	for _, c := range []struct{ sec, min, lsec, lmin int }{{29, 0, 0, 0}, {3601, 0, 0, 0}, {-1, 0, 0, 0}, {0, 4, 0, 0}, {0, 1441, 0, 0}, {0, -5, 0, 0},
+		{0, 0, 9, 0}, {0, 0, 601, 0}, {0, 0, 0, 61}, {0, 0, 0, -1}} {
+		dc := newDaemonConfig()
+		dc.Settings.DeviceCheckSec, dc.Settings.DeviceFactsMin, dc.Settings.DeviceLiveCheckSec, dc.Settings.DeviceLiveFactsMin = c.sec, c.min, c.lsec, c.lmin
+		if err := dc.Validate(); err == nil {
+			t.Errorf("accepted %+v", c)
+		}
+	}
+	dc := newDaemonConfig()
+	dc.Settings.DeviceCheckSec, dc.Settings.DeviceFactsMin, dc.Settings.DeviceLiveCheckSec, dc.Settings.DeviceLiveFactsMin = 30, 1440, 10, 60
+	if err := dc.Validate(); err != nil {
+		t.Errorf("the limits themselves: %v", err)
 	}
 }
