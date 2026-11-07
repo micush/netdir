@@ -1,5 +1,16 @@
 # Changelog
 
+## [v72] - 2026-11-07 — Configure ▸ Alerts: the table of ntpdir
+
+### Changed
+- The rules table of Configure ▸ Alerts is now the one of ntpdir: rules grouped under headings (Gateways, Devices, Certificates and backups, Host), one row each with the columns On, Rule, Severity, Alert when, Threshold, For and Clear after, a coloured severity box, and fixed column widths, instead of one sentence of boxes per rule. What a rule does, and what is saved, are unchanged. The styles and the help text came across with it.
+
+### Verified
+- `node --check`, the help-coverage test, the full test suite and the leak test.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v71] - 2026-11-07 — the gateway tooltip shows how many MCP clients are connected
 
 ### Added
