@@ -1,5 +1,50 @@
 # Changelog
 
+## [v70] - 2026-11-07 — a device you enable (or add, or edit) is checked at once
+
+### Fixed
+- Enabling a disabled device left it **paused** for minutes: since v63 the next round can be 3 minutes away when nobody is looking, and nothing noticed the change. The monitor now looks at the inventory every 3 seconds between rounds and checks a device that was added, enabled, disabled or edited (address, port, platform, login, certificate option, options, or its login's user name, password or token) straight away, with its facts. Only the primary does it (v63), so another node shows the new state a few seconds later.
+
+### Verified
+- A test that enables, then disables, a device with the next round an hour away and sees it checked and paused within a second; `go test -race` of the package three times; the full test suite and leak test.
+
+### Not verified
+- On a real cluster with several nodes (the primary's change is read by the others over the 10 s cache).
+
+## [v69] - 2026-11-07 — field descriptions: one line, never longer than the field
+
+### Changed
+- **New rule in CLAUDE.md:** the text under a form field is one line and no longer than the field. The range line under a number field is now `10 to 600 s. Default 30.` (was `Valid: 10 to 600 seconds. Default 30 seconds.`, which wrapped), and a field that has a hint and a range shows both on the one line (`0 = off. 0 to 65535. Default 0.`). `.f > .hint` is `nowrap` with an ellipsis. A few section notes were shortened again.
+- `TestFieldHintsAreShort` fails any `hint` or `note` in `app.js` over 45 characters.
+
+### Verified
+- The new test, `node --check`, the full test suite, the leak test.
+
+### Not verified
+- Not looked at in a browser (that every range line fits its field).
+
+## [v68] - 2026-11-07 — MCP: the port field is just "Port"
+
+### Changed
+- Configure ▸ MCP ▸ the field **Port on the gateway addresses** is now **Port**; the help says what it is. No Go change.
+
+### Verified
+- `node --check`, the help-coverage test, the full test suite and the leak test.
+
+### Not verified
+- Not looked at in a browser.
+
+## [v67] - 2026-11-07 — short descriptions under the fields
+
+### Changed
+- The text under a field is now a few words (for example "Host or host:port." under a syslog server, "PEM file. Empty: system CAs." under a CA file), and the same for the notes under a section heading. Fields covered: the device Port, Certificate, Name, More IPv4/IPv6 addresses, Use real MAC addresses (the hint is gone), Neighbors, the two Listen/Binding addresses, Login groups, Read-only groups, Devices, Logins, and the Syslog Server and CA file. The full explanation is in the help pane of each page, which already had it. No Go change.
+
+### Verified
+- `node --check` of `app.js` and `help.js`; the help-coverage test and the full test suite; the leak test where the project has one.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v66] - 2026-11-07 — the device check connects to the platform's own API port
 
 ### Fixed

@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -164,7 +165,11 @@ func (m *Monitor) Check(ctx context.Context, devs []Device, creds []Credential, 
 		prev[k] = v
 	}
 	m.mu.Unlock()
+	m.checkList(ctx, devs, cred, prev, now)
+}
 
+// checkList checks the devices in devs (all of them, or the few that changed) and stores each one's health.
+func (m *Monitor) checkList(ctx context.Context, devs []Device, cred map[string]Credential, prev map[string]Health, now time.Time) {
 	sem := make(chan struct{}, max(1, m.Parallel))
 	var wg sync.WaitGroup
 	for _, d := range devs {
@@ -233,26 +238,87 @@ func (m *Monitor) facts(ctx context.Context, d Device, c Credential) (Facts, err
 	return drv.Facts(ctx)
 }
 
-// Run checks the devices until ctx ends, as often as intervals says; list gives the inventory as it is at that moment.
+// changeEvery is how often Run looks at the inventory for a device that was added, enabled, disabled or edited, and checks
+// that device at once (enabling a device would otherwise show "paused" until the next round, minutes away when nobody looks).
+var changeEvery = 3 * time.Second
+
+// fingerprint is what a check of the device depends on.
+func fingerprint(d Device, creds []Credential) string {
+	f := fmt.Sprint(d.Platform, "|", d.Address, "|", d.Port, "|", d.Credential, "|", d.Disabled, "|", d.Insecure, "|", d.Options)
+	for _, c := range creds {
+		if c.Name == d.Credential {
+			f += fmt.Sprint("|", c.Username, "|", len(c.Password), "|", len(c.Token))
+		}
+	}
+	return f
+}
+
+// Run checks the devices until ctx ends, as often as intervals says; list gives the inventory as it is at that moment.  Between
+// rounds it looks at the inventory every changeEvery, and checks a device that changed at once.
 func (m *Monitor) Run(ctx context.Context, list func() ([]Device, []Credential)) {
+	seen := map[string]string{}
+	remember := func(devs []Device, creds []Credential) {
+		seen = make(map[string]string, len(devs))
+		for _, d := range devs {
+			seen[d.Name] = fingerprint(d, creds)
+		}
+	}
 	for {
 		wait := m.InactiveWait
 		if wait <= 0 {
 			wait = 15 * time.Second
 		}
-		if m.Active == nil || m.Active() {
+		active := m.Active == nil || m.Active()
+		if active {
 			devs, creds := list()
 			m.Check(ctx, devs, creds, time.Now())
+			remember(devs, creds)
 			wait, _ = m.intervals(time.Now())
 		}
-		t := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return
-		case <-t.C:
-		case <-m.wake: // someone began to look after a quiet time
-			t.Stop()
+		until := time.Now().Add(wait)
+	sleep:
+		for {
+			step := time.Until(until)
+			if active && step > changeEvery {
+				step = changeEvery
+			}
+			if step <= 0 {
+				break
+			}
+			t := time.NewTimer(step)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+			case <-t.C:
+				if !active || !time.Now().Before(until) {
+					break sleep
+				}
+				devs, creds := list()
+				var changed []Device
+				for _, d := range devs {
+					if seen[d.Name] != fingerprint(d, creds) {
+						changed = append(changed, d)
+					}
+				}
+				if len(changed) > 0 {
+					cred := map[string]Credential{}
+					for _, c := range creds {
+						cred[c.Name] = c
+					}
+					m.mu.Lock()
+					prev := make(map[string]Health, len(m.state))
+					for k, v := range m.state {
+						prev[k] = v
+					}
+					m.mu.Unlock()
+					m.checkList(ctx, changed, cred, prev, time.Now())
+					remember(devs, creds)
+				}
+			case <-m.wake: // someone began to look after a quiet time
+				t.Stop()
+				break sleep
+			}
 		}
 	}
 }

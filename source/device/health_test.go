@@ -157,11 +157,15 @@ func TestMonitorInactiveDoesNotCheck(t *testing.T) {
 	m.InactiveWait = 10 * time.Millisecond
 	var calls atomic.Int32
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go m.Run(ctx, func() ([]Device, []Credential) {
-		calls.Add(1)
-		return nil, nil
-	})
+	done := make(chan struct{})
+	defer func() { cancel(); <-done }()
+	go func() {
+		defer close(done)
+		m.Run(ctx, func() ([]Device, []Credential) {
+			calls.Add(1)
+			return nil, nil
+		})
+	}()
 	time.Sleep(80 * time.Millisecond)
 	if n := calls.Load(); n != 0 {
 		t.Fatalf("inactive node listed devices %d times", n)
@@ -191,4 +195,39 @@ func TestDefaultPortIsDialedByTheCheck(t *testing.T) {
 	if dialed != "10.0.0.10:8006" {
 		t.Fatalf("the check dialed %q, want the Proxmox port", dialed)
 	}
+}
+
+func TestMonitorChecksAnEnabledDeviceAtOnce(t *testing.T) {
+	od, oc := dialFn, changeEvery
+	defer func() { dialFn, changeEvery = od, oc }()
+	changeEvery = 10 * time.Millisecond
+	dialFn = func(context.Context, string) (net.Conn, error) { return nil, errors.New("refused") }
+	m := NewMonitor()
+	m.IdleReach, m.IdleFacts = time.Hour, time.Hour // nothing is due for an hour
+	var off atomic.Bool
+	off.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer func() { cancel(); <-done }() // the loop has ended before the stubs are put back
+	go func() {
+		defer close(done)
+		m.Run(ctx, func() ([]Device, []Credential) {
+			return []Device{{Name: "pve10", Platform: "proxmox", Address: "10.0.0.10", Disabled: off.Load()}}, nil
+		})
+	}()
+	wait := func(want string) {
+		t.Helper()
+		for i := 0; i < 200; i++ {
+			if m.Snapshot()["pve10"].Status == want {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("status %q, want %q", m.Snapshot()["pve10"].Status, want)
+	}
+	wait("paused")
+	off.Store(false) // enabled: it is checked now, not in an hour
+	wait("bad")
+	off.Store(true)
+	wait("paused")
 }

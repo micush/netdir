@@ -1311,10 +1311,10 @@
           if (!pc || Object.values(PORT_DEF).concat("443").includes(pc)) els.port.value = pd;   // a port typed by hand is kept
         } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
-        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Valid: 1 to 65535. Default 443 (8006 for Proxmox)." },
+        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Default 443 (Proxmox 8006)." },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
         { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core" },
-        { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip check for a self-signed certificate." },
+        { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip: self-signed certificate." },
         { k: "login", l: "Login", options: [...ls, NEW_LOGIN], v: d ? d.credential : ls.length ? ls[0] : NEW_LOGIN, on: show, initOn: true },
         { k: "user", l: "User name", v: "", ph: "netdir" },
         { k: "pass", l: "Password", v: "", secret: true },
@@ -1616,7 +1616,7 @@
     function anycastForm(g, edit) {
       form(edit ? "Edit anycast address" : "Add anycast address", [
         { k: "addr", l: "Anycast address", v: edit || "", ph: "203.0.113.123 or 2001:db8:123::1",
-          hint: "Any subnet. Held on every node while it can answer. Other gateways may carry it too." },
+          hint: "Any subnet. Held on every node." },
       ], (v) => {
         const a = (v.addr || "").trim().replace(/\/(32|128)$/, "").toLowerCase();
         if (!a) return "Enter an IPv4 or IPv6 address.";
@@ -2149,13 +2149,13 @@
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
-    { shared: true, k: "name", l: "Name", t: "text", hint: "optional label shown instead of the address" },
+    { shared: true, k: "name", l: "Name", t: "text", hint: "Optional label." },
     { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255, def: 1 },
     { k: "interface", l: "Interface", t: "text" },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
-    { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
-    { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "rows", rows: "morevip6", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
+    { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet, one per row." },
+    { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "rows", rows: "morevip6", wide: true, hint: "Same subnet, one per row." },
     { k: "priority", l: "Priority", t: "int", min: 0, max: 255, def: 100 },
     { shared: true, k: "lb_method", l: "LB method", t: "select", options: LB },
     { k: "weight", l: "Weight", t: "int", min: 0, max: 255, def: 100 },
@@ -2164,8 +2164,8 @@
     { shared: true, k: "max_afns", l: "Max forwarders", t: "int", min: 1, max: 255, def: 128 },
     { shared: true, k: "key", l: "HMAC shared key", t: "text", weakKey: true },
     { k: "preempt", l: "Preemption", t: "bool" },
-    { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool", hint: "On for a gateway you add now (most networks need it: a VMware port group that is not promiscuous, a cloud with one MAC per interface, a switch with port security); gateways that already existed keep their setting. Off is the older way with a virtual MAC per node. On: the VIP is on every node's lo and the controller answers ARP with the real MAC of the node it picks. Failover then depends on the neighbors honoring an unsolicited ARP. Restarts the gateway; set it on every node's cluster together." },
-    { shared: true, k: "neighbors", l: "Neighbors (unicast mode)", t: "rows", rows: "neighbors", wide: true, hint: "Every node, one IP per row. Empty: multicast." },
+    { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool" },
+    { shared: true, k: "neighbors", l: "Neighbors (unicast mode)", t: "rows", rows: "neighbors", wide: true, hint: "Empty: multicast." },
   ];
   const SSO_FIELDS = [
     { shared: true, k: "sso_base_url", brk: true, l: "Address of this console", t: "text" },
@@ -2252,9 +2252,9 @@
   }
 
   const WEB_FIELDS = [
-    { k: "listen", l: "Listen address", t: "port", def: "22161", hint: "the port, default 22161 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:22161" },
-    { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
-    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "same form; a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing. Empty = nobody. People are added on the Users page" },
+    { k: "listen", l: "Listen address", t: "port", def: "22161", hint: "Port, or address:port." },
+    { shared: true, k: "group", l: "Login groups", t: "text", hint: "Separated by commas." },
+    { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "Same form. Empty: nobody." },
     { k: "pam_service", l: "PAM service", t: "text" },
     { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1, def: 30 },
     { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1, max: 1000, def: 3 },
@@ -2277,25 +2277,25 @@
   ];
   // Configure ▸ Devices (devices.go): the inventory and the logins, shared by the cluster
   const DEVICE_FIELDS = [
-    { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags pick groups of devices for a request (tag:site=dc1). Skip check when the device has a self-signed certificate." },
+    { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags: tag:site=dc1." },
   ];
   const DEVCHECK_FIELDS = [
-    { shared: true, k: "device_live_check_s", unit: "seconds", l: "Active checks", t: "int", min: 10, max: 600, def: 30 },
-    { shared: true, k: "device_live_facts_min", unit: "minutes", l: "Active facts", t: "int", min: 1, max: 60, def: 5 },
-    { shared: true, k: "device_check_s", unit: "seconds", l: "Idle checks", t: "int", min: 30, max: 3600, def: 180 },
-    { shared: true, k: "device_facts_min", unit: "minutes", l: "Idle facts", t: "int", min: 5, max: 1440, def: 360 },
+    { shared: true, k: "device_live_check_s", unit: "s", l: "Active checks", t: "int", min: 10, max: 600, def: 30 },
+    { shared: true, k: "device_live_facts_min", unit: "min", l: "Active facts", t: "int", min: 1, max: 60, def: 5 },
+    { shared: true, k: "device_check_s", unit: "s", l: "Idle checks", t: "int", min: 30, max: 3600, def: 180 },
+    { shared: true, k: "device_facts_min", unit: "min", l: "Idle facts", t: "int", min: 5, max: 1440, def: 360 },
   ];
   const DEVCRED_FIELDS = [
-    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Juniper, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric, Centreon, NS1, RcodeZero); vCenter uses a Single Sign-On user name (user@vsphere.local) and password; Aviatrix uses a user name and password. Never shown to an MCP caller." },
+    { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "Password or API token." },
   ];
   const MCP_FIELDS = [
-    { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, def: 443 },
+    { shared: true, k: "mcp_port", l: "Port", t: "int", min: 1, max: 65535, def: 443 },
     { shared: true, k: "mcp_max_result_mb", l: "Largest answer (MB)", t: "int", min: 1, max: 8, def: 1 },
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
     { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
   const CLUSTER_FIELDS = [
-    { k: "listen", l: "Binding address", t: "port", def: "22162", hint: "the port, default 22162 (all addresses); or an address with the port: 10.0.0.1:22162" },
+    { k: "listen", l: "Binding address", t: "port", def: "22162", hint: "Port, or address:port." },
     { k: "self", l: "Advertised address", t: "text" },
     { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600, def: 5 },
   ];
@@ -2303,10 +2303,10 @@
   const SYSLOG_FIELDS = [
     { k: "enabled", l: "Send the log to a syslog server", t: "bool", hint: "" },
     { k: "protocol", l: "Protocol", t: "select", options: ["tcp", "udp", "tls"] },
-    { k: "server", l: "Server", t: "text", hint: "a host name or address, with the port if it is not the usual one: logs.example.com or 10.0.0.9:1514 (514, and 6514 for tls)" },
+    { k: "server", l: "Server", t: "text", hint: "Host or host:port." },
     { k: "facility", l: "Facility", t: "select", options: ["daemon", "user", "auth", "authpriv", "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"] },
     { k: "format", l: "Message format", t: "select", options: ["rfc5424", "rfc3164"] },
-    { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "the PEM file of the authority that signed the server's certificate; empty trusts the system's authorities" },
+    { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "PEM file. Empty: system CAs." },
     { k: "tls_insecure", l: "Do not check the server's certificate (tls)", t: "bool" },
   ];
   const LOG_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];
@@ -2749,13 +2749,13 @@
     return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
-  // the valid range under a number field, with its default: "Valid: 10 to 600. Default 30."
-  function rangeHint(f) {
-    if (f.t !== "int" && f.t !== "float") return null;
+  // the range under a number field, with its default, on one line: "10 to 600 s. Default 30."
+  function rangeText(f) {
+    if (f.t !== "int" && f.t !== "float") return "";
     const u = f.unit ? " " + f.unit : "";
-    const r = f.min != null && f.max != null ? "Valid: " + f.min + " to " + f.max + u + "." : f.min != null ? "Valid: " + f.min + " or more" + u + "." : f.max != null ? "Valid: up to " + f.max + u + "." : "";
-    const d = f.def != null ? "Default " + f.def + u + "." : "";
-    return r || d ? h("span", { class: "hint range" }, [r, d].filter(Boolean).join(" ")) : null;
+    const r = f.range ? f.range : f.min != null && f.max != null ? f.min + " to " + f.max + u : f.min != null ? f.min + " or more" + u : f.max != null ? "up to " + f.max + u : "";
+    const d = f.def != null ? "Default " + f.def + "." : "";
+    return [r ? r + "." : "", d].filter(Boolean).join(" ");
   }
   function fieldset(specs, obj, asCards) {
     const getters = {};
@@ -2825,7 +2825,7 @@
         const upd = () => { weak.textContent = isWeakKey(input.value) ? "Well known or short: anyone on the network can take over this gateway." : ""; };
         input.addEventListener("input", upd); upd();
       }
-      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, rangeHint(f), weak));
+      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, (f.hint || rangeText(f)) ? h("span", { class: "hint" }, [f.hint, rangeText(f)].filter(Boolean).join(" ")) : null, weak));
     }
     return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }
