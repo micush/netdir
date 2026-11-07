@@ -63,6 +63,7 @@ var mcpRoutes = []apiRoute{
 	{Method: "POST", Path: "/api/ldap/test"},
 	{Method: "GET", Path: "/api/lldp"},
 	{Method: "GET", Path: "/api/log", Query: []string{"level", "q", "since", "n"}},
+	{Method: "GET", Path: "/api/mcpusage"},
 	{Method: "GET", Path: "/api/metrics/alerts.yml"},
 	{Method: "GET", Path: "/api/metrics/dashboard.json"},
 	{Method: "GET", Path: "/api/neighbors"},

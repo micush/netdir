@@ -145,6 +145,7 @@ type WebServer struct {
 	sso     *ssoState
 	applyMu sync.Mutex
 	mcp     *mcpListeners // /mcp on the gateways' addresses (mcplisten.go)
+	usage   *mcpUsage     // what the MCP endpoint is used for (mcpusage.go)
 	running *WebConfig
 	srv     *http.Server
 	cancel  context.CancelFunc
@@ -160,6 +161,7 @@ func NewWebServer(mg *Mgmt, status *StatusServer, auth Authenticator) *WebServer
 	w.policy.Store(&d)
 	w.mcp = newMCPListeners(w)
 	w.stateDir = mg.stateDir
+	w.usage = newMCPUsage(mg.stateDir)
 	w.loadSessions()
 	fn := w.endSessionsFor
 	mg.endSessions.Store(&fn)
@@ -292,6 +294,7 @@ func (w *WebServer) Stop() {
 	defer w.applyMu.Unlock()
 	w.noSave.Store(true) // the daemon is stopping, not signing anyone out: the file keeps the sessions
 	w.stopLocked()
+	w.usage.Flush()
 }
 
 func (w *WebServer) janitor(ctx context.Context) {

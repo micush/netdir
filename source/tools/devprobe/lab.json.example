@@ -16,6 +16,8 @@
     {"name": "dns1", "platform": "technitium", "address": "192.168.1.11", "credential": "pan", "insecure": true},
     {"name": "aviatrix", "platform": "aviatrix", "address": "192.168.1.17", "credential": "avxadmin", "insecure": true},
     {"name": "ipfabric", "platform": "ipfabric", "address": "192.168.1.16", "credential": "ipfkey", "insecure": true},
+    {"name": "ns1", "platform": "nsone", "address": "api.nsone.net", "credential": "ns1key"},
+    {"name": "rcode0", "platform": "rcode0", "address": "my.rcodezero.at", "credential": "rc0token"},
     {"name": "centreon", "platform": "centreon", "address": "192.168.1.18", "credential": "centkey", "insecure": true},
     {"name": "mx204", "platform": "junos", "address": "192.168.1.19", "credential": "cat", "insecure": true},
     {"name": "observium", "platform": "observium", "address": "192.168.1.15", "credential": "obskey", "insecure": true},

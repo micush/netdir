@@ -48,6 +48,7 @@ A show command on one device:
 - [Connecting an assistant](#connecting-an-assistant)
 - [MCP tools](#mcp-tools)
 - [Security](#security)
+- [MCP usage](#mcp-usage)
 - [Privacy levels](#privacy-levels)
 - [Trying a device first: devprobe](#trying-a-device-first-devprobe)
 - [Clustering](#clustering)
@@ -63,7 +64,7 @@ A show command on one device:
 |---|---|
 | VIP election, anycast, BGP, OSPF, LLDP, cluster, users, backups, scheduler, updates | built in |
 | Device inventory, credentials, MCP device tools | built in |
-| Drivers | `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `observium` and `centreon` (monitoring systems over their REST APIs), `ipfabric` (IP Fabric over its REST API), `aviatrix` (Aviatrix Controller), `dnsdir` (the DNS Director product, over its MCP endpoint) |
+| Drivers | `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `observium` and `centreon` (monitoring systems over their REST APIs), `nsone` (NS1 hosted DNS over its REST API), `rcode0` (RcodeZero anycast DNS over its REST API), `ipfabric` (IP Fabric over its REST API), `aviatrix` (Aviatrix Controller), `dnsdir` (the DNS Director product, over its MCP endpoint) |
 | Writes to devices | typed port changes from plain English on Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches (`device_change`), and any configuration change on every platform (`device_change_raw`: REST request, PAN-OS action, or CLI lines); an `rw` key, ACL entry or GUI account may, `ro` may not; not yet run on real gear |
 | `show` commands, text running-configs | NX-OS, EOS and PAN-OS answer them over their APIs; IOS-XE, ArubaOS-CX and FortiOS need an SSH transport, not built yet; Infoblox and Technitium have none |
 | NX-OS, EOS, ArubaOS-CX, PAN-OS, Infoblox and Technitium drivers | built against vendor documentation and a test stub, not yet run on real gear (see the changelog) |
@@ -342,6 +343,32 @@ Junos through its REST API: every RPC is `https://HOST:3443/rpc/<rpc-name>?<argu
 
 Secrets found by name in an answer are hidden. This driver has been tested against a stub only, never a real Junos device: the shape of the JSON answers (and how `<command>` and `get-configuration` answer through REST) is the likeliest place for a release to differ.
 
+### NS1 (`nsone`)
+
+The REST API of NS1 (IBM NS1 Connect), `https://api.nsone.net/v1/`, over HTTPS, port 443. The address may be left empty (`api.nsone.net`); a private NS1 deployment gives its own, and option `prefix` the path (`/v1` by default). The credential is an **API key** as the token (Account Settings ▸ API Keys; a key that has only the read permissions reads and nothing more), sent in the header `X-NSONE-Key` and never in a URL.
+
+The device is the NS1 account:
+
+- **Facts**: the number of zones. **Interfaces**: the zones (DNSSEC, primary or secondary, record count when NS1 gives it).
+- **Show** (`device_show`): `show zones [search=TEXT] [limit=N]`, `show zone NAME [limit=N]` (the zone and its records in one answer), `show records zone=NAME [type=TYPE] [search=TEXT] [limit=N]`, `show record ZONE DOMAIN TYPE` (answers, filter chain and metadata of one record), `show monitors`, `show datasources`, `show feeds source=ID`, `show networks`, `show qps`, `show usage`.
+- **API request** (`device_api_get`): any read below `/zones`, `/data`, `/monitoring`, `/networks`, `/stats`, `/views`, `/search`, `/export` and `/account`. API keys, users, teams, account settings, billing, TSIG keys and notification lists (they hold webhook addresses) are refused.
+- **Changes** (`device_change_raw`, rw key): `PUT` (NS1's create), `POST` (its update) and `DELETE` below `/zones`, `/data`, `/monitoring`, `/networks` and `/views`, with a JSON body. A whole zone is not deleted (it takes every record with it). An update is read first, so the answer holds a `before` copy; nothing is put back by itself.
+
+A zone's records come in pages of 2500; `show zone` reads the first page and says so when it was full. Fields named like a credential (a monitor's authorization, a data source's key, a TSIG secret) are hidden. This driver has been tested against a stub only, never a real NS1 account: the field names (`short_answers`, `records`, `dnssec`) are those of NS1's documentation and client libraries.
+
+### RcodeZero (`rcode0`)
+
+The REST API of RcodeZero (nic.at's anycast DNS), `https://my.rcodezero.at/api/v1/`, over HTTPS, port 443. The address may be left empty; option `api_version` is `v1` (default) or `v2`, option `prefix` replaces `/api/<version>`. The credential is an **API token** as the token (Settings ▸ API Tokens), sent as a Bearer token and never in a URL.
+
+The device is the RcodeZero account:
+
+- **Facts**: the number of zones. **Interfaces**: the zones (master or slave, DNSSEC state).
+- **Show** (`device_show`): `show zones [search=TEXT] [limit=N]`, `show zone NAME` (the zone, its rrsets and its query statistics in one answer), `show rrsets zone=NAME [type=TYPE] [search=TEXT] [limit=N]`, `show stats [zone=NAME] [kind=queries]` (`magnitude`, `qnames`, `nxdomains` for a zone), `show messages`, `show secondaries`, `show settings`.
+- **API request** (`device_api_get`): any read below `/zones`, `/stats`, `/settings`, `/messages` and `/reports`. Lists are asked with `page_size=-1` and further pages are followed. Transfer (TSIG) keys, API tokens and users are refused.
+- **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` and `DELETE` below `/zones` and `/settings`. Records change with `PATCH /zones/NAME/rrsets` and a list such as `[{"name": "www.example.com.", "type": "A", "changetype": "update", "ttl": 300, "records": [{"content": "192.0.2.10"}]}]` (`changetype` is `add`, `update` or `delete`). A whole zone is not deleted. The answer holds a `before` copy; nothing is put back by itself.
+
+Fields named like a credential are hidden. This driver has been tested against a stub only, never a real RcodeZero account: the Bearer scheme, `page_size=-1` and the field names follow RcodeZero's client libraries and documentation, and the likeliest places for a difference are the statistics paths and the account-level `/stats` kinds.
+
 ### Adding a platform
 
 A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.
@@ -412,6 +439,10 @@ The same queries are on the API: `GET /api/devices` and `GET /api/devices/query?
 - **Everything is logged.** Each device query is logged with the caller's name (`KEYNAME@ADDRESS` or the address) and the target. Each configuration change goes into the history under the caller's name.
 - **Treat answers as data.** Whatever a device answers is data for the assistant, never instructions. The MCP server says so in its instructions to the client.
 - **Where credentials live.** They are kept in the configuration file (`/var/lib/netdir/netdir.conf`, mode 0600, root) and replicated to the cluster's nodes over the pinned, signed cluster channel.
+
+## MCP usage
+
+**Monitor ▸ MCP** shows what the MCP endpoint is used for on the node the Node menu has picked: calls by **key** (or *(address list)* for a caller let in by its address), by **source address**, by **tool** and by **device, tag or target**, with errors, refused changes, changes made, the data returned and the average time; a chart of calls per hour; and the newest 200 calls. The time range is the last hour, 24 hours or 7 days. The daemon keeps the counts by the hour for 8 days (`mcpusage.json` in the state directory, so they survive a restart and an upgrade); the newest-calls list lives in memory. Only names, sizes and times are kept, never what a caller sent or was answered. The same numbers are `GET /api/mcpusage?window=24h`. Each node counts the calls it answers, so pick each node in turn to see a whole cluster.
 
 ## Privacy levels
 

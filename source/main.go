@@ -182,7 +182,7 @@ Shared settings ("settings" block, the same on every node of a cluster):
   mcp_port           the port of the MCP listeners on the gateway addresses (default 443)
   mcp_acl            who may use /mcp by address: "10.1.0.0/24" reads, "10.1.1.50 rw" may also change things
   mcp_keys           keys that may use /mcp from any address ("Authorization: Bearer KEY"); kept with its hash, never shown to MCP
-  devices            the managed switches and firewalls: {"name", "platform" (iosxe|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|meraki|entra|afc|proxmox|observium|ipfabric|aviatrix|centreon|junos), "address", "port",
+  devices            the managed switches and firewalls: {"name", "platform" (iosxe|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|meraki|entra|afc|proxmox|observium|ipfabric|aviatrix|centreon|junos|nsone|rcode0), "address", "port",
                      "credential", "tags", "insecure", "ca_pem", "options", "disabled"}
   device_credentials the logins they use: {"name", "username", "password"} or {"name", "token"}; never shown to a
                      read-only account or to any MCP caller

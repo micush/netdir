@@ -193,6 +193,12 @@ func Validate(devs []Device, creds []Credential) error {
 		if d.Address == "" && d.Platform == "meraki" {
 			d.Address = "api.meraki.com" // the one dashboard address, so it need not be typed
 		}
+		if d.Address == "" && d.Platform == "nsone" {
+			d.Address = "api.nsone.net" // the NS1 API
+		}
+		if d.Address == "" && d.Platform == "rcode0" {
+			d.Address = "my.rcodezero.at" // the RcodeZero API
+		}
 		if d.Address == "" && d.Platform == "entra" {
 			d.Address = "graph.microsoft.com" // Microsoft Graph (public cloud)
 		}

@@ -1,5 +1,44 @@
 # Changelog
 
+## [v58] - 2026-11-07 — Monitor ▸ MCP: usage by key, source, tool and device
+
+### Added
+- **Monitor ▸ MCP**: calls by key, by source address, by tool and by device/tag/target (calls, errors, refused, changes, data returned, average ms, last call), a calls-per-hour chart, and the newest 200 calls. Time range: last hour, 24 hours, 7 days. `GET /api/mcpusage?window=1h|24h|7d` (relayable to another node; listed in `list_api`).
+- `mcpusage.go`: the counting. Hourly buckets kept 8 days in `mcpusage.json` (state directory; written at most every 30 s and when the web server stops), at most 1000 rows per hour (the rest is counted as `(other)`). Only the key name, address, tool, target, sizes, times and result are kept, never what a caller sent or was answered.
+- A call with a list of targets (`sw1,sw2`) counts once for each device in the list; a tag or `all` is listed as written.
+
+### Changed
+- Nothing else changes in the daemon or the drivers.
+
+### Verified
+- Unit tests of the counting (windows, the 8-day cut, restart, row cap, nil), the handler, and an end-to-end MCP call and refusal; help-page tests; JS parse checks.
+
+### Not verified
+- Not clicked through in a browser; the chart and tables have not been seen. The counts are per node, so a cluster needs each node picked in turn. A crash can lose up to 30 s of counts.
+
+## [v57] - 2026-11-07 — NS1 and RcodeZero drivers
+
+### Added
+- **`nsone`** (NS1 hosted DNS, REST, API key in `X-NSONE-Key`; address defaults to `api.nsone.net`): facts and zones; `show zones|zone|records|record|monitors|datasources|feeds|networks|qps|usage`; API request below `/zones`, `/data`, `/monitoring`, `/networks`, `/stats`, `/views`, `/search`, `/export`, `/account`; changes (rw key) PUT, POST, DELETE below `/zones`, `/data`, `/monitoring`, `/networks`, `/views`. An update (POST) is read first, so the answer holds a `before` copy.
+- **`rcode0`** (RcodeZero anycast DNS, REST, Bearer token; address defaults to `my.rcodezero.at`; option `api_version` v1 or v2): facts and zones; `show zones|zone|rrsets|stats|messages|secondaries|settings`; API request below `/zones`, `/stats`, `/settings`, `/messages`, `/reports`; changes (rw key) below `/zones` and `/settings`, records through `PATCH /zones/NAME/rrsets`. Lists are asked with `page_size=-1` and further pages followed.
+- Shared `device/dnsrest.go`: path and name checks, and a hide by field name (authorization, header, key, token, TSIG...) that runs before the usual redaction.
+- **Add device** fills the address in when the platform is a cloud service: `api.nsone.net` for NS1, `my.rcodezero.at` for RcodeZero (also `api.meraki.com` and `graph.microsoft.com`). An address typed by hand is never replaced; the field's hint shows the service address. (The Configure ▸ Devices table is unchanged: an empty address there is also accepted by the daemon for these four.)
+- Both platforms are in the GUI platform list, `main.go`, the example configurations, the README and the help page.
+
+### Changed
+- Refused on both: API keys and tokens, users, teams, account settings, billing, TSIG keys and (NS1) notification lists; deleting a whole zone.
+
+### Verified
+- TLS-stub tests for both drivers: facts, interfaces, every Show form and its bad input, the API request and its refusals (a refused path never reaches the stub), changes with dry run and `before` copy, key and token handling, options, pagination.
+
+### Not verified
+- **Against a real NS1 or RcodeZero account.** Field names and paths follow the vendors' documentation and client libraries (ns1-python, libcloud, rc0go); RcodeZero's `page_size=-1`, its Bearer scheme and its statistics paths, and NS1's record paging beyond the first 2500 records, are the likeliest places to differ.
+
+## [v56] - 2026-11-07 — Add device: the platform starts with the first in the list
+
+### Changed
+- A new device (Configure ▸ Devices, and Add device on a gateway) starts with the first platform of the list (`afc`) instead of `iosxe`. The platform list is now written once in the GUI, so the table and the form cannot disagree.
+
 ## [v55] - 2026-11-07 — Privacy page: shorter label, more space
 
 ### Changed

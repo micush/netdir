@@ -306,7 +306,7 @@
   const NAV_GROUPS = [
     ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_mcp", "MCP"], ["cfg_privacy", "Privacy"], ["cfg_devices", "Devices"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
-    ["Monitor", [["devices", "Devices"], ["host", "Node"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
+    ["Monitor", [["devices", "Devices"], ["host", "Node"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["mcpusage", "MCP"], ["log", "Log"]]],
   ];
   const TABS = [["topology", TOPO]].concat(NAV_GROUPS.flatMap(([, items]) => items));
   const groupOf = (id) => (id === "topology" ? TOPO : (NAV_GROUPS.find(([, items]) => items.some(([i]) => i === id)) || [null])[0]);
@@ -1198,7 +1198,6 @@
     // ── the gateway's devices (the squares under the circle) ──
     // The inventory and the logins are the cluster's (settings.devices, settings.device_credentials); a gateway lists the devices it is
     // for by name (its devices list).  The same device may be on several gateways: copy it on one, paste it on another.
-    const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"];   // the drivers in device/; the daemon checks the name when the page saves
     const inventory = () => (cv.cfg.settings = cv.cfg.settings || {}, cv.cfg.settings.devices = cv.cfg.settings.devices || []);
     const logins = () => (cv.cfg.settings.device_credentials = cv.cfg.settings.device_credentials || []);
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
@@ -1303,7 +1302,12 @@
       form(edit ? "Edit device " + edit : "Add device", [
         ...(edit || !others.length ? [] : [{ k: "pick", l: "Device", options: [NEW_DEV, ...others], v: NEW_DEV, on: show }]),
         { k: "name", l: "Name", v: d ? d.name : "", ph: "core-sw1" },
-        { k: "platform", l: "Platform", options: PLATFORMS, v: d ? d.platform : "iosxe" },
+        // a cloud service has one API address: choosing it fills the address in (an address typed by hand is left alone)
+        { k: "platform", l: "Platform", options: PLATFORMS, v: d ? d.platform : PLATFORMS[0], initOn: true, on: (els) => {
+          const def = SERVICE_ADDR[els.platform.value] || "", cur = els.address.value.trim();
+          if (!cur || Object.values(SERVICE_ADDR).includes(cur)) els.address.value = def;
+          els.address.placeholder = def || "10.0.0.2";
+        } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
         { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : "", ph: "443" },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
@@ -2476,6 +2480,10 @@
     mark: (c) => !c[0],
   });
   // the lists that are tables
+  // the drivers in device/, alphabetical: a new device starts with the first; the daemon checks the name when the page saves
+  // the API address of the platforms that are a cloud service
+  const SERVICE_ADDR = { meraki: "api.meraki.com", entra: "graph.microsoft.com", nsone: "api.nsone.net", rcode0: "my.rcodezero.at" };
+  const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "nsone", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "rcode0", "technitium"];
   const ROW_TABLES = {
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
@@ -2500,11 +2508,11 @@
     // device of the same name (devExtra, filled in when the page is drawn).
     devices: {
       key: "devices", empty: "No devices.", wide: true,
-      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "technitium"] }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443" },
+      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: PLATFORMS }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443" },
         { name: "Login", ph: "a login's name" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
       parse: (d) => {
-        if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || "iosxe", f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }
-        return [d.name || "", d.platform || "iosxe", d.address || "", d.port ? String(d.port) : "", d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
+        if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || PLATFORMS[0], f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }
+        return [d.name || "", d.platform || PLATFORMS[0], d.address || "", d.port ? String(d.port) : "", d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
       },
       format: (c) => {
         const x = { ...(devExtra[c[0]] || {}), name: c[0], platform: c[1], address: c[2], credential: c[4] };
@@ -2517,7 +2525,7 @@
         if (Object.keys(opts).length) x.options = opts; else delete x.options;
         return [x];
       },
-      mark: (c) => !c[0] || (!c[2] && c[1] !== "meraki" && c[1] !== "entra") || !c[4],
+      mark: (c) => !c[0] || (!c[2] && !SERVICE_ADDR[c[1]]) || !c[4],
     },
     // the logins the devices use: a user name and password, or an API token (FortiOS, PAN-OS, Technitium, Observium, IP Fabric, Centreon)
     devcreds: {
@@ -4262,6 +4270,92 @@
         if (first || live.checked) await load();
       },
       poll_ms: 3000,
+    };
+  })();
+
+  // ── MCP, Monitor  (API: GET /api/mcpusage) ──────────────────────────────────────
+  // What the MCP endpoint is used for on the picked node: calls by key, by source address, by tool and by device, per hour, and the
+  // newest calls.  Counted by the daemon (mcpusage.go); nothing a caller sent or was answered is kept.
+  VIEWS.mcpusage = (() => {
+    const SVGNS = "http://www.w3.org/2000/svg";
+    const sv = (tag, attrs, ...kids) => {
+      const el = document.createElementNS(SVGNS, tag);
+      for (const [k, v] of Object.entries(attrs || {})) if (v != null && v !== false) el.setAttribute(k, v);
+      for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+      return el;
+    };
+    const kept = { win: "24h" };
+    let status, win, summary, chart, tables, recent, note, seq = 0, last = "";
+    const size = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
+    const at = (u) => (u ? new Date(u * 1000).toLocaleString() : "–");
+    const num = (n) => n.toLocaleString();
+    const COLS = [["Calls", (r) => num(r.calls), true], ["Errors", (r) => (r.errors ? num(r.errors) : "–"), true], ["Refused", (r) => (r.refused ? num(r.refused) : "–"), true],
+      ["Changes", (r) => (r.writes ? num(r.writes) : "–"), true], ["Data", (r) => size(r.bytes), true], ["Avg ms", (r) => num(r.avg_ms), true], ["Last", (r) => at(r.last), false]];
+    function sumTable(title, first, rows) {
+      return section(title, rows.length
+        ? h("div", { class: "scroll" }, h("table", { class: "tight" },
+          h("thead", {}, h("tr", {}, h("th", {}, first), COLS.map((c) => h("th", { class: c[2] ? "num" : "" }, c[0])))),
+          h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { class: "mono" }, r.name), COLS.map((c) => h("td", { class: c[2] ? "num" : "" }, c[1](r))))))))
+        : h("div", { class: "empty" }, "No calls in this time range."));
+    }
+    function bars(hours) {
+      const W = 720, H = 120, L = 6, B = 18, n = hours.length, max = Math.max(1, ...hours.map((x) => x.calls));
+      const bw = (W - L * 2) / Math.max(1, n);
+      const svg = sv("svg", { class: "uchart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Calls per hour" });
+      hours.forEach((x, i) => {
+        const hh = Math.round((x.calls / max) * (H - B - 6)), eh = Math.round((x.errors / max) * (H - B - 6));
+        const t = new Date(x.t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) + ": " + x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "");
+        svg.append(sv("g", {}, sv("title", {}, t),
+          sv("rect", { class: "ubar", x: (L + i * bw + 0.5).toFixed(1), y: H - B - hh, width: Math.max(1, bw - 1).toFixed(1), height: hh }),
+          eh ? sv("rect", { class: "uerr", x: (L + i * bw + 0.5).toFixed(1), y: H - B - eh, width: Math.max(1, bw - 1).toFixed(1), height: eh }) : null));
+      });
+      const f = new Date(hours[0].t * 1000), l = new Date(hours[n - 1].t * 1000);
+      svg.append(sv("text", { class: "qax", x: L, y: H - 4 }, f.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+        sv("text", { class: "qax", x: W - L, y: H - 4, "text-anchor": "end" }, l.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
+        sv("text", { class: "qax", x: W / 2, y: 12, "text-anchor": "middle" }, "calls per hour, most " + max));
+      return svg;
+    }
+    function draw(r) {
+      const sig = JSON.stringify(r);
+      if (sig === last) return;
+      last = sig;
+      const t = r.totals;
+      clear(summary).append(t.calls ? [num(t.calls) + " call" + (t.calls === 1 ? "" : "s"), t.errors ? ", " + num(t.errors) + " failed" : "", t.refused ? ", " + num(t.refused) + " refused (read-only caller asked for a change)" : "",
+        t.writes ? ", " + num(t.writes) + " change" + (t.writes === 1 ? "" : "s") : "", "; " + size(t.bytes) + " returned, " + num(t.avg_ms) + " ms on average."].join("") : "No calls in this time range.");
+      clear(chart).append(r.hours.length ? bars(r.hours) : "");
+      clear(tables).append(sumTable("By key", "Key", r.by_key), sumTable("By source address", "Address", r.by_source), sumTable("By tool", "Tool", r.by_tool), sumTable("By device", "Device, tag or target", r.by_target));
+      clear(recent).append(r.recent.length
+        ? h("div", { class: "scroll" }, h("table", { class: "tight" },
+          h("thead", {}, h("tr", {}, ["Time", "Key", "Address", "Tool", "Target", "Result", "Ms", "Data"].map((x) => h("th", {}, x)))),
+          h("tbody", {}, r.recent.map((c) => h("tr", {}, h("td", {}, new Date(c.time).toLocaleTimeString([], { hour12: false })), h("td", { class: "mono" }, c.caller), h("td", { class: "mono" }, c.addr),
+            h("td", { class: "mono" }, c.tool), h("td", { class: "mono" }, c.target || ""), h("td", { class: c.result === "ok" ? "" : "bad" }, c.result + (c.write && c.result === "ok" ? " (change)" : "")),
+            h("td", { class: "num" }, String(c.ms)), h("td", { class: "num" }, size(c.bytes)))))))
+        : h("div", { class: "empty" }, "No calls since the daemon started."));
+      note.textContent = r.note;
+    }
+    async function load() {
+      const my = ++seq;
+      try {
+        const r = (await api("GET", "/api/mcpusage?window=" + win.value)).data;
+        if (my !== seq) return;
+        clear(status);
+        draw(r);
+      } catch (e) { fail(status)(e); }
+    }
+    return {
+      mount(main) {
+        last = "";
+        status = h("div", { "aria-live": "polite" });
+        win = h("select", { "aria-label": "Time range", onchange: () => { kept.win = win.value; last = ""; load(); } },
+          [["1h", "Last hour"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"]].map(([v, t]) => h("option", { value: v }, t)));
+        win.value = kept.win;
+        summary = h("p", {}); chart = h("div", {}); tables = h("div", {}); recent = h("div", {}); note = h("div", { class: "hint nomargin" });
+        main.append(status, section("MCP usage", h("div", { class: "toolbar tight" }, win, h("button", { class: "btn", type: "button", onclick: load }, "Refresh")), summary, chart),
+          tables, section("Newest calls", recent), note);
+        load();
+      },
+      async poll() { await load(); },
+      poll_ms: 5000,
     };
   })();
 

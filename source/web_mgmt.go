@@ -59,6 +59,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/ospf/operate", w.authed(w.op("ospf.operate", nil)))
 	mux.HandleFunc("GET /api/syslog", w.authed(w.op("syslog.status", nil)))
 	mux.HandleFunc("POST /api/syslog/test", w.authed(w.op("syslog.test", nil)))
+	mux.HandleFunc("GET /api/mcpusage", w.authed(w.handleMCPUsage)) // what the MCP endpoint is used for: Monitor ▸ MCP (mcpusage.go)
 	mux.HandleFunc("GET /api/log", w.authed(w.op("log.view", []string{"level", "q", "since", "n"})))
 	mux.HandleFunc("GET /api/host", w.authed(w.op("host.get", []string{"from", "to"})))
 	mux.HandleFunc("GET /api/dnslookup/full", w.authed(w.op("dns.lookup.full", []string{"lookup"})))

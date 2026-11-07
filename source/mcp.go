@@ -372,6 +372,7 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		}
 		if tool.write && access != "rw" {
 			warnf("mcp: %s (read-only) was refused %s", who, tool.name)
+			w.usage.Record(mcpUseCall{Time: time.Now(), Caller: mcpCallerOf(who, from), Addr: from, Tool: tool.name, Target: mcpTarget(args), Result: "refused", Write: true})
 			return ok(mcpText("refused: this caller has read-only access (Configure ▸ MCP)", true))
 		}
 		if tool.write {
@@ -384,9 +385,13 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 			user = "mcp:" + who // mcp:KEYNAME@ADDRESS
 		}
 		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, created: time.Now()}, args: args}
+		began := time.Now()
 		v, err := tool.run(c)
 		mask := w.status.sup.mcpPrivacy(level)
+		rec := mcpUseCall{Time: began, Caller: mcpCallerOf(who, from), Addr: from, Tool: tool.name, Target: mcpTarget(args), Write: tool.write}
 		if err != nil {
+			rec.Ms, rec.Result, rec.Bytes = time.Since(began).Milliseconds(), "error", len(err.Error())
+			w.usage.Record(rec)
 			return ok(mcpText(mask.text(err.Error()), true))
 		}
 		b, _ := json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
@@ -398,6 +403,8 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 			}
 			text = text[:cut] + fmt.Sprintf("\n… (cut at %d MB: ask for less, e.g. fewer log lines or a shorter range)", limit>>20)
 		}
+		rec.Ms, rec.Result, rec.Bytes = time.Since(began).Milliseconds(), "ok", len(text)
+		w.usage.Record(rec)
 		return ok(mcpText(text, false))
 	}
 	return fail(-32601, "method not found: "+q.Method)
