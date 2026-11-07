@@ -75,6 +75,8 @@ A **gateway** is one shared address, its VIP (IPv4, IPv6 or both), served by sev
 
 Every node that is active or forwarding answers on the VIP (and the other gateway addresses) with a listener of its own that serves only the MCP endpoint, `/mcp`, on port 443 by default (`settings.mcp_port`). The GUI does not answer on those addresses: it listens on port 22161 of the node's own addresses. A node whose MCP listener is not serving withdraws its anycast addresses, so traffic goes to a node that can answer.
 
+One answer to an assistant is at most 1 MB by default and is cut, with a note, beyond that; `settings.mcp_max_result_mb` (Configure ▸ MCP ▸ Largest answer) raises it to at most 8. An assistant reads the answer into its context, and 1 MB of text is roughly 250,000 tokens, so ask for less before raising it.
+
 An MCP request for devices is answered by the node that receives it. That node opens the driver for each device the target picks, asks up to 16 devices at a time with a time limit per device, and returns one result per device.
 
 ## Install, upgrade, uninstall

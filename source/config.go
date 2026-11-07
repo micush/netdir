@@ -465,6 +465,9 @@ type Settings struct {
 	Privacy *PrivacyConfig `json:"privacy,omitempty"`
 	// MCPPort is the port of the MCP listeners on the gateways' addresses (mcplisten.go); 0 is the default, 443.
 	MCPPort int `json:"mcp_port,omitempty"`
+	// MCPMaxResultMB is the most one MCP answer may be, in megabytes (1 to 8; 0 is the default, 1).  A longer answer is cut.  It is
+	// capped at what the cluster relay carries between nodes.
+	MCPMaxResultMB int `json:"mcp_max_result_mb,omitempty"`
 	// Devices are the switches and firewalls the gateway manages, and DeviceCredentials the logins they use (devices.go,
 	// device/).
 	Devices           []device.Device     `json:"devices,omitempty"`
@@ -688,6 +691,12 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if dc.Settings.Privacy, err = normPrivacy(dc.Settings.Privacy); err != nil {
 			return err
+		}
+		if n := dc.Settings.MCPMaxResultMB; n < 0 || n > mcpMaxResultMB {
+			return fmt.Errorf("mcp: the largest answer is 1 to %d MB", mcpMaxResultMB)
+		}
+		if dc.Settings.MCPMaxResultMB == 1 {
+			dc.Settings.MCPMaxResultMB = 0 // the default is not written
 		}
 		if p := dc.Settings.MCPPort; p < 0 || p > 65535 {
 			return errors.New("mcp: the port must be 1-65535")

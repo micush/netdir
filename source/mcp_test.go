@@ -140,3 +140,29 @@ func TestMCPRefusesBrowsersAndGET(t *testing.T) {
 		t.Fatalf("batch: %d %s", res.StatusCode, b)
 	}
 }
+
+func TestMCPResultLimitSetting(t *testing.T) {
+	e, _ := mcpEnv(t, "127.0.0.1")
+	sup := e.ws.status.sup
+	if sup.mcpResultLimit() != 1<<20 {
+		t.Fatalf("default %d", sup.mcpResultLimit())
+	}
+	sup.mu.Lock()
+	sup.dc.Settings.MCPMaxResultMB = 4
+	sup.mu.Unlock()
+	if sup.mcpResultLimit() != 4<<20 {
+		t.Fatalf("4 MB: %d", sup.mcpResultLimit())
+	}
+	for _, n := range []int{-1, 9} {
+		dc := newDaemonConfig()
+		dc.Settings.MCPMaxResultMB = n
+		if err := dc.Validate(); err == nil {
+			t.Errorf("accepted %d MB", n)
+		}
+	}
+	dc := newDaemonConfig()
+	dc.Settings.MCPMaxResultMB = 1
+	if err := dc.Validate(); err != nil || dc.Settings.MCPMaxResultMB != 0 {
+		t.Errorf("1 MB is the default and is not written: %v %d", err, dc.Settings.MCPMaxResultMB)
+	}
+}

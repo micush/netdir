@@ -1,5 +1,19 @@
 # Changelog
 
+## [v54] - 2026-11-07 — MCP: the largest answer is a setting
+
+### Added
+- **Configure ▸ MCP ▸ Largest answer (MB)** (`settings.mcp_max_result_mb`, shared): the most one answer to an assistant may be, 1 to 8 MB. The default stays 1 MB and is not written to the file. 8 is what the cluster relay carries between nodes.
+
+### Changed
+- A cut answer now says how large the limit was (`cut at 4 MB`), and is cut at a character boundary, not in the middle of a UTF-8 character.
+
+### Verified
+- Unit test of the limit, the range and the default; help-page tests; JS parse checks.
+
+### Not verified
+- Not clicked through in a browser, and no answer of several MB was produced end to end. An assistant may itself refuse or choke on a very large answer.
+
 ## [v53] - 2026-11-07 — CodeQL: the request URL of the REST drivers is built, not joined
 
 ### Fixed

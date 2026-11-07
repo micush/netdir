@@ -2262,6 +2262,7 @@
   ];
   const MCP_FIELDS = [
     { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, hint: "Empty is 443." },
+    { shared: true, k: "mcp_max_result_mb", l: "Largest answer (MB)", t: "int", min: 1, max: 8, hint: "Empty is 1." },
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
     { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
@@ -3209,7 +3210,7 @@
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: set.snmp_communities, snmp_acl: set.snmp_acl, snmp_contact: set.snmp_contact, location: (cfg.snmp || {}).location });
       const prom = fieldset(PROM_FIELDS, { metrics_acl: set.metrics_acl });
-      const mcp = fieldset(MCP_FIELDS, { mcp_port: set.mcp_port, mcp_acl: set.mcp_acl, mcp_keys: set.mcp_keys });
+      const mcp = fieldset(MCP_FIELDS, { mcp_port: set.mcp_port, mcp_max_result_mb: set.mcp_max_result_mb, mcp_acl: set.mcp_acl, mcp_keys: set.mcp_keys });
       const lldp = fieldset(LLDP_FIELDS, { lldp: !!set.lldp });
       const priv = privacyForm(set.privacy);
       const privShared = () => { const p = priv.get(); return p ? { privacy: p } : {}; };
@@ -3237,7 +3238,7 @@
       const backup = backupForm(set.backup, (sch) => { set.schedule = sch; if (state.cfg && state.cfg.settings) state.cfg.settings.schedule = sch; });
       const backupShared = () => { const b = backup.get(); return b ? { backup: b } : {}; };
       // what snmpd is doing, under the form (refreshed after every save)
-      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl, mcp_acl: mcp.get().mcp_acl, mcp_keys: mcp.get().mcp_keys, ...(mcp.get().mcp_port ? { mcp_port: mcp.get().mcp_port } : {}) }; };
+      const snmpShared = () => { const v = snmp.get(), m = prom.get(); return { snmp_communities: v.snmp_communities, snmp_acl: v.snmp_acl, snmp_contact: v.snmp_contact, metrics_acl: m.metrics_acl, mcp_acl: mcp.get().mcp_acl, mcp_keys: mcp.get().mcp_keys, ...(mcp.get().mcp_port ? { mcp_port: mcp.get().mcp_port } : {}), ...(mcp.get().mcp_max_result_mb > 1 ? { mcp_max_result_mb: mcp.get().mcp_max_result_mb } : {}) }; };
       const snmpLocal = () => { const v = snmp.get(); return { location: v.location }; };
       const snmpPill = h("span");   // ACTIVE beside the heading while snmpd is running
       refreshSNMP = async () => {

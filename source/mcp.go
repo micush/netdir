@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // MCP: the Model Context Protocol (streamable HTTP, JSON answers only) at POST /mcp on the web GUI port, so an assistant
@@ -36,7 +37,8 @@ import (
 
 const (
 	mcpMaxBody     = 1 << 20
-	mcpMaxResult   = mcpMaxBody // bytes of a tool's answer (it goes into the assistant's context): the same as the most a request may send
+	mcpMaxResult   = mcpMaxBody // bytes of a tool's answer (it goes into the assistant's context) unless Settings.MCPMaxResultMB says more
+	mcpMaxResultMB = 8          // the most that setting may be: what the cluster relay carries between nodes
 	mcpLatestProto = "2025-06-18"
 )
 
@@ -113,6 +115,16 @@ var mcpACLCache struct {
 	at     time.Time
 	ro, rw []netip.Prefix
 	lvl    map[string][]netip.Prefix // the sources that have a privacy level of their own, by level
+}
+
+// mcpResultLimit is the most bytes one answer may be (Configure ▸ MCP ▸ Largest answer).
+func (s *Supervisor) mcpResultLimit() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dc != nil && s.dc.Settings.MCPMaxResultMB > 1 {
+		return min(s.dc.Settings.MCPMaxResultMB, mcpMaxResultMB) << 20
+	}
+	return mcpMaxResult
 }
 
 // mcpKeys is the keys that may use the endpoint from any address (mcpkeys.go).
@@ -379,8 +391,12 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		}
 		b, _ := json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
 		text := string(mask.json(b))       // nor what the caller's privacy level hides: public addresses and AS numbers, e-mail addresses, serial numbers ... (mcpmask.go)
-		if len(text) > mcpMaxResult {
-			text = text[:mcpMaxResult] + "\n… (cut: ask for less, e.g. fewer log lines or a shorter range)"
+		if limit := w.status.sup.mcpResultLimit(); len(text) > limit {
+			cut := limit
+			for cut > 0 && !utf8.RuneStart(text[cut]) { // not in the middle of a character
+				cut--
+			}
+			text = text[:cut] + fmt.Sprintf("\n… (cut at %d MB: ask for less, e.g. fewer log lines or a shorter range)", limit>>20)
 		}
 		return ok(mcpText(text, false))
 	}
