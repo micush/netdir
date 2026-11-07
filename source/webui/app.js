@@ -2145,7 +2145,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { proxmox: "8006" };   // the API port of a platform that is not 443
+  const PORT_DEF = { proxmox: "8006", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2280,10 +2280,10 @@
     { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags pick groups of devices for a request (tag:site=dc1). Skip check when the device has a self-signed certificate." },
   ];
   const DEVCHECK_FIELDS = [
-    { shared: true, k: "device_live_check_s", l: "Check every (seconds) while someone looks", t: "int", min: 10, max: 600, def: 30 },
-    { shared: true, k: "device_live_facts_min", l: "Ask for facts every (minutes) while someone looks", t: "int", min: 1, max: 60, def: 5 },
-    { shared: true, k: "device_check_s", l: "Check every (seconds) while nobody looks", t: "int", min: 30, max: 3600, def: 180 },
-    { shared: true, k: "device_facts_min", l: "Ask for facts every (minutes) while nobody looks", t: "int", min: 5, max: 1440, def: 360 },
+    { shared: true, k: "device_live_check_s", unit: "seconds", l: "Active checks", t: "int", min: 10, max: 600, def: 30 },
+    { shared: true, k: "device_live_facts_min", unit: "minutes", l: "Active facts", t: "int", min: 1, max: 60, def: 5 },
+    { shared: true, k: "device_check_s", unit: "seconds", l: "Idle checks", t: "int", min: 30, max: 3600, def: 180 },
+    { shared: true, k: "device_facts_min", unit: "minutes", l: "Idle facts", t: "int", min: 5, max: 1440, def: 360 },
   ];
   const DEVCRED_FIELDS = [
     { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Juniper, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric, Centreon, NS1, RcodeZero); vCenter uses a Single Sign-On user name (user@vsphere.local) and password; Aviatrix uses a user name and password. Never shown to an MCP caller." },
@@ -2752,8 +2752,9 @@
   // the valid range under a number field, with its default: "Valid: 10 to 600. Default 30."
   function rangeHint(f) {
     if (f.t !== "int" && f.t !== "float") return null;
-    const r = f.min != null && f.max != null ? "Valid: " + f.min + " to " + f.max + "." : f.min != null ? "Valid: " + f.min + " or more." : f.max != null ? "Valid: up to " + f.max + "." : "";
-    const d = f.def != null ? "Default " + f.def + "." : "";
+    const u = f.unit ? " " + f.unit : "";
+    const r = f.min != null && f.max != null ? "Valid: " + f.min + " to " + f.max + u + "." : f.min != null ? "Valid: " + f.min + " or more" + u + "." : f.max != null ? "Valid: up to " + f.max + u + "." : "";
+    const d = f.def != null ? "Default " + f.def + u + "." : "";
     return r || d ? h("span", { class: "hint range" }, [r, d].filter(Boolean).join(" ")) : null;
   }
   function fieldset(specs, obj, asCards) {

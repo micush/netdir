@@ -80,7 +80,7 @@ func newProxmox(d Device, c Credential) (Driver, error) {
 	if p.node != "" && !pveNodeRE.MatchString(p.node) {
 		return nil, fmt.Errorf("device %s: option node is a node name", d.Name)
 	}
-	api, err := newAPIClient(d, 8006)
+	api, err := newAPIClient(d, DefaultPort("proxmox"))
 	if err != nil {
 		return nil, err
 	}

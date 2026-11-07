@@ -260,6 +260,18 @@ func checkHost(h string) error {
 	return nil
 }
 
+// defaultPorts is the API port of a platform that is not 443.  The drivers dial it when the device has no port, and the health
+// check connects to it (a Proxmox node listens on 8006, not 443: connecting to 443 reported it down).
+var defaultPorts = map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380}
+
+// DefaultPort is the API port of the platform when the device names none.
+func DefaultPort(platform string) int {
+	if p, ok := defaultPorts[platform]; ok {
+		return p
+	}
+	return 443
+}
+
 // hostPort is the address a driver dials: the device's address and its port, or def.
 func hostPort(d Device, def int) string {
 	p := d.Port

@@ -172,3 +172,23 @@ func TestMonitorInactiveDoesNotCheck(t *testing.T) {
 		t.Fatal("node did not start checking once active")
 	}
 }
+
+func TestDefaultPortIsDialedByTheCheck(t *testing.T) {
+	for p, want := range map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380, "iosxe": 443, "vcenter": 443} {
+		if got := DefaultPort(p); got != want {
+			t.Errorf("%s: %d, want %d", p, got, want)
+		}
+	}
+	var dialed string
+	old := dialFn
+	defer func() { dialFn = old }()
+	dialFn = func(ctx context.Context, addr string) (net.Conn, error) {
+		dialed = addr
+		return nil, errors.New("refused")
+	}
+	m := NewMonitor()
+	m.checkOne(context.Background(), Device{Name: "pve10", Platform: "proxmox", Address: "10.0.0.10"}, Credential{}, Health{}, time.Now())
+	if dialed != "10.0.0.10:8006" {
+		t.Fatalf("the check dialed %q, want the Proxmox port", dialed)
+	}
+}

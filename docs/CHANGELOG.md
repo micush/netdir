@@ -1,5 +1,27 @@
 # Changelog
 
+## [v66] - 2026-11-07 — the device check connects to the platform's own API port
+
+### Fixed
+- The check that colours a device and opens **Device not answering** connected to port 443 for every platform, so a Proxmox node (API on 8006) was reported down with "connection refused" although it was fine. It now connects to the platform's own default port when the device names none: Proxmox 8006, Junos 3443, Technitium 53443, dnsdir 53853, ntpdir 12380, otherwise 443 (`device.DefaultPort`, also used by the Proxmox driver). The Port field in Add device and the device table fills in the same defaults.
+
+### Verified
+- A test that the check dials `host:8006` for a Proxmox device and that every default is as listed; the full test suite, `gofmt`, `go vet` and the leak test.
+
+### Not verified
+- Against a real Proxmox node. A device that is really off or unrouted (`no route to host`) still raises the alert, as it should.
+
+## [v65] - 2026-11-07 — Checks fields renamed: Active checks, Active facts, Idle checks, Idle facts
+
+### Changed
+- The four fields of Configure ▸ Devices ▸ Checks are now **Active checks** (seconds while someone looks), **Active facts** (minutes), **Idle checks** (seconds while nobody looks) and **Idle facts** (minutes). The range line under each names its unit ("Valid: 10 to 600 seconds. Default 30 seconds."). Help page updated. No Go change.
+
+### Verified
+- `node --check`, the help-coverage test, the full test suite and the leak test.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v64] - 2026-11-07 — defaults shown in the fields, valid range under them
 
 ### Changed

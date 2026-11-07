@@ -193,7 +193,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 	}
 	h.Checked = now.Unix()
 	rctx, cancel := context.WithTimeout(ctx, m.Timeout)
-	conn, err := dialFn(rctx, hostPort(d, 443))
+	conn, err := dialFn(rctx, hostPort(d, DefaultPort(d.Platform)))
 	cancel()
 	if err != nil {
 		h.Status, h.Detail = "bad", "the API port does not answer: "+shortErr(err)
