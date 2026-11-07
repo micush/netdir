@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/netip"
@@ -30,7 +31,7 @@ import (
 //
 // How much is hidden is set by a privacy level (mcpprivacy.go): "none", "standard" (what is described above, the default)
 // or "strict" (private addresses and AS numbers, MAC addresses and the serial numbers too), each with rules that
-// Configure ▸ Settings ▸ Privacy can change: how many leading digits of an address stay, whether MAC addresses are hidden,
+// Configure ▸ Privacy can change: how many leading digits of an address stay, whether MAC addresses are hidden,
 // words of the owner's own that are always hidden.  The level of a caller is set per key and per allowed source.
 
 var maskSalt = func() []byte { b := make([]byte, 32); _, _ = rand.Read(b); return b }()
@@ -49,6 +50,7 @@ var (
 	reMail  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
 	reNum   = regexp.MustCompile(`\d{1,10}`)
 	reMAC   = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}`)
+	reB64   = regexp.MustCompile(`[A-Za-z0-9+/_-]{16,}={0,2}`)
 	reToken = regexp.MustCompile(`(?:(?:PUBLIC|PRIVATE)-(?:IP|IP6|AS)|MASKED-[A-Z]+)-[0-9a-f]{6}`)
 )
 
@@ -116,6 +118,7 @@ type maskRules struct {
 	r     PrivacyRules
 	words *regexp.Regexp
 	none  bool
+	noEnc bool // do not look for encoded pieces (set on the copy used to test a decoded piece)
 }
 
 func newMaskRules(r PrivacyRules) *maskRules {
@@ -152,31 +155,45 @@ func (m *maskRules) asn(digits string) (string, bool) {
 
 func maskASNText(digits string) (string, bool) { return stdMask.asn(digits) }
 
-// ip4Keep is an address with the first keep octets left readable: 203.0.PUBLIC-IP-3fa91c.
+// ip4Keep is an address with the first keep octets left readable: 203.0.PUBLIC-IP-3fa91c; with a negative keep, the last ones:
+// PUBLIC-IP-3fa91c.114.7.
 func ip4Keep(a netip.Addr, tag string, keep int) string {
-	if keep <= 0 {
-		return tag
-	}
 	o := a.As4()
 	var b strings.Builder
-	for i := 0; i < keep && i < 3; i++ {
-		b.WriteString(strconv.Itoa(int(o[i])))
-		b.WriteByte('.')
+	switch {
+	case keep > 0:
+		for i := 0; i < keep && i < 3; i++ {
+			b.WriteString(strconv.Itoa(int(o[i])))
+			b.WriteByte('.')
+		}
+		return b.String() + tag
+	case keep < 0:
+		for i := 4 + max(keep, -3); i < 4; i++ {
+			b.WriteByte('.')
+			b.WriteString(strconv.Itoa(int(o[i])))
+		}
 	}
-	return b.String() + tag
+	return tag + b.String()
 }
 
 func ip6Keep(a netip.Addr, tag string, keep int) string {
-	if keep <= 0 {
-		return tag
-	}
 	o := a.As16()
+	grp := func(i int) string { return strconv.FormatUint(uint64(o[2*i])<<8|uint64(o[2*i+1]), 16) }
 	var b strings.Builder
-	for i := 0; i < keep && i < 3; i++ {
-		b.WriteString(strconv.FormatUint(uint64(o[2*i])<<8|uint64(o[2*i+1]), 16))
-		b.WriteByte(':')
+	switch {
+	case keep > 0:
+		for i := 0; i < keep && i < 3; i++ {
+			b.WriteString(grp(i))
+			b.WriteByte(':')
+		}
+		return b.String() + tag
+	case keep < 0:
+		for i := 8 + max(keep, -3); i < 8; i++ {
+			b.WriteByte(':')
+			b.WriteString(grp(i))
+		}
 	}
-	return b.String() + tag
+	return tag + b.String()
 }
 
 // text hides what a piece of text says, as the rules ask.
@@ -185,6 +202,9 @@ func (m *maskRules) text(s string) string {
 		return s
 	}
 	r := m.r
+	if !m.noEnc {
+		s = m.hideEncoded(s)
+	}
 	if r.Emails {
 		s = reMail.ReplaceAllStringFunc(s, func(x string) string { return maskTag("MASKED-EMAIL", strings.ToLower(x)) })
 	}
@@ -192,6 +212,12 @@ func (m *maskRules) text(s string) string {
 		s = replaceMAC(s, func(x string) string {
 			low := strings.ToLower(x)
 			tag := maskTag("MASKED-MAC", strings.NewReplacer("-", ":", ".", "").Replace(low))
+			if r.MACs == "nic" { // the last three bytes, the part that is the card's own
+				if strings.Contains(x, ".") {
+					return tag + "." + x[len(x)-7:]
+				}
+				return tag + x[8:9] + x[9:]
+			}
 			if r.MACs == "oui" {
 				if strings.Contains(x, ".") {
 					return x[:4] + "." + tag // the first two bytes of the vendor part
@@ -245,6 +271,62 @@ func (m *maskRules) text(s string) string {
 		})
 	}
 	return m.hideWords(s)
+}
+
+// hideEncoded replaces a base64 piece that decodes to readable text the rules would hide something in.  Opaque identifiers carry
+// what is hidden around them: an Infoblox _ref is "record:host/<base64 of dns.host_address$._default.net.example.10.1.2.3>:name",
+// and masking only the readable name would leave the address in the base64.
+func (m *maskRules) hideEncoded(s string) string {
+	if len(s) < 16 {
+		return s
+	}
+	return reB64.ReplaceAllStringFunc(s, func(run string) string {
+		cands := []string{run}
+		for i, n := 0, 0; i < len(run) && n < 3; i++ { // a "/" may be the end of a prefix ("host/ZG5z…") rather than part of the encoding
+			if run[i] == '/' {
+				cands = append(cands, run[i+1:])
+				n++
+			}
+		}
+		for _, c := range cands {
+			if len(c) < 16 {
+				continue
+			}
+			if d, ok := decodeText(c); ok && m.plain(d) != d {
+				return run[:len(run)-len(c)] + maskTag("MASKED-REF", c)
+			}
+		}
+		return run
+	})
+}
+
+// plain hides as text does, but looks for no encoded pieces (it is used on what a piece decodes to).
+func (m *maskRules) plain(s string) string {
+	c := *m
+	c.noEnc = true
+	return c.text(s)
+}
+
+// decodeText decodes a base64 string (standard or URL alphabet, padded or not) that is printable ASCII.
+func decodeText(c string) (string, bool) {
+	c = strings.TrimRight(c, "=")
+	for _, enc := range []*base64.Encoding{base64.RawStdEncoding, base64.RawURLEncoding} {
+		b, err := enc.DecodeString(c)
+		if err != nil || len(b) < 8 {
+			continue
+		}
+		ok := true
+		for _, x := range b {
+			if x < 0x20 || x > 0x7e {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return string(b), true
+		}
+	}
+	return "", false
 }
 
 // hideWords replaces the owner's own words, leaving the tokens already made alone (a word such as "public" must not break them).

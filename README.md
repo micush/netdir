@@ -421,7 +421,7 @@ What an assistant is told can be limited, because the assistant is usually a pub
 | `standard` (default) | public IP addresses and AS numbers, e-mail addresses, SNMP contact and location, serial numbers except the last four characters |
 | `strict` | all of that, private IP addresses and AS numbers, MAC addresses, serial numbers completely |
 
-Configure ▸ Settings ▸ Privacy sets the **default** level, for callers that have none of their own, and what each of `standard` and `strict` hides: public and private addresses, AS numbers, e-mail addresses, contacts, serial numbers (shown, last four, hidden), MAC addresses (shown, vendor part, hidden), how many leading digits of a hidden address stay readable (`203.0.PUBLIC-IP-3fa91c`), and a list of your own words (company, site and host names) that are always hidden. A key has a **Privacy** setting in Configure ▸ MCP ▸ Keys and an allowed source has one in the same table. A caller with both a key and an address gets the strictest.
+Configure ▸ Privacy sets the **default** level, for callers that have none of their own, and what each of `standard` and `strict` hides: public and private addresses, AS numbers, e-mail addresses, contacts, serial numbers (shown, last four, hidden), MAC addresses (shown, vendor part, last three bytes, hidden), how many leading or trailing digits of a hidden address stay readable (`203.0.PUBLIC-IP-3fa91c`, or `PUBLIC-IP-3fa91c.114.7`), and a list of your own words (company, site and host names) that are always hidden. A key has a **Privacy** setting in Configure ▸ MCP ▸ Keys and an allowed source has one in the same table. A caller with both a key and an address gets the strictest.
 
 In the file:
 
@@ -429,8 +429,8 @@ In the file:
 "settings": {
   "mcp_acl": ["10.0.0.20 rw strict", "10.0.0.0/24 none"],
   "mcp_keys": [{"name": "laptop", "access": "ro", "privacy": "strict", "key": "…"}],
-  "privacy": {"default": "standard", "strict": {"public_ips": true, "private_ips": true, "ip_keep": 1,
-    "public_asns": true, "private_asns": true, "serials": "hide", "macs": "oui", "emails": true,
+  "privacy": {"default": "standard", "strict": {"public_ips": true, "private_ips": true, "ip_keep": -2,
+    "public_asns": true, "private_asns": true, "serials": "hide", "macs": "nic", "emails": true,
     "contacts": true, "words": ["contoso", "lab-edge"]}}
 }
 ```

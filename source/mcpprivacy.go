@@ -14,7 +14,7 @@ import (
 //	          characters: what netdir hid before levels existed, so an upgrade changes nothing (the default)
 //	strict    all of that, and private addresses, private AS numbers, MAC addresses and serial numbers, completely
 //
-// Settings ▸ Privacy sets the level for callers that have none of their own, and what each of the two levels hides.  A key
+// Configure ▸ Privacy sets the level for callers that have none of their own, and what each of the two levels hides.  A key
 // (mcp_keys[].privacy) and an allowed source (mcp_acl, "10.1.0.0/24 strict") may have a level of their own; a caller who has
 // several (a key and an address) gets the strictest of them, and one with none gets the default.
 
@@ -25,7 +25,7 @@ type PrivacyRules struct {
 	PublicASNs  bool     `json:"public_asns"`       // public AS numbers
 	PrivateASNs bool     `json:"private_asns"`      // private-use AS numbers
 	Serials     string   `json:"serials"`           // show | tail (last four characters) | hide
-	MACs        string   `json:"macs"`              // show | oui (the vendor part stays) | hide
+	MACs        string   `json:"macs"`              // show | oui (the vendor part stays) | nic (the last three bytes stay) | hide
 	Emails      bool     `json:"emails"`            // e-mail addresses
 	Contacts    bool     `json:"contacts"`          // SNMP contact and location
 	Words       []string `json:"words,omitempty"`   // words of your own that are always hidden (host names, company, sites)
@@ -112,8 +112,8 @@ func normRules(name string, r *PrivacyRules) (*PrivacyRules, error) {
 		return nil, nil
 	}
 	c := *r
-	if c.IPKeep < 0 || c.IPKeep > 3 {
-		return nil, fmt.Errorf("privacy: %s: the digits of an address to keep are 0 to 3", name)
+	if c.IPKeep < -3 || c.IPKeep > 3 {
+		return nil, fmt.Errorf("privacy: %s: the digits of an address to keep are -3 to 3 (negative: the last ones)", name)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Serials)) {
 	case "", "show", "tail", "hide":
@@ -122,10 +122,10 @@ func normRules(name string, r *PrivacyRules) (*PrivacyRules, error) {
 		return nil, fmt.Errorf("privacy: %s: serial numbers are shown, tail (last four) or hidden: show, tail, hide", name)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.MACs)) {
-	case "", "show", "oui", "hide":
+	case "", "show", "oui", "nic", "hide":
 		c.MACs = strings.ToLower(strings.TrimSpace(c.MACs))
 	default:
-		return nil, fmt.Errorf("privacy: %s: MAC addresses are show, oui (vendor part stays) or hide", name)
+		return nil, fmt.Errorf("privacy: %s: MAC addresses are show, oui (vendor part stays), nic (the card's own part stays) or hide", name)
 	}
 	if c.Serials == "" {
 		c.Serials = "show"

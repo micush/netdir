@@ -35,7 +35,7 @@ const (
 type MCPKey struct {
 	Name    string `json:"name"`              // who or what holds it ("laptop", "claude-ops"); the caller is logged as mcp:NAME@ADDRESS
 	Access  string `json:"access"`            // "ro" or "rw"
-	Privacy string `json:"privacy,omitempty"` // "none", "standard" or "strict"; empty: the default level (Settings ▸ Privacy)
+	Privacy string `json:"privacy,omitempty"` // "none", "standard" or "strict"; empty: the default level (Configure ▸ Privacy)
 	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key (worked out from Key when there is one)
 	Key     string `json:"key,omitempty"`     // the key itself; empty for a key made before it was kept
 	Created int64  `json:"created,omitempty"` // unix time the key was added

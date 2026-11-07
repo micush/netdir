@@ -1,5 +1,39 @@
 # Changelog
 
+## [v51] - 2026-11-07 — Privacy is its own page
+
+### Changed
+- Privacy is now its own item, **Configure ▸ Privacy**, between MCP and Devices (v50 had put it on the MCP page). Its help is its own help page again. Saved settings are unchanged.
+
+### Verified
+- Go suites; JS parse checks; opened in a browser.
+
+## [v50] - 2026-11-07 — Privacy moved to the MCP page; last digits; NIC part of a MAC
+
+### Changed
+- The Privacy settings moved from Configure ▸ Settings ▸ Privacy to **Configure ▸ MCP**, under the access list and keys. Its help is on the MCP help page. Saved settings are unchanged.
+
+### Added
+- **Digits of a hidden address left readable** can now keep the **last** 1, 2 or 3 (`PUBLIC-IP-3fa91c.114.7`) as well as the first (`ip_keep` -3 to 3; negative is the last ones).
+- **MAC addresses** can show the **network interface controller** part (the last three bytes) with `macs: "nic"`, next to shown, vendor part and hidden.
+
+### Verified
+- Unit tests of both; Go suites; JS parse checks.
+
+## [v49] - 2026-11-07 — Privacy: values hidden inside base64 identifiers
+
+### Fixed
+- An Infoblox WAPI `_ref` (`record:host/<base64>:name`) carries the object's key in its base64 part (`dns.host_address$._default.<zone>.<host>.<address>`). Only the readable name was masked, so the address could be decoded from the rest. The masking now decodes a base64 piece of 16 or more characters that is printable text; when the rules would hide something in it (an address, an AS number, an e-mail, one of your own words), that piece becomes `MASKED-REF-xxxxxx`. A reference with nothing to hide is left as it was. Applies to every answer at every level except `none`, so other drivers' opaque identifiers (cursors, object IDs, URLs) are covered the same way.
+
+### Changed
+- A masked `_ref` can no longer be sent back to read or change that object (like any value with a stand-in in it). Use the name or address instead.
+
+### Verified
+- Unit tests: strict level, a word of your own inside the encoding, standard level leaving a reference alone, and ordinary long words and identifiers unchanged.
+
+### Not verified
+- Not tried against a real Infoblox; no other driver's identifiers were checked for what they encode.
+
 ## [v48] - 2026-11-07 — Topology: devices wrap at six per row
 
 ### Changed

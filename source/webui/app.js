@@ -304,7 +304,7 @@
   // Topology comes first; its items are the gateways themselves (filled in from the daemon).
   const TOPO = "Topology";
   const NAV_GROUPS = [
-    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_mcp", "MCP"], ["cfg_devices", "Devices"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
+    ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_mcp", "MCP"], ["cfg_privacy", "Privacy"], ["cfg_devices", "Devices"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
     ["Monitor", [["devices", "Devices"], ["host", "Node"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
   ];
@@ -542,7 +542,7 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : state.settingsTab === "privacy" ? "config_privacy" : "config_logs";
+      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
       case "cfg_groups": return "config_groups";
       case "cfg_devices": return "config_devices";
       case "cfg_web": return "config_web";
@@ -552,6 +552,7 @@
       case "cfg_alerts": return "config_alerts";
       case "cfg_backup": return "config_backup";
       case "cfg_mcp": return "config_mcp";
+      case "cfg_privacy": return "config_privacy";
       case "cfg_monitoring": return state.monTab === 1 ? "config_metrics" : "config_snmp";
       case "users": return state.usersTab === 1 ? "users_ldap" : state.usersTab === 2 ? "users_sso" + (state.ssoTab >= 0 ? state.ssoTab : 0) : "users_local";
       default: return state.tab;
@@ -2583,7 +2584,7 @@
     d.showModal();
     return d;
   }
-  // Configure ▸ Settings ▸ Privacy: what an MCP caller is not told (mcpprivacy.go).  The default level, and what the standard and the
+  // Configure ▸ Privacy: what an MCP caller is not told (mcpprivacy.go).  The default level, and what the standard and the
   // strict level each hide.  Only what differs from the built-in rules is saved, so an untouched page leaves nothing in the file.
   const PRIV_STD = { public_ips: true, private_ips: false, ip_keep: 0, public_asns: true, private_asns: false, serials: "tail", macs: "show", emails: true, contacts: true, words: [] };
   const PRIV_STRICT = { public_ips: true, private_ips: true, ip_keep: 0, public_asns: true, private_asns: true, serials: "hide", macs: "hide", emails: true, contacts: true, words: [] };
@@ -2610,9 +2611,9 @@
           box("public_asns", "Public AS numbers"), box("private_asns", "Private AS numbers"),
           box("emails", "E-mail addresses"), box("contacts", "SNMP contact and location")),
         h("div", { class: "grid" },
-          sel("ip_keep", "Digits of a hidden address left readable", [[0, "none"], [1, "first 1 (203.)"], [2, "first 2 (203.0.)"], [3, "first 3 (203.0.114.)"]]),
+          sel("ip_keep", "Digits of a hidden address left readable", [[0, "none"], [1, "first 1 (203.)"], [2, "first 2 (203.0.)"], [3, "first 3 (203.0.114.)"], [-1, "last 1 (.7)"], [-2, "last 2 (.114.7)"], [-3, "last 3 (.0.114.7)"]]),
           sel("serials", "Serial numbers", [["show", "shown"], ["tail", "last four characters (****1234)"], ["hide", "hidden"]]),
-          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["hide", "hidden"]])),
+          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["nic", "network interface controller part shown (…:3c:4d:5e)"], ["hide", "hidden"]])),
         h("label", { class: "f wide" }, h("span", {}, "Words always hidden"), words));
       return { el, get: () => ({ ...r, words: r.words.slice() }) };
     };
@@ -3371,7 +3372,6 @@
       const settingsTabs = () => {
         const TABS = [
           ["general", "General", h("div", {}, section("Neighbor discovery", lldp.el, h("p", { class: "f" }, lldpState)))],
-          ["privacy", "Privacy", priv.el],
           ["logs", "Logs", h("div", {}, section("Log level", logs.el),
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
@@ -3408,6 +3408,7 @@
           sso.el)],
         ["ldap", "LDAP", section("LDAP sign-in", ldap.el)],
         ["mcp", "MCP", section("MCP", mcp.el, h("p", { class: "muted small mono" }, mcpURL()))],
+        ["privacy", "Privacy", priv.el],
         ["monitoring", "Monitoring", monitoringTabs()],
         ["alerts", "Alerts", section("Alerts", alerts.el)],
         ["backup", "Backup", backup.el],
@@ -3474,7 +3475,7 @@
       },
     };
   };
-  for (const id of ["general", "groups", "mcp", "devices", "web", "sso", "ldap", "monitoring", "alerts", "backup"]) VIEWS["cfg_" + id] = makeConfigView(id);
+  for (const id of ["general", "groups", "mcp", "privacy", "devices", "web", "sso", "ldap", "monitoring", "alerts", "backup"]) VIEWS["cfg_" + id] = makeConfigView(id);
 
   // ── shared helpers for the management pages ───────────────────────────────
   // Nothing is said when every node answered (the Node menu says "Cluster"); when one could not, which and why, since the
