@@ -35,6 +35,7 @@ const (
 type MCPKey struct {
 	Name    string `json:"name"`              // who or what holds it ("laptop", "claude-ops"); the caller is logged as mcp:NAME@ADDRESS
 	Access  string `json:"access"`            // "ro" or "rw"
+	Privacy string `json:"privacy,omitempty"` // "none", "standard" or "strict"; empty: the default level (Settings ▸ Privacy)
 	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key (worked out from Key when there is one)
 	Key     string `json:"key,omitempty"`     // the key itself; empty for a key made before it was kept
 	Created int64  `json:"created,omitempty"` // unix time the key was added
@@ -77,6 +78,10 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 		default:
 			return nil, fmt.Errorf("mcp: key %q: the access is ro or rw", k.Name)
 		}
+		var okLevel bool
+		if k.Privacy, okLevel = normLevel(k.Privacy); !okLevel {
+			return nil, fmt.Errorf("mcp: key %q: the privacy level is none, standard or strict", k.Name)
+		}
 		if k.Key != "" {
 			if strings.TrimSpace(k.Key) != k.Key || len(k.Key) < mcpKeyMinLen {
 				return nil, fmt.Errorf("mcp: key %q: a key is at least %d characters, without spaces (Add key makes one)", k.Name, mcpKeyMinLen)
@@ -110,6 +115,16 @@ func mcpKeyAccess(keys []MCPKey, presented string) (name, access string) {
 		}
 	}
 	return name, access
+}
+
+// mcpKeyPrivacy is the privacy level of the key with this name ("" when it has none of its own).
+func mcpKeyPrivacy(keys []MCPKey, name string) string {
+	for _, k := range keys {
+		if k.Name == name {
+			return k.Privacy
+		}
+	}
+	return ""
 }
 
 // mcpBearer is the key in "Authorization: Bearer KEY"; ok is false when the header is there but not of that form.

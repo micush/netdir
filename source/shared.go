@@ -240,6 +240,7 @@ func cloneSettings(d Settings) Settings {
 	d.SNMPACL = nonEmpty(d.SNMPACL)
 	d.MetricsACL = nonEmpty(d.MetricsACL)
 	d.MCPACL = nonEmpty(d.MCPACL)
+	d.Privacy = d.Privacy.clone()
 	d.Alerts = d.Alerts.clone()
 	d.Backup = d.Backup.clone()
 	d.MCPKeys = append([]MCPKey(nil), d.MCPKeys...)

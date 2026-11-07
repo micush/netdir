@@ -460,6 +460,9 @@ type Settings struct {
 	// MCPKeys may use the MCP endpoint from any address, with the key in "Authorization: Bearer KEY" (mcpkeys.go); only a
 	// hash of each key is kept.
 	MCPKeys []MCPKey `json:"mcp_keys,omitempty"`
+	// Privacy is what an MCP caller is not told: the level that applies to callers without one of their own and what each
+	// level hides (Configure ▸ Settings ▸ Privacy, mcpprivacy.go).  Unset: the standard level, as before levels existed.
+	Privacy *PrivacyConfig `json:"privacy,omitempty"`
 	// MCPPort is the port of the MCP listeners on the gateways' addresses (mcplisten.go); 0 is the default, 443.
 	MCPPort int `json:"mcp_port,omitempty"`
 	// Devices are the switches and firewalls the gateway manages, and DeviceCredentials the logins they use (devices.go,
@@ -681,6 +684,9 @@ func (dc *DaemonConfig) Validate() error {
 			return err
 		}
 		if dc.Settings.MCPKeys, err = normMCPKeys(dc.Settings.MCPKeys); err != nil {
+			return err
+		}
+		if dc.Settings.Privacy, err = normPrivacy(dc.Settings.Privacy); err != nil {
 			return err
 		}
 		if p := dc.Settings.MCPPort; p < 0 || p > 65535 {

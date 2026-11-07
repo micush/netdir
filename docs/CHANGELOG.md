@@ -1,5 +1,28 @@
 # Changelog
 
+## [v47] - 2026-11-06 — Privacy tab: explanations moved to the help pane
+
+### Changed
+- Configure ▸ Settings ▸ Privacy and the Privacy columns no longer carry long hint texts; the explanations are in the help pane (the "?" button), which already had them.
+
+## [v46] - 2026-11-07 — Privacy levels for MCP answers
+
+### Added
+- **Privacy levels** (`none`, `standard`, `strict`) for what an MCP caller is told. `standard` is what netdir always hid (public addresses and AS numbers, e-mail addresses, SNMP contact and location, serial numbers by their last four characters), so nothing changes on upgrade. `strict` also hides private addresses and AS numbers, MAC addresses and serial numbers completely.
+- **Configure ▸ Settings ▸ Privacy**: the default level, and what each of `standard` and `strict` hides: public and private addresses, public and private AS numbers, e-mail addresses, contacts, serial numbers (shown, last four, hidden), MAC addresses (shown, vendor part, hidden), how many leading digits of a hidden address stay readable (`203.0.PUBLIC-IP-3fa91c`), and a list of the owner's own words that are always hidden. Saved as `settings.privacy`; only what differs from the built-in rules is written.
+- A **Privacy** column on **Allowed sources** (`"10.1.0.0/24 strict"`, `"10.1.1.50 rw none"`) and on **Keys** (`"privacy"`). A caller with a key and an address gets the strictest of the levels set; with none set, the default applies.
+- New stand-ins `PRIVATE-IP`, `PRIVATE-IP6`, `PRIVATE-AS`, `MASKED-MAC`, `MASKED-SERIAL`, `MASKED-WORD`; one sent back in a change is restored from the current configuration like the others.
+- Help for the new tab; a Privacy levels section in the README.
+
+### Fixed
+- README: a doubled Cisco Meraki heading.
+
+### Verified
+- Unit tests of every rule (strict text, kept digits, MAC modes and IPv6 look-alikes, words not breaking stand-ins, serial modes, normalisation, access-list and key parsing, strictest-wins) and a test through the real MCP path (level on the source, default level, `none` on a source under a strict default).
+
+### Not verified
+- The Privacy tab and the new columns were checked for syntax and by the test that every help topic exists, not clicked through in a browser by a person; not tried against real devices.
+
 ## [v45] - 2026-11-07 — Screenshots in the README
 
 ### Added

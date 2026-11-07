@@ -44,7 +44,7 @@ func expectedHelpTopics(sidebar []string) []string {
 		case "anycaststatus":
 			want = append(want, "anycaststatus_bgp", "anycaststatus_ospf")
 		case "cfg_general":
-			want = append(want, "config_logs", "config_upgrades", "config_cluster", "config_general")
+			want = append(want, "config_logs", "config_upgrades", "config_cluster", "config_general", "config_privacy")
 		case "cfg_groups":
 			want = append(want, "config_groups")
 		case "cfg_alerts":

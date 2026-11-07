@@ -542,7 +542,7 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
+      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : state.settingsTab === "privacy" ? "config_privacy" : "config_logs";
       case "cfg_groups": return "config_groups";
       case "cfg_devices": return "config_devices";
       case "cfg_web": return "config_web";
@@ -2475,12 +2475,16 @@
   const ROW_TABLES = {
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
-    // MCP access: "10.1.0.0/24" (read-only) or "10.1.1.50 rw"
+    // MCP access: "10.1.0.0/24" (read-only), "10.1.1.50 rw", "10.1.0.0/24 strict" (an address or network, ro or rw, a privacy level)
     mcpacl: {
       key: "mcpacl", wide: true, empty: "No sources allowed without a key.",
-      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }],
-      parse: (line) => { const f = String(line).trim().split(/\s+/); return [f[0] || "", (f[1] || "").toLowerCase() === "rw" ? "rw" : "ro"]; },
-      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "")),
+      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }],
+      parse: (line) => {
+        const f = String(line).trim().split(/\s+/).map((x) => x.toLowerCase());
+        const lv = f.slice(1).find((x) => ["none", "standard", "strict"].includes(x));
+        return [String(line).trim().split(/\s+/)[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default"];
+      },
+      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "")),
       mark: (c) => !c[0],
     },
     neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
@@ -2577,6 +2581,53 @@
     d.showModal();
     return d;
   }
+  // Configure ▸ Settings ▸ Privacy: what an MCP caller is not told (mcpprivacy.go).  The default level, and what the standard and the
+  // strict level each hide.  Only what differs from the built-in rules is saved, so an untouched page leaves nothing in the file.
+  const PRIV_STD = { public_ips: true, private_ips: false, ip_keep: 0, public_asns: true, private_asns: false, serials: "tail", macs: "show", emails: true, contacts: true, words: [] };
+  const PRIV_STRICT = { public_ips: true, private_ips: true, ip_keep: 0, public_asns: true, private_asns: true, serials: "hide", macs: "hide", emails: true, contacts: true, words: [] };
+  function privacyForm(cur) {
+    cur = cur || {};
+    const section = (title, ...kids) => h("div", { class: "card" }, h("header", {}, h("h2", {}, tc(title))), h("div", { class: "body" }, ...kids));
+    const defSel = h("select", { "aria-label": "Default privacy level" }, [["standard", "standard"], ["none", "none — nothing is hidden"], ["strict", "strict"]].map(([v, l]) => h("option", { value: v }, l)));
+    defSel.value = cur.default || "standard";
+    const card = (title, base, saved) => {
+      const r = { ...base, ...(saved || {}), words: (saved && saved.words) || [] };
+      const box = (k, label) => { const i = h("input", { type: "checkbox", checked: !!r[k] }); i.addEventListener("change", () => { r[k] = i.checked; }); return h("label", { class: "f check" }, i, label); };
+      const sel = (k, label, opts, hint) => {
+        const i = h("select", { "aria-label": label }, opts.map(([v, l]) => h("option", { value: String(v) }, l)));
+        i.value = String(r[k]);
+        i.addEventListener("change", () => { r[k] = typeof base[k] === "number" ? Number(i.value) : i.value; });
+        return h("label", { class: "f" }, h("span", {}, label), i, hint ? h("span", { class: "hint" }, hint) : null);
+      };
+      const words = h("textarea", { rows: 4, spellcheck: "false", autocomplete: "off", "aria-label": "Words always hidden", placeholder: "one per line, e.g. your company or site names" });
+      words.value = r.words.join("\n");
+      words.addEventListener("change", () => { r.words = words.value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean); });
+      const el = section(title,
+        h("div", { class: "grid" },
+          box("public_ips", "Public IP addresses"), box("private_ips", "Private IP addresses (10.x, 172.16-31.x, 192.168.x, fc00::/7 …)"),
+          box("public_asns", "Public AS numbers"), box("private_asns", "Private AS numbers"),
+          box("emails", "E-mail addresses"), box("contacts", "SNMP contact and location")),
+        h("div", { class: "grid" },
+          sel("ip_keep", "Digits of a hidden address left readable", [[0, "none"], [1, "first 1 (203.)"], [2, "first 2 (203.0.)"], [3, "first 3 (203.0.114.)"]]),
+          sel("serials", "Serial numbers", [["show", "shown"], ["tail", "last four characters (****1234)"], ["hide", "hidden"]]),
+          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["hide", "hidden"]])),
+        h("label", { class: "f wide" }, h("span", {}, "Words always hidden"), words));
+      return { el, get: () => ({ ...r, words: r.words.slice() }) };
+    };
+    const std = card("Standard level hides", PRIV_STD, cur.standard), strict = card("Strict level hides", PRIV_STRICT, cur.strict);
+    const same = (a, b) => JSON.stringify(Object.keys(b).sort().map((k) => [k, a[k]])) === JSON.stringify(Object.keys(b).sort().map((k) => [k, b[k]]));
+    const intro = section("Default level", h("label", { class: "f" }, h("span", {}, "Level for a source or key that has none of its own"), defSel));
+    return {
+      el: h("div", {}, intro, std.el, strict.el),
+      get() {
+        const o = {};
+        if (defSel.value !== "standard") o.default = defSel.value;
+        if (!same(std.get(), PRIV_STD)) o.standard = std.get();
+        if (!same(strict.get(), PRIV_STRICT)) o.strict = strict.get();
+        return Object.keys(o).length ? o : undefined;
+      },
+    };
+  }
   // The MCP keys (Configure ▸ MCP): a name, ro or rw, and the key (kept, so Show can display it again; an old key has
   // only its hash).  Add key makes a random key here, shows it, and sends it with the next save.  A change is a "change" event,
   // so the page saves it like any other field.
@@ -2607,6 +2658,9 @@
         const acc = h("select", { "aria-label": "Access of " + k.name }, ["ro", "rw"].map((a) => h("option", { value: a }, a)));
         acc.value = k.access || "ro";
         acc.addEventListener("change", () => { k.access = acc.value; });
+        const priv = h("select", { "aria-label": "Privacy of " + k.name }, ["default", "none", "standard", "strict"].map((a) => h("option", { value: a }, a)));
+        priv.value = k.privacy || "default";
+        priv.addEventListener("change", () => { if (priv.value === "default") delete k.privacy; else k.privacy = priv.value; });
         // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
         const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
           value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
@@ -2614,6 +2668,7 @@
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
           h("td", {}, name),
           h("td", {}, acc),
+          h("td", {}, priv),
           h("td", { class: "ctext" }, day(k.created)),
           h("td", {}, keyIn));
         tr.addEventListener("contextmenu", rowMenu([
@@ -2625,7 +2680,7 @@
         return tr;
       }));
       const tbl = h("table", { class: "policy zones rows mcpkeytab" },
-        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
       const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
       empty.hidden = keys.length > 0;
       const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2654,7 +2709,7 @@
       name.focus();
     }
     draw();
-    return { el, get: () => keys.map((k) => (k.key ? { name: k.name, access: k.access || "ro", key: k.key, created: k.created } : { name: k.name, access: k.access || "ro", hash: k.hash, created: k.created })) };
+    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
   function fieldset(specs, obj, asCards) {
@@ -3153,6 +3208,8 @@
       const prom = fieldset(PROM_FIELDS, { metrics_acl: set.metrics_acl });
       const mcp = fieldset(MCP_FIELDS, { mcp_port: set.mcp_port, mcp_acl: set.mcp_acl, mcp_keys: set.mcp_keys });
       const lldp = fieldset(LLDP_FIELDS, { lldp: !!set.lldp });
+      const priv = privacyForm(set.privacy);
+      const privShared = () => { const p = priv.get(); return p ? { privacy: p } : {}; };
       const lldpShared = () => ({ lldp: lldp.get().lldp });
       // what lldpd is doing on this node, beside the box (refreshed after every save); a few words, never a banner
       const lldpState = h("span", { class: "muted small" });
@@ -3216,7 +3273,7 @@
         ...logs.get(),
         // keep what this form has no fields for (pauses, removed nodes, the order of the nodes, anycast addresses)
         groups: groups.map((g) => ({ ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...keptDevices(g.orig), ...g.fs.get() })),
-        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...snmpShared(), ...lldpShared(), ...alertsShared(), ...backupShared() },
+        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...snmpShared(), ...lldpShared(), ...privShared(), ...alertsShared(), ...backupShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),
@@ -3312,6 +3369,7 @@
       const settingsTabs = () => {
         const TABS = [
           ["general", "General", h("div", {}, section("Neighbor discovery", lldp.el, h("p", { class: "f" }, lldpState)))],
+          ["privacy", "Privacy", priv.el],
           ["logs", "Logs", h("div", {}, section("Log level", logs.el),
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],

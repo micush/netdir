@@ -42,30 +42,36 @@ const (
 
 var mcpProtocols = map[string]bool{"2024-11-05": true, "2025-03-26": true, "2025-06-18": true, "2025-11-25": true}
 
-// normMCPACL checks the access list and writes each entry the same way: "10.1.0.0/24", "host.example.com", "10.1.1.50 rw".
+// normMCPACL checks the access list and writes each entry the same way: "10.1.0.0/24", "host.example.com", "10.1.1.50 rw",
+// "10.1.0.0/24 strict", "10.1.1.50 rw none": an address or network, then ro or rw, then a privacy level (mcpprivacy.go).
 func normMCPACL(list []string) ([]string, error) {
 	if len(list) > 64 {
 		return nil, errors.New("mcp: at most 64 entries in the access list")
 	}
-	mode := map[string]string{}
+	mode, level := map[string]string{}, map[string]string{}
 	var order []string
 	for _, s := range list {
 		f := strings.Fields(s)
 		if len(f) == 0 {
 			continue
 		}
-		if len(f) > 2 {
-			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw", s)
+		if len(f) > 3 {
+			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level", s)
 		}
-		rw := false
-		if len(f) == 2 {
-			switch strings.ToLower(f[1]) {
+		rw, lvl := false, ""
+		for _, w := range f[1:] {
+			switch strings.ToLower(w) {
 			case "rw", "read-write", "readwrite":
 				rw = true
+				continue
 			case "ro", "read-only", "readonly":
-			default:
-				return nil, fmt.Errorf("mcp: access list: %q: the access is ro or rw", s)
+				continue
 			}
+			l, ok := normLevel(w)
+			if !ok || l == "" || lvl != "" {
+				return nil, fmt.Errorf("mcp: access list: %q: after the address, ro or rw and a privacy level (none, standard, strict)", s)
+			}
+			lvl = l
 		}
 		n, err := normACL("mcp", f[:1])
 		if err != nil {
@@ -83,22 +89,30 @@ func normMCPACL(list []string) ([]string, error) {
 		if rw || mode[t] == "" {
 			mode[t] = map[bool]string{true: "rw", false: "ro"}[rw || mode[t] == "rw"]
 		}
+		level[t] = strictestLevel(level[t], lvl)
 	}
 	out := make([]string, 0, len(order))
 	for _, t := range order {
 		if mode[t] == "rw" {
 			t += " rw"
 		}
+		if level[t0(t)] != "" {
+			t += " " + level[t0(t)]
+		}
 		out = append(out, t)
 	}
 	return out, nil
 }
+
+// t0 is the address of an entry written "ADDRESS [rw]".
+func t0(e string) string { f := strings.Fields(e); return f[0] }
 
 var mcpACLCache struct {
 	sync.Mutex
 	key    string
 	at     time.Time
 	ro, rw []netip.Prefix
+	lvl    map[string][]netip.Prefix // the sources that have a privacy level of their own, by level
 }
 
 // mcpKeys is the keys that may use the endpoint from any address (mcpkeys.go).
@@ -111,9 +125,16 @@ func (s *Supervisor) mcpKeys() []MCPKey {
 	return s.dc.Settings.MCPKeys
 }
 
-// mcpAccess says what a caller from this address may do: "rw", "ro" or "" (nothing).  Host names are looked up again
-// after a minute, not for every request.
+// mcpAccess says what a caller from this address may do: "rw", "ro" or "" (nothing).
 func (s *Supervisor) mcpAccess(from netip.Addr) string {
+	a, _ := s.mcpAccessLevel(from)
+	return a
+}
+
+// mcpAccessLevel says what a caller from this address may do ("rw", "ro" or "") and the privacy level the list gives it
+// (the strictest of the entries that match it; "" when none of them has one).  Host names are looked up again after a
+// minute, not for every request.
+func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 	s.mu.Lock()
 	var acl []string
 	if s.dc != nil {
@@ -121,33 +142,46 @@ func (s *Supervisor) mcpAccess(from netip.Addr) string {
 	}
 	s.mu.Unlock()
 	if len(acl) == 0 {
-		return ""
+		return "", ""
 	}
 	c := &mcpACLCache
 	c.Lock()
 	key := strings.Join(acl, ",")
 	if c.key != key || time.Since(c.at) >= time.Minute {
 		var ro, rw []string
+		lv := map[string][]string{}
 		for _, e := range acl {
 			f := strings.Fields(e)
-			if len(f) == 2 && f[1] == "rw" {
+			if len(f) > 1 && f[1] == "rw" {
 				rw = append(rw, f[0])
 			} else {
 				ro = append(ro, f[0])
 			}
+			if l := f[len(f)-1]; len(f) > 1 && l != "rw" {
+				lv[l] = append(lv[l], f[0])
+			}
+		}
+		c.lvl = map[string][]netip.Prefix{}
+		for l, nets := range lv {
+			c.lvl[l] = expandACL(nets)
 		}
 		c.key, c.at, c.ro, c.rw = key, time.Now(), expandACL(ro), expandACL(rw)
 	}
-	ro, rw := c.ro, c.rw
+	ro, rw, lvl := c.ro, c.rw, c.lvl
 	c.Unlock()
 	from = from.Unmap()
+	for l, nets := range lvl {
+		if inNets(nets, from) {
+			level = strictestLevel(level, l)
+		}
+	}
 	switch {
 	case inNets(rw, from):
-		return "rw"
+		return "rw", level
 	case inNets(ro, from):
-		return "ro"
+		return "ro", level
 	}
-	return ""
+	return "", ""
 }
 
 // ── JSON-RPC ─────────────────────────────────────────────────────────────────
@@ -178,7 +212,8 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := ap.Addr().Unmap().String()
-	access, who := w.status.sup.mcpAccess(ap.Addr()), from
+	access, alevel := w.status.sup.mcpAccessLevel(ap.Addr())
+	who, level := from, alevel
 	// a key (Authorization: Bearer KEY) opens it from any address; a wrong one is refused, whatever the address list says
 	key, ok := mcpBearer(r)
 	if !ok {
@@ -195,6 +230,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		access, who = maxAccess(access, kacc), name+"@"+from
+		level = strictestLevel(level, mcpKeyPrivacy(w.status.sup.mcpKeys(), name))
 	}
 	if access == "" {
 		http.Error(rw, "forbidden: this address is not in the MCP access list, and no key was sent (Authorization: Bearer KEY)", http.StatusForbidden)
@@ -226,7 +262,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		}
 		var out []mcpResp
 		for _, q := range reqs {
-			if res := w.mcpOne(r.Context(), q, access, from, who); res != nil {
+			if res := w.mcpOne(r.Context(), q, access, from, who, level); res != nil {
 				out = append(out, *res)
 			}
 		}
@@ -242,7 +278,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusOK, mcpResp{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &mcpErr{-32700, "parse error"}})
 		return
 	}
-	res := w.mcpOne(r.Context(), q, access, from, who)
+	res := w.mcpOne(r.Context(), q, access, from, who, level)
 	if res == nil { // a notification
 		rw.WriteHeader(http.StatusAccepted)
 		return
@@ -252,7 +288,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 
 // mcpOne answers one message; nil for a notification (no id).
 // from is the caller's address, who the name it is logged under: the address, or KEYNAME@ADDRESS for a caller with a key.
-func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who string) *mcpResp {
+func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, level string) *mcpResp {
 	if len(q.ID) == 0 || string(q.ID) == "null" {
 		return nil
 	}
@@ -337,11 +373,12 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who stri
 		}
 		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, created: time.Now()}, args: args}
 		v, err := tool.run(c)
+		mask := w.status.sup.mcpPrivacy(level)
 		if err != nil {
-			return ok(mcpText(maskText(err.Error()), true))
+			return ok(mcpText(mask.text(err.Error()), true))
 		}
 		b, _ := json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
-		text := string(mcpMaskJSON(b))     // nor a public address, a public AS number, an e-mail address or a serial number (mcpmask.go)
+		text := string(mask.json(b))       // nor what the caller's privacy level hides: public addresses and AS numbers, e-mail addresses, serial numbers ... (mcpmask.go)
 		if len(text) > mcpMaxResult {
 			text = text[:mcpMaxResult] + "\n… (cut: ask for less, e.g. fewer log lines or a shorter range)"
 		}

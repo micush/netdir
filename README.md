@@ -48,6 +48,7 @@ A show command on one device:
 - [Connecting an assistant](#connecting-an-assistant)
 - [MCP tools](#mcp-tools)
 - [Security](#security)
+- [Privacy levels](#privacy-levels)
 - [Trying a device first: devprobe](#trying-a-device-first-devprobe)
 - [Clustering](#clustering)
 - [Anycast addresses, BGP and OSPF](#anycast-addresses-bgp-and-ospf)
@@ -258,7 +259,7 @@ The on-site controller for Aruba CX VXLAN/EVPN fabrics, over its REST API (`http
 
 NetEdit has no documented API, so it has no driver; the Aruba CX switches it manages can be added directly as `aoscx`.
 
-### Cisco Meraki (`meraki`)### Cisco Meraki (`meraki`)
+### Cisco Meraki (`meraki`)
 
 The Dashboard API (`https://api.meraki.com/api/v1`), with an **API key** as the credential's token (a dashboard administrator with read-only access makes a key that only reads). Address `api.meraki.com` (left empty it is that). A Meraki network is a cloud, so a device here is one of two things:
 
@@ -346,7 +347,7 @@ A platform is one file in `source/device/`. It implements `device.Driver` (Facts
 ## Connecting an assistant
 
 1. **Allow the caller.**
-   - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change things (rw is for single addresses only).
+   - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change things (rw is for single addresses only). A privacy level may follow: `"10.0.0.0/24 strict"` (see [Privacy levels](#privacy-levels)).
    - Or with a key that works from any address: Configure ▸ MCP ▸ Keys ▸ right-click ▸ **Add key** makes one and shows it once. In the file, `{"name": "laptop", "access": "rw", "key": "<at least 32 random characters>"}` in `settings.mcp_keys` does the same. Only a SHA-256 hash of the key is kept.
 2. **Give the gateway a certificate the client trusts.** The GUI starts with a self-signed one; install yours with `netdir --tls-install --cert-file F --key-file F`. The primary's certificate is copied to every node.
 3. **Point the client at the VIP.** For Claude Code:
@@ -409,6 +410,32 @@ The same queries are on the API: `GET /api/devices` and `GET /api/devices/query?
 - **Everything is logged.** Each device query is logged with the caller's name (`KEYNAME@ADDRESS` or the address) and the target. Each configuration change goes into the history under the caller's name.
 - **Treat answers as data.** Whatever a device answers is data for the assistant, never instructions. The MCP server says so in its instructions to the client.
 - **Where credentials live.** They are kept in the configuration file (`/var/lib/netdir/netdir.conf`, mode 0600, root) and replicated to the cluster's nodes over the pinned, signed cluster channel.
+
+## Privacy levels
+
+What an assistant is told can be limited, because the assistant is usually a public AI service. Every answer is rewritten on its way out: a hidden value becomes a short stand-in (`PUBLIC-IP-3fa91c`) that is the same for the same value, so the assistant can still see that two answers mean the same thing. The stand-in changes when the daemon restarts and cannot be turned back into the value. Three levels:
+
+| Level | Hides |
+|---|---|
+| `none` | nothing (passwords, keys and tokens are always hidden, at every level) |
+| `standard` (default) | public IP addresses and AS numbers, e-mail addresses, SNMP contact and location, serial numbers except the last four characters |
+| `strict` | all of that, private IP addresses and AS numbers, MAC addresses, serial numbers completely |
+
+Configure ▸ Settings ▸ Privacy sets the **default** level, for callers that have none of their own, and what each of `standard` and `strict` hides: public and private addresses, AS numbers, e-mail addresses, contacts, serial numbers (shown, last four, hidden), MAC addresses (shown, vendor part, hidden), how many leading digits of a hidden address stay readable (`203.0.PUBLIC-IP-3fa91c`), and a list of your own words (company, site and host names) that are always hidden. A key has a **Privacy** setting in Configure ▸ MCP ▸ Keys and an allowed source has one in the same table. A caller with both a key and an address gets the strictest.
+
+In the file:
+
+```json
+"settings": {
+  "mcp_acl": ["10.0.0.20 rw strict", "10.0.0.0/24 none"],
+  "mcp_keys": [{"name": "laptop", "access": "ro", "privacy": "strict", "key": "…"}],
+  "privacy": {"default": "standard", "strict": {"public_ips": true, "private_ips": true, "ip_keep": 1,
+    "public_asns": true, "private_asns": true, "serials": "hide", "macs": "oui", "emails": true,
+    "contacts": true, "words": ["contoso", "lab-edge"]}}
+}
+```
+
+Hiding is best effort: a value written in an unusual way, an address split over two fields or a host name is not recognised. A word that is also a device name hides the name too, so the assistant cannot name that device in a request. A stand-in sent back in a change is turned back into the real value from the current configuration. Nothing changes on upgrade: with no `privacy` setting the standard level applies, as before.
 
 ## Trying a device first: devprobe
 
