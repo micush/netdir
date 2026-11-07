@@ -69,7 +69,7 @@ func TestValidate(t *testing.T) {
 		d    Device
 		c    []Credential
 	}{
-		{"unknown platform", Device{Name: "a", Platform: "junos", Address: "1.2.3.4", Credential: "lab"}, creds},
+		{"unknown platform", Device{Name: "a", Platform: "ciscoios9000", Address: "1.2.3.4", Credential: "lab"}, creds},
 		{"unknown credential", Device{Name: "a", Platform: "iosxe", Address: "1.2.3.4", Credential: "nope"}, creds},
 		{"address with scheme", Device{Name: "a", Platform: "iosxe", Address: "https://1.2.3.4", Credential: "lab"}, creds},
 		{"address with port", Device{Name: "a", Platform: "iosxe", Address: "sw:443", Credential: "lab"}, creds},

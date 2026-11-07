@@ -1,5 +1,23 @@
 # Changelog
 
+## [v43] - 2026-11-07 — Juniper Junos driver
+
+### Added
+- **Juniper Junos** (`junos`): through the REST API (`https://HOST:3443/rpc/…`, user name and password, HTTPS only).
+- Facts (host name, model, release, chassis serial number, uptime), interfaces (state, speed, MAC, description, addresses), LLDP neighbors, the committed configuration (`Config`), `device_show` for any `show …` command (the configuration and secrets refused), `device_api_get` for any `/rpc/get-<name>` read (the configuration, keys, passwords, licences and users refused, also over MCP), and `device_api_catalog`.
+- `device_change_raw` (rw key): lines of configuration in set format are loaded into the candidate configuration, checked, committed with `commit confirmed 3` and confirmed once the device still answers (Junos undoes the change by itself otherwise); `dry_run` returns the device's own diff and puts the candidate back; a candidate that already holds uncommitted changes is not touched. An operational RPC is `POST /rpc` with the XML; the reboot is the line `request system reboot`. Users and login, the REST, NETCONF and SSH services, management interfaces, whole-hierarchy deletes, commits, locks, zeroize, power off, software and file operations are refused.
+- `show` accepts the Junos output filters `| match`, `| except`, `| find`, `| display`, `| trim` and `| resolve` (the check that a show never writes is unchanged: no `| save`, no redirection).
+- The platform is in the device lists, the help, the README, the examples and the test that requires every platform to be writable.
+
+### Fixed
+- Query values of `device_api_get` on Centreon may hold spaces (a search such as `{"name":{"$lk":"%web 1%"}}`).
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass. A stub Junos is read and changed: facts, interfaces, neighbors, configuration, show and refused shows, API reads and refused paths, a dry run, a change that is confirmed, lines the device refuses, a failing commit check, uncommitted changes of someone else, a device that stops answering after the commit, refused lines and RPCs, an RPC, and a reboot (the connection closing).
+
+### Not verified
+- Not run against a real Junos device. The JSON shapes ([{"data": …}] wrappers, element names), the REST answers to `<command format="text">` and to `get-configuration` with `format="text"`, and the exact error layout are from Juniper's documentation and may differ by release; `show <command> | display xml rpc` gives the RPC name when a read is needed.
+
 ## [v42] - 2026-11-07 — Infoblox: AAAA records can be read over MCP
 
 ### Fixed

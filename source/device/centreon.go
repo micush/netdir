@@ -660,7 +660,7 @@ func centQuery(qs string) (string, error) {
 			return "", fmt.Errorf("path: %q is not a parameter name", k)
 		}
 		for _, v := range vs {
-			if len(v) > 2000 || ctlRE.MatchString(v) {
+			if len(v) > 2000 || junCtlRE.MatchString(v) {
 				return "", fmt.Errorf("path: the value of %q is too long, or holds a control character", k)
 			}
 		}

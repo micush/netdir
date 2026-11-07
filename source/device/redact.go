@@ -157,6 +157,11 @@ func CheckAPIPathMCP(p string) error {
 			return err
 		}
 	}
+	if strings.HasPrefix(path, "/rpc/") { // Juniper Junos REST: the path is an RPC name
+		if err := junRPCDenied(strings.TrimPrefix(path, "/rpc/")); err != nil {
+			return err
+		}
+	}
 	if strings.HasPrefix(path, "/eapi/") { // Arista eAPI: the path is a CLI command, and the CLI accepts abbreviations ("show run")
 		for _, w := range strings.Split(strings.TrimPrefix(path, "/eapi/"), "/") {
 			if err := eosDeniedWord(w); err != nil {

@@ -17,6 +17,7 @@
     {"name": "aviatrix", "platform": "aviatrix", "address": "192.168.1.17", "credential": "avxadmin", "insecure": true},
     {"name": "ipfabric", "platform": "ipfabric", "address": "192.168.1.16", "credential": "ipfkey", "insecure": true},
     {"name": "centreon", "platform": "centreon", "address": "192.168.1.18", "credential": "centkey", "insecure": true},
+    {"name": "mx204", "platform": "junos", "address": "192.168.1.19", "credential": "cat", "insecure": true},
     {"name": "observium", "platform": "observium", "address": "192.168.1.15", "credential": "obskey", "insecure": true},
     {"name": "cx6300", "platform": "aoscx", "address": "192.168.1.6", "credential": "cat", "insecure": true},
     {"name": "ddi", "platform": "nios", "address": "192.168.1.7", "credential": "cat", "insecure": true},

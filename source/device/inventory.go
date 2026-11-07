@@ -154,7 +154,7 @@ func scrub(msg string, c Credential) string {
 }
 
 // showRE is what a read-only command looks like: "show" and words, and at most an output filter.
-var showRE = regexp.MustCompile(`^show(\s+[^\s|;<>&` + "`" + `$]+)+(\s*\|\s*(include|exclude|begin|section|count|json|json-pretty|xml|grep|egrep|head|last|no-more)(\s+[^|;<>&` + "`" + `$]+)?)*\s*$`)
+var showRE = regexp.MustCompile(`^show(\s+[^\s|;<>&` + "`" + `$]+)+(\s*\|\s*(include|exclude|begin|section|count|json|json-pretty|xml|grep|egrep|head|last|no-more|match|except|find|display|trim|resolve)(\s+[^|;<>&` + "`" + `$]+)?)*\s*$`)
 
 // CheckShow refuses anything but a single read-only command: it must start with "show", be one line, and may end in
 // output filters (| include X, | json, ...) but never one that writes (| tee, | redirect, | save, > file), nor chain a
