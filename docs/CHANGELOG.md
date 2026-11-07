@@ -1,5 +1,16 @@
 # Changelog
 
+## [v59] - 2026-11-07 — Monitor ▸ MCP: the page read the answer wrongly
+
+### Fixed
+- Monitor ▸ MCP showed nothing: the page read `.data` of the answer, but `/api/mcpusage` returns the report itself (not wrapped in `{ok, data}` like the pages made through the operations table). The page now reads the answer as it is. The server, its tests, the help text and the README were right and are unchanged.
+
+### Verified
+- `node --check`; the Go suites.
+
+### Not verified
+- Still not clicked through in a browser.
+
 ## [v58] - 2026-11-07 — Monitor ▸ MCP: usage by key, source, tool and device
 
 ### Added

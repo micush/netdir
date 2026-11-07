@@ -4336,7 +4336,7 @@
     async function load() {
       const my = ++seq;
       try {
-        const r = (await api("GET", "/api/mcpusage?window=" + win.value)).data;
+        const r = await api("GET", "/api/mcpusage?window=" + win.value);   // the answer is the report itself, not wrapped in {ok, data}
         if (my !== seq) return;
         clear(status);
         draw(r);
