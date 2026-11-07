@@ -832,10 +832,12 @@
       const rightX = anys.length ? R + SIDE_GAP + aCols * AW + (aCols - 1) * CG : 0, leftX = nodes.length ? R + SIDE_GAP + nCols * NW + (nCols - 1) * CG : 0;
       const sideBottom = Math.max(anys.length ? anyTop + anyH : 0, nodes.length ? nodeTop + nodeH : 0);
       // the gateway's devices: a row of squares under the circle (and under the nodes and pills when those reach lower)
-      const devs = (g.devices || []).filter((n) => devByName(n)), COLW = 190, SW = 160, SH = 46;
-      const SY = Math.max(CY + R, sideBottom) + 70;
-      const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, devs.length * COLW + 20), H = devs.length ? SY + SH + 12 : Math.max(CY + R, sideBottom) + 16;
-      const cx = W / 2, rowX = (W - devs.length * COLW) / 2;
+      const devs = (g.devices || []).filter((n) => devByName(n)), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
+      const SY = Math.max(CY + R, sideBottom) + 70, devRows = Math.ceil(devs.length / DEV_ROW), perRow = Math.min(DEV_ROW, devs.length);
+      const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, perRow * COLW + 20), H = devs.length ? SY + devRows * SH + (devRows - 1) * RG + 12 : Math.max(CY + R, sideBottom) + 16;
+      const cx = W / 2;
+      // the slot of device k: x and y of its square (a short last row is centred)
+      const devAt = (k) => { const r = Math.floor(k / DEV_ROW), n = Math.min(DEV_ROW, devs.length - r * DEV_ROW); return { x: (W - n * COLW) / 2 + (k % DEV_ROW) * COLW + (COLW - SW) / 2, y: SY + r * (SH + RG) }; };
       const svg = sv("svg", { class: "cv", viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "group", "aria-label": "Gateway diagram", tabindex: "0",
         onkeydown: (e) => { if ((e.key === "Delete" || e.key === "Backspace") && cv.sel && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); delSel(); } },
         onclick: (e) => { if (e.target === svg) { cv.sel = null; refresh(); } } });
@@ -949,19 +951,19 @@
           n.soak_sec > 0 ? sv("text", { x: x + NSL + 8, y: y + 17, class: "t1 soak" }, sv("title", {}, soakTip(n.soak_sec)), "⏳") : null));
       });
       devs.forEach((name, i) => {
-        const d = devByName(name), x = rowX + i * COLW + (COLW - SW) / 2, mx = x + SW / 2;
+        const d = devByName(name), { x, y } = devAt(i), mx = x + SW / 2;
         const info = st.devs[name], c = d.disabled ? "paused" : info ? info.status : "idle";
-        lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: SY, class: "edge" + (c === "bad" ? " down" : "") }));
+        lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: y, class: "edge" + (c === "bad" ? " down" : "") }));
         shapes.push(sv("g", { class: "shape drag st-" + c + (sel("dev", name) ? " sel" : ""), "data-col": "dev:" + name, tabindex: "0", role: "button", "aria-label": "Device " + name,
           onclick: pick("dev", name), oncontextmenu: rightClick("dev", name),
-          onpointerdown: dragStart({ axis: "x", n: devs.length, index: i, pos: x, origin: rowX + (COLW - SW) / 2, step: COLW, group: "dev:" + name,
-            ghost: (k) => sv("rect", { class: "dropslot", x: rowX + (COLW - SW) / 2 + k * COLW, y: SY, width: SW, height: SH, rx: 4 }),
+          onpointerdown: dragStart({ axis: "xy", n: devs.length, index: i, pos: { x, y }, slot: devAt, group: "dev:" + name,
+            ghost: (k) => sv("rect", { class: "dropslot", x: devAt(k).x, y: devAt(k).y, width: SW, height: SH, rx: 4 }),
             drop: (k) => { reorder(g.devices, i, k); cv.sel = { kind: "dev", addr: name }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("dev", name)(e); } },
           sv("title", {}, devTip(d, info)),
-          sv("rect", { x, y: SY, width: SW, height: SH, rx: 4 }),
-          label(mx, SY + 19, fitPx(name, SW - 20, "600 13px system-ui, sans-serif"), "t1"),
-          label(mx, SY + 35, fitPx(d.address + " · " + d.platform, SW - 20, "400 11px system-ui, sans-serif"), "t2")));
+          sv("rect", { x, y, width: SW, height: SH, rx: 4 }),
+          label(mx, y + 19, fitPx(name, SW - 20, "600 13px system-ui, sans-serif"), "t1"),
+          label(mx, y + 35, fitPx(d.address + " · " + d.platform, SW - 20, "400 11px system-ui, sans-serif"), "t2")));
       });
       svg.append(...lines, ...shapes);
       // The scrolling box (.cv-wrap) is made once and kept: only the drawing inside it is swapped on each refresh, so its

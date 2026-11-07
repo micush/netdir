@@ -1,5 +1,16 @@
 # Changelog
 
+## [v48] - 2026-11-07 — Topology: devices wrap at six per row
+
+### Changed
+- A gateway's devices are drawn at most six across; the seventh starts a new row (a short last row is centred). Dragging a device to reorder works across rows.
+
+### Verified
+- JS parse check; Go suites.
+
+### Not verified
+- The new layout was not looked at in a browser, and not with more than a few devices.
+
 ## [v47] - 2026-11-06 — Privacy tab: explanations moved to the help pane
 
 ### Changed
