@@ -10,8 +10,37 @@ What you get:
 - **Read-only first, with guard rails.** Access is by address list or bearer key, and read-only is the default. Device passwords and tokens are never shown to an MCP caller. A device's configuration goes only to read-write callers, and `show` takes nothing that writes. Every call is logged.
 - **A cluster you manage from any node.** Shared settings, config history, certificates and software updates stay in step across the nodes, through a web GUI or the command line.
 
+## Screenshots
+
+The web GUI, taken in a lab: two Juniper routers and a Centreon server behind one gateway (the devices are test stubs, not real gear).
+
+**Topology**: the gateway, the node serving it, and the devices it answers for.
+
+![Topology: one gateway with its node and three devices](snaps/topology.png)
+
+**Configure ▸ Devices**: the inventory and the logins the devices use (passwords and tokens are masked, and never shown to an MCP caller).
+
+![Configure, Devices: the device inventory and the logins](snaps/configure-devices.png)
+
+**Configure ▸ MCP**: who may use the endpoint, by address or by key, read-only or read-write.
+
+![Configure, MCP: allowed sources and keys](snaps/configure-mcp.png)
+
+**Monitor ▸ Devices**: ask every device, or a group of them, the same question. Facts from all three at once:
+
+![Monitor, Devices: facts of every device](snaps/monitor-facts.png)
+
+The interfaces of one router:
+
+![Monitor, Devices: the interfaces of a Juniper router](snaps/monitor-interfaces.png)
+
+A show command on one device:
+
+![Monitor, Devices: show bgp summary on a Juniper router](snaps/monitor-show.png)
+
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Status](#status)
 - [How it works](#how-it-works)
 - [Install, upgrade, uninstall](#install-upgrade-uninstall)

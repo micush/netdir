@@ -1,5 +1,13 @@
 # Changelog
 
+## [v45] - 2026-11-07 — Screenshots in the README
+
+### Added
+- `snaps/`: six screenshots of the web GUI (Topology, Configure ▸ Devices, Configure ▸ MCP, and Monitor ▸ Devices with facts, interfaces and a show command), linked from a new Screenshots section of the README, so the repository page shows them.
+
+### Notes
+- Taken from a lab with test stubs (two Juniper routers and a Centreon server), not real devices. No code changed.
+
 ## [v44] - 2026-11-07 — README is about netdir only
 
 ### Changed
