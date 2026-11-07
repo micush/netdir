@@ -722,7 +722,5 @@ table.policy.rows.mcpkeytab th:nth-child(4) { width: 8rem; }
 table.policy.rows.mcpkeytab th:nth-child(5) { width: auto; }
 table.mcpkeytab td input[readonly] { text-overflow: ellipsis; font-family: var(--mono); font-size: .86rem; line-height: 1.5; padding: .45rem .6rem; height: 2.3rem; box-sizing: border-box; }   /* the same box hidden and shown */
 
-.uchart { width: 100%; height: auto; max-height: 160px; display: block; }
-.uchart .ubar { fill: var(--accent); opacity: .75; }
-.uchart .uerr { fill: var(--bad); }
+.ubar, .uerr { fill: var(--c); }
 .tight td.bad { color: var(--bad); }

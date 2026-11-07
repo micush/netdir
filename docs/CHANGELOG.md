@@ -1,5 +1,27 @@
 # Changelog
 
+## [v62] - 2026-11-07 — Monitor ▸ MCP: the charts take the colours of their tiles
+
+### Fixed
+- The bars of Monitor ▸ MCP were black (they used a class the new layout no longer has). Calls per hour is now the colour of the Calls tile, the failed part the colour of the Errors tile, and Data returned per hour the colour of the Data tile.
+
+### Not verified
+- Seen only in the screenshot you sent; the new colours have not been looked at.
+
+## [v61] - 2026-11-07 — VMware vCenter driver
+
+### Added
+- **`vcenter`** (VMware vCenter Server, vSphere Automation API, Single Sign-On user name and password): the driver creates a session (`POST /api/session`, Basic authentication, never a URL), sends `vmware-api-session-id`, renews an expired session once and deletes the session on close. vCenter 7.0 Update 2 and later use `/api`; an older vCenter (`/rest`, answers wrapped in `{"value": …}`) is found when `/api/session` does not exist, or forced with option `api_style`.
+- Facts (release and build), interfaces (the ESXi hosts), `show vms|vm|hosts|clusters|datacenters|datastores|networks|folders|resourcepools|version|health` (`show vm NAME|ID` is one answer with the record, power state, guest identity and network, and VMware Tools; a part that fails is named), the API request below `/vcenter`, `/appliance`, `/cis`, `/content`, `/esx`, `/vstats`, and changes (rw key) below `/vcenter`, `/cis`, `/content` (power actions are `POST …/power?action=…`).
+- Refused: sessions, users, accounts, tokens, passwords, certificates and keys, KMS, guest processes and files, console tickets; and for changes deployment, restore, updates, the appliance, and deleting a VM, host, cluster, datacenter, datastore, folder, resource pool, network or disk.
+- In the GUI platform list, `main.go`, the example configurations, the README and the help page.
+
+### Verified
+- TLS-stub tests: sign-in and its refusal, an expired session renewed, the session deleted on close, the old `/rest` mode found and forced, every Show form and its bad input, a VM of two with the same name, the API request and its refusals (a refused path never reaches the stub), changes with dry run and the refused ones.
+
+### Not verified
+- **Against a real vCenter.** Paths and field names follow VMware's API reference. The likeliest differences: the old `/rest` mode, the appliance health names, vCenter Deployment APIs that live on port 5480 (not reached), Snapservice (SAML only, not reached), and a large inventory (one call, no paging).
+
 ## [v60] - 2026-11-07 — Monitor ▸ MCP and Monitor ▸ Devices laid out like Monitor ▸ Node
 
 ### Changed

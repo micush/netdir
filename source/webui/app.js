@@ -2497,7 +2497,7 @@
   // the drivers in device/, alphabetical: a new device starts with the first; the daemon checks the name when the page saves
   // the API address of the platforms that are a cloud service
   const SERVICE_ADDR = { meraki: "api.meraki.com", entra: "graph.microsoft.com", nsone: "api.nsone.net", rcode0: "my.rcodezero.at" };
-  const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "nsone", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "rcode0", "technitium"];
+  const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "nsone", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "rcode0", "technitium", "vcenter"];
   const ROW_TABLES = {
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),
@@ -4318,7 +4318,7 @@
         : h("div", { class: "empty" }, "No calls in this time range."));
     }
     // bars per hour; red is the part that failed
-    function bars(title, hours, pick, fail2, text) {
+    function bars(title, hours, cls, pick, fail2, text) {
       const W = 620, H = 230, L = 12, R = 12, T = 12, B = 28, n = hours.length, max = Math.max(1, ...hours.map(pick));
       const pw = W - L - R, ph = H - T - B, bw = pw / Math.max(1, n);
       const svg = sv("svg", { class: "qchart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
@@ -4326,8 +4326,8 @@
       hours.forEach((x, i) => {
         const v = pick(x), hh = Math.round((v / max) * ph), eh = fail2 ? Math.round((fail2(x) / max) * ph) : 0;
         svg.append(sv("g", {}, sv("title", {}, hm(x.t, true) + ": " + text(x)),
-          sv("rect", { class: "ubar", x: (L + i * bw + 0.5).toFixed(1), y: T + ph - hh, width: Math.max(1, bw - 1).toFixed(1), height: hh }),
-          eh ? sv("rect", { class: "uerr", x: (L + i * bw + 0.5).toFixed(1), y: T + ph - eh, width: Math.max(1, bw - 1).toFixed(1), height: eh }) : null));
+          sv("rect", { class: "ubar " + cls, x: (L + i * bw + 0.5).toFixed(1), y: T + ph - hh, width: Math.max(1, bw - 1).toFixed(1), height: hh }),
+          eh ? sv("rect", { class: "uerr t3", x: (L + i * bw + 0.5).toFixed(1), y: T + ph - eh, width: Math.max(1, bw - 1).toFixed(1), height: eh }) : null));
       });
       svg.append(sv("text", { class: "qax", x: L, y: H - 8 }, hm(hours[0].t, n > 24)), sv("text", { class: "qax", x: W - R, y: H - 8, "text-anchor": "end" }, hm(hours[n - 1].t, n > 24)),
         sv("text", { class: "qax", x: W - R, y: T + 10, "text-anchor": "end" }, "most " + max.toLocaleString()));
@@ -4348,8 +4348,8 @@
         tile("t5", "Data returned", size(t.bytes), "after privacy masking"),
         tile("t6", "Average time", num(t.avg_ms) + " ms", "per call on this node"));
       clear(charts).append(
-        bars("Calls per hour", r.hours, (x) => x.calls, (x) => x.errors, (x) => x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "")),
-        bars("Data returned per hour", r.hours, (x) => x.bytes, null, (x) => size(x.bytes)));
+        bars("Calls per hour", r.hours, "t1", (x) => x.calls, (x) => x.errors, (x) => x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "")),
+        bars("Data returned per hour", r.hours, "t5", (x) => x.bytes, null, (x) => size(x.bytes)));
       clear(tables).append(sumCard("By key", "Key", r.by_key), sumCard("By source address", "Address", r.by_source), sumCard("By tool", "Tool", r.by_tool), sumCard("By device", "Device, tag or target", r.by_target));
       clear(recent).append(card("Newest calls", r.recent.length
         ? h("div", { class: "scroll" }, h("table", {},

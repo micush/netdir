@@ -32,6 +32,7 @@
       {"name": "dns1", "platform": "technitium", "address": "10.0.0.11", "credential": "pan", "insecure": true, "tags": ["site=home", "role=ddi"]},
       {"name": "aviatrix", "platform": "aviatrix", "address": "10.0.0.17", "credential": "avxadmin", "insecure": true, "tags": ["site=home", "role=cloud"]},
       {"name": "ipfabric", "platform": "ipfabric", "address": "10.0.0.16", "credential": "ipfkey", "insecure": true, "tags": ["site=home", "role=assurance"]},
+      {"name": "vcenter", "platform": "vcenter", "address": "10.0.0.30", "credential": "vcenterlogin", "insecure": true, "tags": ["role=virtualization"]},
       {"name": "ns1", "platform": "nsone", "address": "api.nsone.net", "credential": "ns1key", "tags": ["role=dns"]},
       {"name": "rcode0", "platform": "rcode0", "address": "my.rcodezero.at", "credential": "rc0token", "tags": ["role=dns"]},
       {"name": "centreon", "platform": "centreon", "address": "10.0.0.18", "credential": "centkey", "insecure": true, "tags": ["site=home", "role=monitor"]},
