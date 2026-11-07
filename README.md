@@ -288,6 +288,19 @@ The Aviatrix Controller's API (`https://HOST/v2/api`; option `api_path` for anot
 
 The action names and result fields are those of Aviatrix's Terraform provider. This driver has been tested against a stub only, never a real controller.
 
+### Centreon (`centreon`)
+
+The REST API v2 of Centreon (`https://HOST/centreon/api/latest/`), over HTTPS, port 443. Option `prefix` says where Centreon is below the host (`/centreon` by default, `none` for the root), option `api_version` fixes a release (`24.04`) instead of `latest`. The credential is an **API token** (a personal access token, Centreon 23.10 and later; sent as `X-AUTH-TOKEN`) or a **user name and password** (`POST /login`, then the session token in `X-AUTH-TOKEN`; an expired session is renewed once). Neither is ever put in a URL.
+
+The device is the Centreon central server:
+
+- **Facts**: the platform version and how many hosts it monitors. **Interfaces**: the monitored hosts (up to 5000), with address, poller, and up or not.
+- **Show** (`device_show`): `show platform|pollers|hostgroups|servicegroups|downtimes`, `show hosts [status=down|unreachable|up|pending] [search=TEXT] [limit=N]`, `show services [host=NAME] [status=ok|warning|critical|unknown|problem] [search=TEXT] [limit=N]`, `show problems` (hosts that are not up, services that are not ok) and **`show host NAME`** (name, alias, address or ID): the monitoring record, the configuration, the services with their status and the recent timeline of one host in one answer. A part the user may not read is named under `errors`; the rest is still answered.
+- **API request** (`device_api_get`): any read below `/monitoring`, `/configuration` and `/platform`; lists take `limit`, `page`, `sort_by` and `search`. Users, contacts, access rights, tokens, authentication and administration are refused. The prefix and `/api/latest` may be left out or given.
+- **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` or `DELETE` below `/monitoring` (acknowledge, downtime, check, submit result) and `/configuration` (hosts, services, templates, groups, commands, pollers) with a JSON body. Centreon applies a configuration change to the pollers only when it is exported: send the request with *save* (it posts to `/configuration/monitoring-servers/generate-and-reload`, Centreon 23.10 and later) or export from the web interface. A dry run returns the copy of what the path holds; nothing is put back automatically. Commands defined in `/configuration/commands` run on the pollers: give that access only to keys that should have it.
+
+Secrets found by name in an answer (SNMP communities, passwords, tokens) are hidden. The field names are those of Centreon's API documentation; `show host` keeps the whole record, so a field a release names otherwise is still shown. This driver has been tested against a stub only, never a real Centreon.
+
 ### Adding a platform
 
 A platform is one file in `source/device/`. It implements `device.Driver` (Facts, Interfaces, Neighbors, Config, Show, Close) and registers itself with `device.Register`. Something a platform cannot do answers `device.ErrUnsupported`.

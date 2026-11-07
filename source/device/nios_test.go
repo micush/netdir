@@ -240,3 +240,17 @@ func TestCheckAPIPathMCPArubaInfoblox(t *testing.T) {
 		}
 	}
 }
+
+// AAAA is the DNS record type, not AAA (authentication): its WAPI objects are readable over MCP, AAA still is not.
+func TestCheckAPIPathMCPAAAARecords(t *testing.T) {
+	for _, ok := range []string{"/wapi/v2.12/record:aaaa", "/wapi/v2.12/sharedrecord:aaaa?name=x", "/wapi/v2.12/record:host_ipv6addr"} {
+		if err := CheckAPIPathMCP(ok); err != nil {
+			t.Errorf("%s refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"/restconf/data/aaa", "/wapi/v2.12/aaa", "/wapi/v2.12/admingroup"} {
+		if err := CheckAPIPathMCP(bad); err == nil {
+			t.Errorf("%s allowed", bad)
+		}
+	}
+}

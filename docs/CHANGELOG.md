@@ -1,5 +1,28 @@
 # Changelog
 
+## [v42] - 2026-11-07 — Infoblox: AAAA records can be read over MCP
+
+### Fixed
+- **`/wapi/…/record:aaaa` and `sharedrecord:aaaa` were refused** as if they held AAA (authentication) secrets, because the path filter looks for the word "aaa" inside a path word and "aaaa" (the DNS IPv6 record type) contains it. "aaaa" is no longer taken for "aaa"; a path word with a real "aaa" in it is still refused.
+
+### Verified
+- `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass; a test reads the AAAA paths and still refuses `aaa` and `admingroup`.
+
+## [v41] - 2026-11-07 — Centreon driver
+
+### Added
+- **Centreon** (`centreon`): the monitoring platform, through its REST API v2 (`/centreon/api/latest`). Credential: an API token (Centreon 23.10 and later) or a user name and password (the driver signs in and renews an expired session). Options: `prefix` (`/centreon` by default, `none` for the root) and `api_version` (`latest` or a release such as `24.04`).
+- Facts (platform version, number of hosts), interfaces (the monitored hosts with address, poller and up or not), `device_show`: `show platform|pollers|hostgroups|servicegroups|downtimes`, `show hosts`, `show services`, `show problems` and **`show host NAME`** (name, alias, address or ID: the monitoring record, configuration, services with status and timeline of one host in one answer; a part the user may not read is named under `errors`).
+- `device_api_get` reads any path below `/monitoring`, `/configuration` and `/platform`; users, contacts, access rights, tokens, authentication and administration are refused.
+- `device_change_raw` (rw key): POST, PUT, PATCH, DELETE below `/monitoring` and `/configuration`; the same refusals. *Save* exports the configuration to the pollers and reloads them (`POST /configuration/monitoring-servers/generate-and-reload`).
+- The platform is in the device lists, the help, the README, the examples, and in the test that requires every platform to be writable.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -count=1 ./...` and the `CGO_ENABLED=0` variants pass. A stub Centreon is read and changed with a token and with a login: facts, interfaces (also 250 hosts over three pages), every `show`, a session that expires, a refused token, a wrong password, both options, `device_api_get` allowed and refused paths, a dry run, a change, a change with save, and the refused paths and bodies.
+
+### Not verified
+- Not run against a real Centreon. Paths, search syntax and field names come from Centreon's API documentation; page size (100) and the export path (`generate-and-reload`, 23.10 and later) are the likeliest to differ on another release. If a list is refused, `device_api_get` shows the server's own message.
+
 ## [v40] - 2026-11-06 — IP Fabric 7.5 and later: no version in the URL
 
 ### Fixed

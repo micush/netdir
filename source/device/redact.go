@@ -123,7 +123,11 @@ func secretSegment(sg string) error {
 		return fmt.Errorf("path: %q holds secrets (users, keys, certificates) and is not available over MCP", sg)
 	}
 	for _, d := range deniedAny {
-		if strings.Contains(sg, d) {
+		w := sg
+		if d == "aaa" {
+			w = strings.ReplaceAll(sg, "aaaa", "") // AAAA is the DNS record type (Infoblox record:aaaa, sharedrecord:aaaa), not AAA
+		}
+		if strings.Contains(w, d) {
 			return fmt.Errorf("path: %q holds secrets (users, keys, certificates, SNMP, AAA) and is not available over MCP", sg)
 		}
 	}

@@ -32,6 +32,7 @@
       {"name": "dns1", "platform": "technitium", "address": "10.0.0.11", "credential": "pan", "insecure": true, "tags": ["site=home", "role=ddi"]},
       {"name": "aviatrix", "platform": "aviatrix", "address": "10.0.0.17", "credential": "avxadmin", "insecure": true, "tags": ["site=home", "role=cloud"]},
       {"name": "ipfabric", "platform": "ipfabric", "address": "10.0.0.16", "credential": "ipfkey", "insecure": true, "tags": ["site=home", "role=assurance"]},
+      {"name": "centreon", "platform": "centreon", "address": "10.0.0.18", "credential": "centkey", "insecure": true, "tags": ["site=home", "role=monitor"]},
       {"name": "observium", "platform": "observium", "address": "10.0.0.15", "credential": "obskey", "insecure": true, "tags": ["site=home", "role=monitor"]},
       {"name": "cx6300", "platform": "aoscx", "address": "10.0.0.6", "credential": "cat", "insecure": true, "tags": ["site=home", "role=access"],
        "options": {"api_version": "v10.09"}},
