@@ -207,7 +207,7 @@ const NETDIR_HELP = {
       ["fields", [["Default level", "Used when neither the key nor the allowed source the caller came in by has a level. **standard** is what netdir always did (public addresses and AS numbers, e-mail addresses, contacts, serial numbers by their last four characters), so nothing changes until you choose otherwise. **none** hides none of it. Shared."],
         ["Public / Private IP addresses", "Public addresses are those of the Internet. Private ones are RFC 1918, carrier-grade NAT, link-local and unique-local ranges. Loopback, documentation addresses and netmasks are never hidden."],
         ["Public / Private AS numbers", "Private ones are the private-use ranges 64512-65534 and 4200000000-4294967294."],
-        ["Digits of a hidden address left readable", "None, the first 1 to 3 octets (IPv6: groups) in front of the stand-in, or the last 1 to 3 behind it (`PUBLIC-IP-3fa91c.114.7`). The same address always gets the same stand-in, so the assistant can still see that two answers mean the same thing."],
+        ["IP addresses", "Hidden, the first 1 to 3 octets (IPv6: groups) in front of the stand-in, or the last 1 to 3 behind it (`PUBLIC-IP-3fa91c.114.7`). The same address always gets the same stand-in, so the assistant can still see that two answers mean the same thing."],
         ["Serial numbers", "Shown, the last four characters (`****1234`), or hidden."],
         ["MAC addresses", "Shown, the vendor part only (`00:1a:2b:` and a stand-in), the network interface controller part only (a stand-in and `3c:4d:5e`, the last three bytes, which identify the card), or hidden."],
         ["Words always hidden", "One per line, 3 to 64 characters, any case. Used in every answer, including names of devices."]]],

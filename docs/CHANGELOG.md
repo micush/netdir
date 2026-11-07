@@ -1,5 +1,10 @@
 # Changelog
 
+## [v55] - 2026-11-07 — Privacy page: shorter label, more space
+
+### Changed
+- Privacy: "Digits of a hidden address left readable" is now **IP addresses** (its first choice reads "hidden"), and there is space above that row and above the words box. The help page follows.
+
 ## [v54] - 2026-11-07 — MCP: the largest answer is a setting
 
 ### Added
