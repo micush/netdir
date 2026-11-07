@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -85,10 +86,23 @@ func (c *apiClient) do(ctx context.Context, method, path string, body any, hdr h
 		}
 		rd, ct = bytes.NewReader(j), "application/json"
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	// The request goes to the device's own address (c.base) whatever the path is: the path and the query are put into the
+	// request's URL as such, never joined to the address as text (a path such as "@other.example/x" cannot change the host).
+	if path != "" && path[0] != '/' {
+		return nil, fmt.Errorf("the path of a request to the device starts with /, not %q", path)
+	}
+	p, q, _ := strings.Cut(path, "?")
+	p, _, _ = strings.Cut(p, "#")
+	q, _, _ = strings.Cut(q, "#")
+	dec, err := url.PathUnescape(p)
+	if err != nil {
+		return nil, fmt.Errorf("the path of a request to the device is not valid: %v", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base, rd)
 	if err != nil {
 		return nil, err
 	}
+	req.URL.Path, req.URL.RawPath, req.URL.RawQuery = dec, p, q
 	for k, v := range c.hdr {
 		req.Header[k] = v
 	}

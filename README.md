@@ -435,7 +435,7 @@ In the file:
 }
 ```
 
-Hiding is best effort: a value written in an unusual way, an address split over two fields or a host name is not recognised. A word that is also a device name hides the name too, so the assistant cannot name that device in a request. A stand-in sent back in a change is turned back into the real value from the current configuration. Nothing changes on upgrade: with no `privacy` setting the standard level applies, as before.
+Hiding is best effort: a value written in an unusual way, an address split over two fields or a host name is not recognised. A word that is also a device name hides the name too, so the assistant cannot name that device in a request. A stand-in sent back in a change is turned back into the real value from the current configuration. Nothing changes on upgrade: with no `privacy` setting the standard level applies, as before. `sh tools/leaktest.sh` (in `source/`) records what every driver's tests return and checks that none of the addresses, MAC addresses, e-mails, AS numbers, serial numbers or secrets of that data gets through the strict level.
 
 ## Trying a device first: devprobe
 

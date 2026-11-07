@@ -26,6 +26,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
    drops a `netdir` binary in the repo root — delete it if it appears), `go vet ./...` and
    `go test -race -count=1 ./...`. Don't skip straight to packaging on a
    change that could plausibly have broken something. Beyond the unit tests:
+   - **Leak test:** after changing a driver or the masking (`mcpmask.go`, `mcpprivacy.go`) run `sh tools/leaktest.sh` from `source/`. It records what every driver returns while the device tests run and checks that nothing of the test data (addresses, MAC addresses, e-mails, AS numbers, serial numbers, secrets) gets through the strict privacy level; a corpus of unusual spellings is checked too. New drivers need no change; one with a new set of optional interfaces (`device/leakcapture_test.go`, `wrapLeak`) must be added there or its answers are not recorded.
    - **Touched the device drivers (`source/device/`)?** That package is portable: run
      `go test -race -count=1 ./device` there on any OS. Every driver has a test against a TLS stub of the
      platform's API (`device_test.go`): facts, interfaces, neighbors, config, a wrong password or token. Field

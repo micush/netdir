@@ -1,5 +1,32 @@
 # Changelog
 
+## [v53] - 2026-11-07 — CodeQL: the request URL of the REST drivers is built, not joined
+
+### Fixed
+- CodeQL (go/request-forgery, `device/httpapi.go`): `apiClient.do` joined the device's address and the caller's path as text (`base + path`). A path that did not start with `/` (such as `@other.example/x`) could have changed the host. The request is now made to the device's address alone and the path and query are set on its URL as such; a path that does not start with `/` is refused. Paths that did start with `/` reach the device exactly as before (tested: encoded slashes and spaces, a query, `//`, a fragment dropped). Callers were already checked by `CheckAPIPath`, so this is a second line of defence.
+
+### Verified
+- All Go suites; a new test of the paths.
+
+### Not verified
+- Whether GitHub's CodeQL now closes the alert: that is only known after the next scan. A second alert (the screenshot shows 2 open) was not seen, so it is not addressed.
+
+## [v52] - 2026-11-07 — Leak test of all drivers; reverse names and address host names masked
+
+### Added
+- **`sh tools/leaktest.sh`** (`device/leakcapture_test.go`, `leak_test.go`): records everything every driver returns while the device tests run (877 answers, 21 platforms), sends it through the same redaction and masking an MCP caller's answer gets at the strict level, and checks with separate patterns that no address (documentation ranges counted as real), MAC address, e-mail address, base64-hidden address, AS number, serial number, contact or secret of the test data is left. A negative control (the standard level instead of strict) is caught with 96 leaks, and the checks find 283 addresses and 56 MAC addresses before masking, so they look properly.
+- A corpus of 34 unusual spellings (address with port or in brackets, in a URL, as a key, mapped IPv6, zone ids, MAC in four forms, JSON inside a string, base64 references, e-mail forms, reverse names ...) checked the same way.
+
+### Fixed
+- Reverse DNS names (`3.2.1.10.in-addr.arpa`, a zone such as `113.0.203.in-addr.arpa`, the nibbles under `ip6.arpa`) leaked the address (or network) they name; they are now hidden as `MASKED-PTR-xxxxxx` when the address is one the level hides.
+- Host names made of an address (`ip-203-0-113-22.example.net`, as cloud hosts are named) leaked it; the address part is now the same stand-in as the dotted form (`ip-PUBLIC-IP-5c0997.example.net`).
+
+### Verified
+- All Go suites; the leak test and its negative control.
+
+### Not verified
+- The test data is what the driver tests' stubs return: few AS numbers (one, and documentation ones are not counted), few serial numbers; real devices say more and in other forms. Nothing was run against real devices.
+
 ## [v51] - 2026-11-07 — Privacy is its own page
 
 ### Changed

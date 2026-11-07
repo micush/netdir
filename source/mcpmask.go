@@ -50,6 +50,9 @@ var (
 	reMail  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
 	reNum   = regexp.MustCompile(`\d{1,10}`)
 	reMAC   = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}`)
+	reArpa4 = regexp.MustCompile(`(?i)\b(?:\d{1,3}\.){1,4}in-addr\.arpa\b`)
+	reArpa6 = regexp.MustCompile(`(?i)\b(?:[0-9a-f]\.){1,32}ip6\.arpa\b`)
+	reDash  = regexp.MustCompile(`\b\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`)
 	reB64   = regexp.MustCompile(`[A-Za-z0-9+/_-]{16,}={0,2}`)
 	reToken = regexp.MustCompile(`(?:(?:PUBLIC|PRIVATE)-(?:IP|IP6|AS)|MASKED-[A-Z]+)-[0-9a-f]{6}`)
 )
@@ -228,6 +231,50 @@ func (m *maskRules) text(s string) string {
 		})
 	}
 	if r.PublicIPs || r.PrivateIPs {
+		hide := func(a netip.Addr) bool { return r.PublicIPs && publicAddr(a) || r.PrivateIPs && privateAddr(a) }
+		// reverse names (3.2.1.10.in-addr.arpa, the nibbles of an IPv6 address under ip6.arpa) and host names made of the address (ip-10-1-2-3)
+		s = reArpa4.ReplaceAllStringFunc(s, func(x string) string {
+			p := strings.Split(strings.TrimSuffix(strings.ToLower(x), ".in-addr.arpa"), ".")
+			var o [4]byte
+			for i, d := range p {
+				n, err := strconv.Atoi(d)
+				if err != nil || n > 255 {
+					return x
+				}
+				o[len(p)-1-i] = byte(n)
+			}
+			if hide(netip.AddrFrom4(o)) {
+				return maskTag("MASKED-PTR", strings.ToLower(x))
+			}
+			return x
+		})
+		s = reArpa6.ReplaceAllStringFunc(s, func(x string) string {
+			p := strings.Split(strings.TrimSuffix(strings.ToLower(x), ".ip6.arpa"), ".")
+			var o [16]byte
+			for i, d := range p {
+				n, _ := strconv.ParseUint(d, 16, 8)
+				k := len(p) - 1 - i // the nibble's place, counted from the front
+				if k%2 == 0 {
+					o[k/2] |= byte(n) << 4
+				} else {
+					o[k/2] |= byte(n)
+				}
+			}
+			if hide(netip.AddrFrom16(o)) {
+				return maskTag("MASKED-PTR", strings.ToLower(x))
+			}
+			return x
+		})
+		s = reDash.ReplaceAllStringFunc(s, func(x string) string {
+			a, err := netip.ParseAddr(strings.ReplaceAll(x, "-", "."))
+			if err != nil || !hide(a) {
+				return x
+			}
+			if publicAddr(a) {
+				return ip4Keep(a, maskTag("PUBLIC-IP", a.String()), r.IPKeep)
+			}
+			return ip4Keep(a, maskTag("PRIVATE-IP", a.String()), r.IPKeep)
+		})
 		s = reV4.ReplaceAllStringFunc(s, func(x string) string {
 			a, err := netip.ParseAddr(x)
 			if err != nil {
