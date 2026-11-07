@@ -1,26 +1,33 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
-	"net/http"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
-// Who is connected to the MCP listeners right now: the open connections on each gateway address, counted by the address they come
-// from (one assistant may hold several connections).  The gateway's tooltip shows the number as "Clients".  The node's own checks
-// (an address of the listener itself, or loopback) are not clients.
+// Who is using the MCP endpoint: a client is a caller (the key's name, or the address when there is no key) that sent any request
+// (the handshake and the tool list included) in the last mcpClientWindow.  The endpoint keeps no session and no connection state of
+// its own (POST only, an idle connection is closed after a minute), so "recently asked" is what "connected" can mean.  The gateway's
+// tooltip shows the number as "Clients", added up over the nodes that serve the gateway.  Callers are kept as short hashes, so the
+// nodes can count each caller once without sending names or addresses around.
 
-type mcpConnTracker struct {
-	mu    sync.Mutex
-	conns map[net.Conn]mcpConnKey
-	n     map[mcpConnKey]int
+const mcpClientWindow = 5 * time.Minute
+
+type mcpSeenKey struct{ local, caller string }
+
+type mcpSeenSet struct {
+	mu  sync.Mutex
+	at  map[mcpSeenKey]time.Time
+	now func() time.Time
 }
 
-type mcpConnKey struct{ local, remote string }
-
-var mcpConns = &mcpConnTracker{conns: map[net.Conn]mcpConnKey{}, n: map[mcpConnKey]int{}}
+var mcpSeen = &mcpSeenSet{at: map[mcpSeenKey]time.Time{}, now: time.Now}
 
 func bareAddr(a net.Addr) string {
 	if a == nil {
@@ -36,30 +43,28 @@ func bareAddr(a net.Addr) string {
 	return h
 }
 
-// hook is the ConnState of a listener's server.
-func (t *mcpConnTracker) hook(c net.Conn, st http.ConnState) {
+func callerHash(caller string) string {
+	s := sha256.Sum256([]byte(caller))
+	return hex.EncodeToString(s[:6])
+}
+
+// record notes that caller sent a request to the address local (the address the request came in on).
+func (t *mcpSeenSet) record(local, caller string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	switch st {
-	case http.StateNew:
-		if _, ok := t.conns[c]; ok {
-			return
-		}
-		k := mcpConnKey{bareAddr(c.LocalAddr()), bareAddr(c.RemoteAddr())}
-		t.conns[c] = k
-		t.n[k]++
-	case http.StateClosed, http.StateHijacked:
-		if k, ok := t.conns[c]; ok {
-			delete(t.conns, c)
-			if t.n[k]--; t.n[k] <= 0 {
-				delete(t.n, k)
+	now := t.now()
+	t.at[mcpSeenKey{local, callerHash(caller)}] = now
+	if len(t.at) > 256 { // forget the old ones now and then
+		for k, v := range t.at {
+			if now.Sub(v) > mcpClientWindow {
+				delete(t.at, k)
 			}
 		}
 	}
 }
 
-// clients is how many different addresses have a connection open to any of the gateway addresses.
-func (t *mcpConnTracker) clients(addrs ...string) int {
+// callers lists, as hashes, the callers that used any of the addresses in the window.
+func (t *mcpSeenSet) callers(addrs ...string) []string {
 	want := map[string]bool{}
 	for _, a := range addrs {
 		a = strings.TrimSpace(strings.SplitN(a, "/", 2)[0])
@@ -69,15 +74,21 @@ func (t *mcpConnTracker) clients(addrs ...string) int {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	seen := map[string]bool{}
-	for k := range t.n {
-		if !want[k.local] || k.remote == k.local {
+	now := t.now()
+	set := map[string]bool{}
+	for k, v := range t.at {
+		if now.Sub(v) > mcpClientWindow {
+			delete(t.at, k)
 			continue
 		}
-		if ip, err := netip.ParseAddr(k.remote); err == nil && ip.IsLoopback() {
-			continue
+		if want[k.local] {
+			set[k.caller] = true
 		}
-		seen[k.remote] = true
 	}
-	return len(seen)
+	out := make([]string, 0, len(set))
+	for c := range set {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }

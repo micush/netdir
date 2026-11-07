@@ -47,8 +47,9 @@ type CanvasGateway struct {
 	VIP4      string         `json:"vip4"`
 	VIP6      string         `json:"vip6"`
 	Anycast   []AnycastState `json:"anycast,omitempty"`
-	// MCPClients is how many different addresses hold an MCP connection to the addresses of this gateway on this node right now.
+	// MCPClients is how many different callers used the MCP endpoint on this gateway's addresses in the last 5 minutes (all serving nodes, see addPeerClients).
 	MCPClients int            `json:"mcp_clients"`
+	MCPCallers []string       `json:"mcp_callers,omitempty"` // the callers behind MCPClients, as hashes, so the nodes can be added up without counting one twice
 	Status     string         `json:"status"`
 	Detail     string         `json:"detail"`
 	Families   []CanvasFamily `json:"families"`
@@ -184,8 +185,9 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
 	out := make([]CanvasGateway, 0, len(dc.Groups))
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
+		callers := mcpSeen.callers(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...)...)
 		cg := CanvasGateway{Name: g.Name, GroupID: g.GroupID, Interface: g.Interface, VIP4: g.VIP4, VIP6: g.VIP6,
-			Families: []CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), MCPClients: mcpConns.clients(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...)...), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
+			Families: []CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), MCPCallers: callers, MCPClients: len(callers), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
 		// the gateway itself, one state per address family
 		for _, f := range []struct{ af, vip string }{{"v4", g.VIP4}, {"v6", g.VIP6}} {
 			if f.vip == "" {

@@ -260,6 +260,9 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "this MCP server answers POST only (no event stream)", http.StatusMethodNotAllowed)
 		return
 	}
+	if la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+		mcpSeen.record(bareAddr(la), mcpClientID(who, from))
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, mcpMaxBody))
 	if err != nil {
 		http.Error(rw, "request too large", http.StatusRequestEntityTooLarge)

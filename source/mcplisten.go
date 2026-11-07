@@ -290,7 +290,6 @@ func (m *mcpListeners) listen(a netip.Addr) (*mcpListener, error) {
 			MinVersion:     tls.VersionTLS12,
 			NextProtos:     []string{"h2", "http/1.1"},
 		},
-		ConnState:         mcpConns.hook,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      90 * time.Second,

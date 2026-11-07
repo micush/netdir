@@ -355,6 +355,7 @@ func (w *WebServer) Handler() http.Handler {
 		groups := w.status.canvasGroups()
 		if r.URL.Query().Get("own") == "" { // ?own=1: this node's own view, as asked by another node or by the sidebar
 			w.status.viaServing(r.Context(), groups)
+			w.status.addPeerClients(r.Context(), groups)
 		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": groups, "dnsdir": dnsdirInfo()})
 	}))

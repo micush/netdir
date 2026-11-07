@@ -1,5 +1,16 @@
 # Changelog
 
+## [v73] - 2026-11-07 — Clients: callers of the last 5 minutes, over all serving nodes
+
+### Changed
+- **Clients** in the gateway tooltip (v71) counted open connections of one node, which are closed after a minute idle and are none for a client that is set up but waiting. It is now the number of different callers (the key's name, or the address when there is no key) that sent any MCP request, the handshake and tool list included, to the gateway's addresses in the last **5 minutes**, added up over the nodes that serve the gateway and counting each caller once. A refused request does not count. The nodes exchange only a short hash of each caller (`mcp_callers` in `/api/canvas?own=1`), never a name or an address; the answers are kept for 5 seconds and a node that cannot be asked counts as it was.
+
+### Verified
+- Tests: a caller counts once however often it asks, two callers count two, the window expires, only hashes leave the node, an `initialize` alone makes a client, a refused request does not; the full test suite and the leak test.
+
+### Not verified
+- With two real nodes (the exchange uses the same relay as the Topology page) and in a browser.
+
 ## [v72] - 2026-11-07 — Configure ▸ Alerts: the table of ntpdir
 
 ### Changed
