@@ -47,9 +47,11 @@ type CanvasGateway struct {
 	VIP4      string         `json:"vip4"`
 	VIP6      string         `json:"vip6"`
 	Anycast   []AnycastState `json:"anycast,omitempty"`
-	Status    string         `json:"status"`
-	Detail    string         `json:"detail"`
-	Families  []CanvasFamily `json:"families"`
+	// MCPClients is how many different addresses hold an MCP connection to the addresses of this gateway on this node right now.
+	MCPClients int            `json:"mcp_clients"`
+	Status     string         `json:"status"`
+	Detail     string         `json:"detail"`
+	Families   []CanvasFamily `json:"families"`
 	// Vmac is the last virtual-MAC test on this node (see vmactest.go); absent until one has run.
 	Vmac    *VmacResult    `json:"vmac,omitempty"`
 	Members []CanvasMember `json:"members"`
@@ -183,7 +185,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
 		cg := CanvasGateway{Name: g.Name, GroupID: g.GroupID, Interface: g.Interface, VIP4: g.VIP4, VIP6: g.VIP6,
-			Families: []CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
+			Families: []CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), MCPClients: mcpConns.clients(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...)...), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
 		// the gateway itself, one state per address family
 		for _, f := range []struct{ af, vip string }{{"v4", g.VIP4}, {"v6", g.VIP6}} {
 			if f.vip == "" {

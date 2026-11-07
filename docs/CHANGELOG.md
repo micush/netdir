@@ -1,5 +1,16 @@
 # Changelog
 
+## [v71] - 2026-11-07 — the gateway tooltip shows how many MCP clients are connected
+
+### Added
+- Hovering the gateway circle (the VIP) now ends with **Clients: N**: how many different addresses have an MCP connection open to the gateway's addresses (the VIP and the extra addresses) right now. The listeners count their open connections (`mcpconns.go`, from `http.Server.ConnState`); several connections from one address count once, and the node's own address and loopback (its own checks) are not clients. The number is the serving node's (`mcp_clients` in `/api/canvas`); a node that does not serve the gateway shows the serving node's. A client that is quiet for a minute is disconnected by the listener's idle timeout, so it leaves the count then.
+
+### Verified
+- A test of the counting (one address with two connections counts once, the node itself and loopback do not, a repeated state is not counted twice, closing is counted down once); the full test suite and the leak test.
+
+### Not verified
+- With a real assistant connected, and in a browser. HTTP clients may open a fresh connection per call, so the number can be 0 between calls.
+
 ## [v70] - 2026-11-07 — a device you enable (or add, or edit) is checked at once
 
 ### Fixed
