@@ -1,5 +1,16 @@
 # Changelog
 
+## [v64] - 2026-11-07 — defaults shown in the fields, valid range under them
+
+### Changed
+- A number field that was empty for "the default" now shows the default itself (Group ID 1, Priority 100, Weight 100, Hello 150 ms, Hold 750 ms, Max forwarders 128, session idle 30 min, failed logins 3 in 1 min, lockout 15 min, minimum password length 8, MCP port 443, largest MCP answer 1 MB, sync interval 5 s, the four device check intervals, the listen ports 22161 and 22162, and a device's API port 443, or 8006 for Proxmox, filled when the platform is picked). Under each number field is its valid range and default ("Valid: 10 to 600. Default 30."). A default is still not written to the file, for the device port; the other numbers are now saved as shown.
+
+### Verified
+- Full test suite, leak test and `node --check`; no Go change.
+
+### Not verified
+- Not looked at in a browser (the range lines, the filled port in Add device and the device table, Proxmox getting 8006 when picked).
+
 ## [v63] - 2026-11-07 — far fewer device checks: only the primary, slower when nobody is looking
 
 ### Changed

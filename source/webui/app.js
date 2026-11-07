@@ -1307,9 +1307,11 @@
           const def = SERVICE_ADDR[els.platform.value] || "", cur = els.address.value.trim();
           if (!cur || Object.values(SERVICE_ADDR).includes(cur)) els.address.value = def;
           els.address.placeholder = def || "10.0.0.2";
+          const pd = portDef(els.platform.value), pc = els.port.value.trim();
+          if (!pc || Object.values(PORT_DEF).concat("443").includes(pc)) els.port.value = pd;   // a port typed by hand is kept
         } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
-        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : "", ph: "443" },
+        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Valid: 1 to 65535. Default 443 (8006 for Proxmox)." },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
         { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core" },
         { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip check for a self-signed certificate." },
@@ -1324,7 +1326,7 @@
         if (!v.address && v.platform === "meraki") v.address = "api.meraki.com";
         if (!v.address && v.platform === "entra") v.address = "graph.microsoft.com";
         if (!v.address || /[\s/:@]/.test(v.address) && !v.address.includes("::") && v.address.split(":").length < 3) return "Give the address or host name, without a port or a scheme.";
-        if (v.port && !(Number(v.port) >= 1 && Number(v.port) <= 65535)) return "The port is 1 to 65535, or empty for 443.";
+        if (v.port && !(Number(v.port) >= 1 && Number(v.port) <= 65535)) return "The port is 1 to 65535 (default 443).";
         let cred = v.login;
         if (cred === NEW_LOGIN) {
           if (!v.pass && !v.token && v.platform !== "entra") return "A new login needs a password or a token.";
@@ -1334,7 +1336,7 @@
           logins().push({ name: cred, ...(v.user ? { username: v.user } : {}), ...(v.pass ? { password: v.pass } : {}), ...(v.token ? { token: v.token } : {}) });
         }
         const x = { ...(d || {}), name: v.name, platform: v.platform, address: v.address, credential: cred };
-        if (v.port) x.port = Number(v.port); else delete x.port;
+        if (v.port && v.port !== portDef(v.platform)) x.port = Number(v.port); else delete x.port;   // 443 is the default and is not written
         const opts = {};
         for (const p of v.opts.split(/[\s,]+/).filter(Boolean)) {
           const m = /^([a-z_]{1,32})=(\S{1,100})$/.exec(p);
@@ -2143,21 +2145,23 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
+  const PORT_DEF = { proxmox: "8006" };   // the API port of a platform that is not 443
+  const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
     { shared: true, k: "name", l: "Name", t: "text", hint: "optional label shown instead of the address" },
-    { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255 },
+    { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255, def: 1 },
     { k: "interface", l: "Interface", t: "text" },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
     { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
     { shared: true, k: "more_vip6", l: "More IPv6 addresses", t: "rows", rows: "morevip6", wide: true, hint: "Same subnet as the VIP, one per row, no prefix length." },
-    { k: "priority", l: "Priority", t: "int", min: 0, max: 255 },
+    { k: "priority", l: "Priority", t: "int", min: 0, max: 255, def: 100 },
     { shared: true, k: "lb_method", l: "LB method", t: "select", options: LB },
-    { k: "weight", l: "Weight", t: "int", min: 0, max: 255 },
-    { shared: true, k: "hello_ms", l: "Hello interval (ms)", t: "int", min: 1 },
-    { shared: true, k: "hold_ms", l: "Hold time (ms)", t: "int", min: 1 },
-    { shared: true, k: "max_afns", l: "Max forwarders", t: "int", min: 1, max: 255 },
+    { k: "weight", l: "Weight", t: "int", min: 0, max: 255, def: 100 },
+    { shared: true, k: "hello_ms", l: "Hello interval (ms)", t: "int", min: 1, max: 65535, def: 150 },
+    { shared: true, k: "hold_ms", l: "Hold time (ms)", t: "int", min: 1, max: 65535, def: 750 },
+    { shared: true, k: "max_afns", l: "Max forwarders", t: "int", min: 1, max: 255, def: 128 },
     { shared: true, k: "key", l: "HMAC shared key", t: "text", weakKey: true },
     { k: "preempt", l: "Preemption", t: "bool" },
     { shared: true, k: "real_macs", l: "Use real MAC addresses (no virtual MACs)", t: "bool", hint: "On for a gateway you add now (most networks need it: a VMware port group that is not promiscuous, a cloud with one MAC per interface, a switch with port security); gateways that already existed keep their setting. Off is the older way with a virtual MAC per node. On: the VIP is on every node's lo and the controller answers ARP with the real MAC of the node it picks. Failover then depends on the neighbors honoring an unsolicited ARP. Restarts the gateway; set it on every node's cluster together." },
@@ -2248,15 +2252,15 @@
   }
 
   const WEB_FIELDS = [
-    { k: "listen", l: "Listen address", t: "port", hint: "the port, default 22161 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:22161" },
+    { k: "listen", l: "Listen address", t: "port", def: "22161", hint: "the port, default 22161 (all addresses); to listen on one address only, write it with the port: 10.0.0.1:22161" },
     { shared: true, k: "group", l: "Login groups", t: "text", hint: "one or more, separated by commas: a member of any may sign in. The first one that is a local group is the one the Users page manages; the others can be directory (Active Directory) groups" },
     { shared: true, k: "read_group", l: "Read-only groups", t: "text", hint: "same form; a member of one of these (and of none of the login groups) can sign in and look at everything but change nothing. Empty = nobody. People are added on the Users page" },
     { k: "pam_service", l: "PAM service", t: "text" },
-    { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1 },
-    { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1 },
-    { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1 },
-    { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1 },
-    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, hint: "0 = 8" },
+    { k: "session_idle_minutes", l: "Session idle timeout (min)", t: "int", min: 1, def: 30 },
+    { shared: true, k: "max_failed_logins", l: "Failed logins before lockout", t: "int", min: 1, max: 1000, def: 3 },
+    { shared: true, k: "failed_login_window_minutes", l: "…within this many minutes", t: "int", min: 1, max: 10080, def: 1 },
+    { shared: true, k: "lockout_minutes", l: "Lockout lasts (minutes)", t: "int", min: 1, max: 10080, def: 15 },
+    { shared: true, k: "min_password_length", l: "Minimum password length", t: "int", min: 0, max: 128, def: 8, zeroDef: true },
   ];
   const SNMP_FIELDS = [
     { k: "location", l: "Location", t: "text" },
@@ -2276,24 +2280,24 @@
     { shared: true, k: "devices", l: "Devices", t: "rows", rows: "devices", wide: true, hint: "Tags pick groups of devices for a request (tag:site=dc1). Skip check when the device has a self-signed certificate." },
   ];
   const DEVCHECK_FIELDS = [
-    { shared: true, k: "device_live_check_s", l: "Check every (seconds) while someone looks", t: "int", min: 10, max: 600, hint: "Empty is 30." },
-    { shared: true, k: "device_live_facts_min", l: "Ask for facts every (minutes) while someone looks", t: "int", min: 1, max: 60, hint: "Empty is 5." },
-    { shared: true, k: "device_check_s", l: "Check every (seconds) while nobody looks", t: "int", min: 30, max: 3600, hint: "Empty is 180." },
-    { shared: true, k: "device_facts_min", l: "Ask for facts every (minutes) while nobody looks", t: "int", min: 5, max: 1440, hint: "Empty is 360." },
+    { shared: true, k: "device_live_check_s", l: "Check every (seconds) while someone looks", t: "int", min: 10, max: 600, def: 30 },
+    { shared: true, k: "device_live_facts_min", l: "Ask for facts every (minutes) while someone looks", t: "int", min: 1, max: 60, def: 5 },
+    { shared: true, k: "device_check_s", l: "Check every (seconds) while nobody looks", t: "int", min: 30, max: 3600, def: 180 },
+    { shared: true, k: "device_facts_min", l: "Ask for facts every (minutes) while nobody looks", t: "int", min: 5, max: 1440, def: 360 },
   ];
   const DEVCRED_FIELDS = [
     { shared: true, k: "device_credentials", l: "Logins", t: "rows", rows: "devcreds", wide: true, hint: "A user name and password (Catalyst, Nexus, Arista, Juniper, Aruba CX, Infoblox), or an API token (FortiGate, PAN-OS, Technitium, Observium, IP Fabric, Centreon, NS1, RcodeZero); vCenter uses a Single Sign-On user name (user@vsphere.local) and password; Aviatrix uses a user name and password. Never shown to an MCP caller." },
   ];
   const MCP_FIELDS = [
-    { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, hint: "Empty is 443." },
-    { shared: true, k: "mcp_max_result_mb", l: "Largest answer (MB)", t: "int", min: 1, max: 8, hint: "Empty is 1." },
+    { shared: true, k: "mcp_port", l: "Port on the gateway addresses", t: "int", min: 1, max: 65535, def: 443 },
+    { shared: true, k: "mcp_max_result_mb", l: "Largest answer (MB)", t: "int", min: 1, max: 8, def: 1 },
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
     { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
   const CLUSTER_FIELDS = [
-    { k: "listen", l: "Binding address", t: "port", hint: "the port, default 22162 (all addresses); or an address with the port: 10.0.0.1:22162" },
+    { k: "listen", l: "Binding address", t: "port", def: "22162", hint: "the port, default 22162 (all addresses); or an address with the port: 10.0.0.1:22162" },
     { k: "self", l: "Advertised address", t: "text" },
-    { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600 },
+    { k: "sync_interval_sec", l: "Sync interval (s)", t: "int", min: 1, max: 3600, def: 5 },
   ];
   // Configure ▸ Settings ▸ Logs: where this node sends its log (per node, never replicated)
   const SYSLOG_FIELDS = [
@@ -2390,6 +2394,7 @@
           inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
         } else {
           inp = h("input", { type: c.secret ? "password" : "text", autocomplete: c.secret ? "new-password" : "off", spellcheck: "false", "aria-label": c.name, placeholder: c.ph || "" });
+          if (!row.v[i] && c.def) row.v[i] = c.def;   // the default shown as the value, not left empty
           inp.value = row.v[i] || "";
           inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
         }
@@ -2426,7 +2431,7 @@
       return tr;
     }
     // a row added with Add and left empty (Esc, or a click elsewhere) goes away again; a select counts as empty while it shows its first choice
-    const isBlank = (row) => row.v.every((x, i) => (spec.cols[i].opts ? x === spec.cols[i].opts[0] : !x.trim()));
+    const isBlank = (row) => row.v.every((x, i) => (spec.cols[i].opts ? x === spec.cols[i].opts[0] : !x.trim() || x === spec.cols[i].def));
     function dropBlank(row) {
       if (!row.fresh || !data.includes(row) || !isBlank(row)) return false;
       const ae = document.activeElement, atr = ae && ae.closest ? ae.closest("tr") : null;
@@ -2528,15 +2533,15 @@
     // device of the same name (devExtra, filled in when the page is drawn).
     devices: {
       key: "devices", empty: "No devices.", wide: true,
-      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: PLATFORMS }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443" },
+      cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: PLATFORMS }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443", def: "443" },
         { name: "Login", ph: "a login's name" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
       parse: (d) => {
         if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || PLATFORMS[0], f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }
-        return [d.name || "", d.platform || PLATFORMS[0], d.address || "", d.port ? String(d.port) : "", d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
+        return [d.name || "", d.platform || PLATFORMS[0], d.address || "", d.port ? String(d.port) : portDef(d.platform), d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
       },
       format: (c) => {
         const x = { ...(devExtra[c[0]] || {}), name: c[0], platform: c[1], address: c[2], credential: c[4] };
-        if (c[3].trim()) x.port = Number(c[3]); else delete x.port;
+        if (c[3].trim() && c[3].trim() !== portDef(c[1])) x.port = Number(c[3]); else delete x.port;   // 443 is the default and is not written
         const tags = c[5].split(/[\s,]+/).filter(Boolean);
         if (tags.length) x.tags = tags; else delete x.tags;
         if (c[6] === "skip check") { x.insecure = true; delete x.ca_pem; } else delete x.insecure;
@@ -2744,6 +2749,13 @@
     return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
+  // the valid range under a number field, with its default: "Valid: 10 to 600. Default 30."
+  function rangeHint(f) {
+    if (f.t !== "int" && f.t !== "float") return null;
+    const r = f.min != null && f.max != null ? "Valid: " + f.min + " to " + f.max + "." : f.min != null ? "Valid: " + f.min + " or more." : f.max != null ? "Valid: up to " + f.max + "." : "";
+    const d = f.def != null ? "Default " + f.def + "." : "";
+    return r || d ? h("span", { class: "hint range" }, [r, d].filter(Boolean).join(" ")) : null;
+  }
   function fieldset(specs, obj, asCards) {
     const getters = {};
     let grid = h("div", { class: "grid" });
@@ -2790,7 +2802,7 @@
       } else if (f.t === "port") {
         // a listen address kept as ":22161" in the file is shown as the port alone; one with a host in front is shown as it is
         input = h("input", { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false" });
-        input.value = v == null ? "" : String(v).replace(/^:(\d+)$/, "$1");
+        input.value = v == null || v === "" ? (f.def || "") : String(v).replace(/^:(\d+)$/, "$1");
         get = () => { const t = input.value.trim(); return /^\d+$/.test(t) ? ":" + t : t; };
       } else if (f.t === "secret") {
         input = h("input", { type: "password", autocomplete: "new-password", spellcheck: "false" });
@@ -2798,7 +2810,7 @@
         get = () => input.value.trim();
       } else if (f.t === "int" || f.t === "float") {
         input = h("input", { type: "number", step: f.t === "float" ? "any" : "1", min: f.min, max: f.max });
-        input.value = v == null ? "" : v;
+        input.value = v == null || v === "" || (v === 0 && f.def != null && (f.min > 0 || f.zeroDef)) ? (f.def == null ? "" : f.def) : v;   // empty or "the default" is shown as the default itself
         get = () => (input.value === "" ? 0 : Number(input.value));
       } else {
         input = h("input", { type: "text", autocomplete: "off", spellcheck: "false" });
@@ -2812,7 +2824,7 @@
         const upd = () => { weak.textContent = isWeakKey(input.value) ? "Well known or short: anyone on the network can take over this gateway." : ""; };
         input.addEventListener("input", upd); upd();
       }
-      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, weak));
+      grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, f.hint ? h("span", { class: "hint" }, f.hint) : null, rangeHint(f), weak));
     }
     return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }
