@@ -1,5 +1,13 @@
 # Changelog
 
+## [v44] - 2026-11-07 — README is about netdir only
+
+### Changed
+- The README no longer mentions the NTP Director or `ntpdir`, nor the product netdir came from; the status table says what netdir does, and the driver list now names every driver (Observium, Centreon, IP Fabric and Aviatrix were missing from it). The DNS Director (`dnsdir`) section stays, as a driver of netdir.
+
+### Not changed
+- The `ntpdir` platform is still in the code and still works for a device that uses it; only the README stopped describing it.
+
 ## [v43] - 2026-11-07 — Juniper Junos driver
 
 ### Added
