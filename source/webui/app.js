@@ -306,7 +306,7 @@
   const NAV_GROUPS = [
     ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_mcp", "MCP"], ["cfg_privacy", "Privacy"], ["cfg_devices", "Devices"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
-    ["Monitor", [["devices", "Devices"], ["host", "Node"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["mcpusage", "MCP"], ["log", "Log"]]],
+    ["Monitor", [["devices", "Devices"], ["host", "Node"], ["mcpusage", "MCP"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
   ];
   const TABS = [["topology", TOPO]].concat(NAV_GROUPS.flatMap(([, items]) => items));
   const groupOf = (id) => (id === "topology" ? TOPO : (NAV_GROUPS.find(([, items]) => items.some(([i]) => i === id)) || [null])[0]);
@@ -1898,7 +1898,7 @@
   // The inventory, and a form that asks the devices a target picks for one thing at once.  Every device answers on its own row:
   // what it said, or why not, and how long it took.  Nothing is polled: a device is asked only when Ask is pressed.
   VIEWS.devices = (() => {
-    let inv, form, out, err, targetIn, opSel, cmdIn, askBtn, chgIn, planBtn, applyBtn, chgOut, chgErr, planned = null;
+    let tiles, inv, form, out, err, targetIn, opSel, cmdIn, askBtn, chgIn, planBtn, applyBtn, chgOut, chgErr, planned = null;
     const OPS = [["facts", "Facts"], ["interfaces", "Interfaces"], ["ports", "Ports"], ["neighbors", "Neighbors"], ["neighbor_details", "LLDP and CDP details"], ["routes", "Routes"], ["routing", "Routing protocols"], ["firewall", "Firewall"], ["resources", "CPU, memory and power"], ["vlans", "VLANs"], ["api_catalog", "API catalog"], ["api", "API path"], ["config", "Configuration"], ["show", "Show command"]];
     const upFor = (s) => (!s ? "" : s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d");
     const yes = (b) => (b == null ? "–" : b ? pill("up", "ok tiny") : pill("down", "bad tiny"));
@@ -2085,8 +2085,20 @@
           h("label", { class: "f" }, h("span", {}, "Interface"), iIn), h("label", { class: "f wide" }, h("span", {}, "Filter"), fIn),
           h("label", { class: "f" }, h("span", {}, "Seconds"), sIn), go, cerr), cout));
     };
+    let lastAt = 0;
     async function load() {
       const d = (await api("GET", "/api/devices")).data;
+      lastAt = Date.now();
+      const st = (x) => (x.disabled ? "paused" : ((d.health || {})[x.name] || {}).status || "");
+      const n = (k) => d.devices.filter((x) => st(x) === k).length;
+      const tile = (cls, label, value, sub) => h("div", { class: "qtile " + cls }, h("div", { class: "qv" }, value), h("div", { class: "qs" }, sub || "\u00a0"), h("div", { class: "ql" }, label));
+      const plats = new Set(d.devices.map((x) => x.platform));
+      clear(tiles).append(
+        tile("t1", "Devices", String(d.devices.length), plats.size + (plats.size === 1 ? " platform" : " platforms")),
+        tile("t3", "Answering", String(n("ok")), "asked and answered"),
+        tile("t5", "Refusing", String(n("warn")), "answered with an error"),
+        tile("t6", "Unreachable", String(n("bad")), "no answer"),
+        tile("t2", "Disabled", String(n("paused")), "never contacted"));
       clear(inv).append(d.devices.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
         h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Tags", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, d.devices.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Click to ask only this device; right-click for the network tools",
@@ -2116,7 +2128,8 @@
         const tool = (label, fn) => h("button", { class: "btn", type: "button", onclick: () => { const a = addrIn.value.trim(); if (a) fn(a); } }, label);
         const tools = h("div", { class: "toolbar" }, h("label", { class: "f" }, h("span", {}, "Address"), addrIn),
           tool("Ping", (a) => netTool("ping", a)), tool("Traceroute", (a) => netTool("trace", a)), tool("Scan", scanPopup), tool("Lookup", lookupPopup), tool("Whois", whoisPopup));
-        main.append(h("div", { class: "card" }, h("header", {}, h("h2", {}, "Devices")), inv), h("div", { class: "card" }, h("div", { class: "body" }, form)), out,
+        tiles = h("div", { class: "qtiles" });
+        main.append(tiles, h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, "Devices")), inv), h("div", { class: "card" }, h("div", { class: "body" }, form)), out,
           state.session && state.session.read_only ? null : changeCard(),
           state.session && state.session.read_only ? null : rawCard(),
           state.session && state.session.read_only ? null : captureCard(),
@@ -2125,6 +2138,7 @@
         const pre = state.prefill.devices;   // Topology ▸ right-click a gateway ▸ Ask its devices
         if (pre) { state.prefill.devices = null; targetIn.value = pre.target; opSel.value = pre.op; ask(); }
       },
+      async poll() { if (Date.now() - lastAt >= 10000) await load(); },   // the tiles and the table follow the devices, as the Node page follows the machine
     };
   })();
 
@@ -4274,8 +4288,9 @@
   })();
 
   // ── MCP, Monitor  (API: GET /api/mcpusage) ──────────────────────────────────────
-  // What the MCP endpoint is used for on the picked node: calls by key, by source address, by tool and by device, per hour, and the
-  // newest calls.  Counted by the daemon (mcpusage.go); nothing a caller sent or was answered is kept.
+  // What the MCP endpoint is used for on the picked node, laid out like Monitor ▸ Node: a time range, tiles, charts per hour, and cards
+  // with calls by key, by source address, by tool and by device, then the newest calls.  Counted by the daemon (mcpusage.go);
+  // nothing a caller sent or was answered is kept.
   VIEWS.mcpusage = (() => {
     const SVGNS = "http://www.w3.org/2000/svg";
     const sv = (tag, attrs, ...kids) => {
@@ -4284,78 +4299,93 @@
       for (const kid of kids.flat(Infinity)) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
       return el;
     };
+    const RANGES = [["1h", "Last Hour"], ["24h", "Last Day"], ["7d", "Last Week"]];
+    const REFRESH_MS = 5000;
     const kept = { win: "24h" };
-    let status, win, summary, chart, tables, recent, note, seq = 0, last = "";
-    const size = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB");
+    let status, bar, tiles, charts, tables, recent, foot, rangeBtns, win = kept.win, seq = 0, lastAt = 0, last = "";
+    const size = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB");
     const at = (u) => (u ? new Date(u * 1000).toLocaleString() : "–");
     const num = (n) => n.toLocaleString();
+    const hm = (u, long) => new Date(u * 1000).toLocaleString([], long ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false } : { hour: "2-digit", minute: "2-digit", hour12: false });
+    const card = (title, ...kids) => h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body flush" }, ...kids));
     const COLS = [["Calls", (r) => num(r.calls), true], ["Errors", (r) => (r.errors ? num(r.errors) : "–"), true], ["Refused", (r) => (r.refused ? num(r.refused) : "–"), true],
       ["Changes", (r) => (r.writes ? num(r.writes) : "–"), true], ["Data", (r) => size(r.bytes), true], ["Avg ms", (r) => num(r.avg_ms), true], ["Last", (r) => at(r.last), false]];
-    function sumTable(title, first, rows) {
-      return section(title, rows.length
-        ? h("div", { class: "scroll" }, h("table", { class: "tight" },
+    function sumCard(title, first, rows) {
+      return card(title, rows.length
+        ? h("div", { class: "scroll" }, h("table", {},
           h("thead", {}, h("tr", {}, h("th", {}, first), COLS.map((c) => h("th", { class: c[2] ? "num" : "" }, c[0])))),
           h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { class: "mono" }, r.name), COLS.map((c) => h("td", { class: c[2] ? "num" : "" }, c[1](r))))))))
         : h("div", { class: "empty" }, "No calls in this time range."));
     }
-    function bars(hours) {
-      const W = 720, H = 120, L = 6, B = 18, n = hours.length, max = Math.max(1, ...hours.map((x) => x.calls));
-      const bw = (W - L * 2) / Math.max(1, n);
-      const svg = sv("svg", { class: "uchart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Calls per hour" });
+    // bars per hour; red is the part that failed
+    function bars(title, hours, pick, fail2, text) {
+      const W = 620, H = 230, L = 12, R = 12, T = 12, B = 28, n = hours.length, max = Math.max(1, ...hours.map(pick));
+      const pw = W - L - R, ph = H - T - B, bw = pw / Math.max(1, n);
+      const svg = sv("svg", { class: "qchart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
+      for (let g = 0; g <= 4; g++) svg.append(sv("line", { class: "qgrid", x1: L, x2: W - R, y1: T + ph - (ph * g) / 4, y2: T + ph - (ph * g) / 4 }));
       hours.forEach((x, i) => {
-        const hh = Math.round((x.calls / max) * (H - B - 6)), eh = Math.round((x.errors / max) * (H - B - 6));
-        const t = new Date(x.t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) + ": " + x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "");
-        svg.append(sv("g", {}, sv("title", {}, t),
-          sv("rect", { class: "ubar", x: (L + i * bw + 0.5).toFixed(1), y: H - B - hh, width: Math.max(1, bw - 1).toFixed(1), height: hh }),
-          eh ? sv("rect", { class: "uerr", x: (L + i * bw + 0.5).toFixed(1), y: H - B - eh, width: Math.max(1, bw - 1).toFixed(1), height: eh }) : null));
+        const v = pick(x), hh = Math.round((v / max) * ph), eh = fail2 ? Math.round((fail2(x) / max) * ph) : 0;
+        svg.append(sv("g", {}, sv("title", {}, hm(x.t, true) + ": " + text(x)),
+          sv("rect", { class: "ubar", x: (L + i * bw + 0.5).toFixed(1), y: T + ph - hh, width: Math.max(1, bw - 1).toFixed(1), height: hh }),
+          eh ? sv("rect", { class: "uerr", x: (L + i * bw + 0.5).toFixed(1), y: T + ph - eh, width: Math.max(1, bw - 1).toFixed(1), height: eh }) : null));
       });
-      const f = new Date(hours[0].t * 1000), l = new Date(hours[n - 1].t * 1000);
-      svg.append(sv("text", { class: "qax", x: L, y: H - 4 }, f.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
-        sv("text", { class: "qax", x: W - L, y: H - 4, "text-anchor": "end" }, l.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })),
-        sv("text", { class: "qax", x: W / 2, y: 12, "text-anchor": "middle" }, "calls per hour, most " + max));
-      return svg;
+      svg.append(sv("text", { class: "qax", x: L, y: H - 8 }, hm(hours[0].t, n > 24)), sv("text", { class: "qax", x: W - R, y: H - 8, "text-anchor": "end" }, hm(hours[n - 1].t, n > 24)),
+        sv("text", { class: "qax", x: W - R, y: T + 10, "text-anchor": "end" }, "most " + max.toLocaleString()));
+      return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body" }, svg));
     }
     function draw(r) {
       const sig = JSON.stringify(r);
       if (sig === last) return;
       last = sig;
       const t = r.totals;
-      clear(summary).append(t.calls ? [num(t.calls) + " call" + (t.calls === 1 ? "" : "s"), t.errors ? ", " + num(t.errors) + " failed" : "", t.refused ? ", " + num(t.refused) + " refused (read-only caller asked for a change)" : "",
-        t.writes ? ", " + num(t.writes) + " change" + (t.writes === 1 ? "" : "s") : "", "; " + size(t.bytes) + " returned, " + num(t.avg_ms) + " ms on average."].join("") : "No calls in this time range.");
-      clear(chart).append(r.hours.length ? bars(r.hours) : "");
-      clear(tables).append(sumTable("By key", "Key", r.by_key), sumTable("By source address", "Address", r.by_source), sumTable("By tool", "Tool", r.by_tool), sumTable("By device", "Device, tag or target", r.by_target));
-      clear(recent).append(r.recent.length
-        ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Time", "Key", "Address", "Tool", "Target", "Result", "Ms", "Data"].map((x) => h("th", {}, x)))),
+      const tile = (cls, label, value, sub) => h("div", { class: "qtile " + cls }, h("div", { class: "qv" }, value), h("div", { class: "qs" }, sub || "\u00a0"), h("div", { class: "ql" }, label));
+      const per = r.window_hours ? t.calls / r.window_hours : 0;
+      clear(tiles).append(
+        tile("t1", "Calls", num(t.calls), per ? (per < 10 ? per.toFixed(1) : Math.round(per)) + " an hour" : ""),
+        tile("t3", "Errors", num(t.errors), t.calls ? Math.round((t.errors * 100) / t.calls) + "% of calls" : ""),
+        tile("t2", "Refused", num(t.refused), "read-only callers asking to change"),
+        tile("t4", "Changes", num(t.writes), "that went through"),
+        tile("t5", "Data returned", size(t.bytes), "after privacy masking"),
+        tile("t6", "Average time", num(t.avg_ms) + " ms", "per call on this node"));
+      clear(charts).append(
+        bars("Calls per hour", r.hours, (x) => x.calls, (x) => x.errors, (x) => x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "")),
+        bars("Data returned per hour", r.hours, (x) => x.bytes, null, (x) => size(x.bytes)));
+      clear(tables).append(sumCard("By key", "Key", r.by_key), sumCard("By source address", "Address", r.by_source), sumCard("By tool", "Tool", r.by_tool), sumCard("By device", "Device, tag or target", r.by_target));
+      clear(recent).append(card("Newest calls", r.recent.length
+        ? h("div", { class: "scroll" }, h("table", {},
+          h("thead", {}, h("tr", {}, ["Time", "Key", "Address", "Tool", "Target", "Result", "Ms", "Data"].map((x, i) => h("th", { class: i >= 6 ? "num" : "" }, x)))),
           h("tbody", {}, r.recent.map((c) => h("tr", {}, h("td", {}, new Date(c.time).toLocaleTimeString([], { hour12: false })), h("td", { class: "mono" }, c.caller), h("td", { class: "mono" }, c.addr),
             h("td", { class: "mono" }, c.tool), h("td", { class: "mono" }, c.target || ""), h("td", { class: c.result === "ok" ? "" : "bad" }, c.result + (c.write && c.result === "ok" ? " (change)" : "")),
             h("td", { class: "num" }, String(c.ms)), h("td", { class: "num" }, size(c.bytes)))))))
-        : h("div", { class: "empty" }, "No calls since the daemon started."));
-      note.textContent = r.note;
+        : h("div", { class: "empty" }, "No calls since the daemon started.")));
+      foot.textContent = r.note;
     }
     async function load() {
       const my = ++seq;
       try {
-        const r = await api("GET", "/api/mcpusage?window=" + win.value);   // the answer is the report itself, not wrapped in {ok, data}
+        const r = await api("GET", "/api/mcpusage?window=" + win);   // the answer is the report itself, not wrapped in {ok, data}
         if (my !== seq) return;
+        lastAt = Date.now();
         clear(status);
         draw(r);
       } catch (e) { fail(status)(e); }
     }
+    function setRange(id) {
+      win = kept.win = id; last = "";
+      for (const [k, b] of rangeBtns) b.setAttribute("aria-pressed", k === id ? "true" : "false");
+      load();
+    }
     return {
       mount(main) {
-        last = "";
+        last = ""; win = kept.win;
         status = h("div", { "aria-live": "polite" });
-        win = h("select", { "aria-label": "Time range", onchange: () => { kept.win = win.value; last = ""; load(); } },
-          [["1h", "Last hour"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"]].map(([v, t]) => h("option", { value: v }, t)));
-        win.value = kept.win;
-        summary = h("p", {}); chart = h("div", {}); tables = h("div", {}); recent = h("div", {}); note = h("div", { class: "hint nomargin" });
-        main.append(status, section("MCP usage", h("div", { class: "toolbar tight" }, win, h("button", { class: "btn", type: "button", onclick: load }, "Refresh")), summary, chart),
-          tables, section("Newest calls", recent), note);
+        rangeBtns = new Map(RANGES.map(([id, label]) => [id, h("button", { type: "button", class: "seg", "aria-pressed": id === win ? "true" : "false", onclick: () => setRange(id) }, label)]));
+        bar = h("div", { class: "toolbar qbar" }, h("span", { class: "segs", role: "group", "aria-label": "Time range" }, [...rangeBtns.values()]));
+        tiles = h("div", { class: "qtiles" }); charts = h("div", { class: "hostcharts" }); tables = h("div", { class: "hosttables" }); recent = h("div", {}); foot = h("p", { class: "hint" });
+        main.append(status, bar, tiles, charts, tables, recent, foot);
         load();
       },
-      async poll() { await load(); },
-      poll_ms: 5000,
+      async poll() { if (Date.now() - lastAt >= REFRESH_MS) await load(); },
     };
   })();
 

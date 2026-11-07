@@ -44,7 +44,7 @@ func TestMCPUsage(t *testing.T) {
 	if r2 := u.Report(7 * 24 * time.Hour); r2["totals"].(mcpUseSum).Calls != 6 {
 		t.Errorf("7 days: %+v", r2["totals"])
 	}
-	if h := r["hours"].([]mcpUseHour); len(h) != 25 && len(h) != 24 || h[len(h)-1].Calls != 5 {
+	if h := r["hours"].([]mcpUseHour); len(h) != 25 && len(h) != 24 || h[len(h)-1].Calls != 5 || h[len(h)-1].Bytes != 500 {
 		t.Errorf("hours %+v", h)
 	}
 	if rc := r["recent"].([]mcpUseCall); len(rc) != 7 || rc[0].Tool != "get_log" {

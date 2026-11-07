@@ -1,5 +1,18 @@
 # Changelog
 
+## [v60] - 2026-11-07 — Monitor ▸ MCP and Monitor ▸ Devices laid out like Monitor ▸ Node
+
+### Changed
+- **Monitor ▸ MCP** moved to just below Node in the menu and follows the Node page: the time-range buttons (Last Hour, Last Day, Last Week), a row of tiles (calls, errors, refused, changes, data returned, average time), two charts per hour (calls with the failed part in red, data returned) and the tables as cards. It refreshes by itself every 5 seconds.
+- **Monitor ▸ Devices** starts with tiles (devices, answering, refusing, unreachable, disabled) and the same card headers, and refreshes by itself every 10 seconds. The ask form, change, raw change, capture and network tools are unchanged.
+- `/api/mcpusage` hours now carry `bytes` too.
+
+### Verified
+- Go and JS parse checks; unit tests of the usage report including bytes per hour; help-page tests.
+
+### Not verified
+- Not looked at in a browser: the chart sizes and the tile colours were taken from the Node page's classes. Devices refreshing every 10 s redraws its table, which drops a row you were pointing at.
+
 ## [v59] - 2026-11-07 — Monitor ▸ MCP: the page read the answer wrongly
 
 ### Fixed

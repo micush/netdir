@@ -253,6 +253,7 @@ type mcpUseHour struct {
 	T      int64 `json:"t"`
 	Calls  int64 `json:"calls"`
 	Errors int64 `json:"errors"`
+	Bytes  int64 `json:"bytes"`
 }
 
 // Report adds the buckets of the last window up, by key, source address, tool and target, and by hour.
@@ -295,6 +296,7 @@ func (u *mcpUsage) Report(window time.Duration) map[string]any {
 			if hh := hours[h]; hh != nil {
 				hh.Calls += v.Calls
 				hh.Errors += v.Errors
+				hh.Bytes += v.Bytes
 			}
 		}
 	}
