@@ -744,3 +744,5 @@ table.mcpkeytab td input[readonly] { text-overflow: ellipsis; font-family: var(-
 
 .ubar, .uerr { fill: var(--c); }
 .tight td.bad { color: var(--bad); }
+table.policy tr.off td { opacity: .5; }
+table.policy tr.off td:first-child { opacity: 1; }

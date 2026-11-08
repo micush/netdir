@@ -45,20 +45,31 @@ const (
 var mcpProtocols = map[string]bool{"2024-11-05": true, "2025-03-26": true, "2025-06-18": true, "2025-11-25": true}
 
 // normMCPACL checks the access list and writes each entry the same way: "10.1.0.0/24", "host.example.com", "10.1.1.50 rw",
-// "10.1.0.0/24 strict", "10.1.1.50 rw none": an address or network, then ro or rw, then a privacy level (mcpprivacy.go).
+// "10.1.0.0/24 strict", "10.1.1.50 rw none": an address or network, then ro or rw, then a privacy level (mcpprivacy.go).  The word
+// "disabled" at the end ("10.1.1.50 rw disabled") keeps the entry in the list and gives it no access (right-click ▸ Disable); a
+// disabled entry is not merged with the others of its address.
 func normMCPACL(list []string) ([]string, error) {
 	if len(list) > 64 {
 		return nil, errors.New("mcp: at most 64 entries in the access list")
 	}
+	type ent struct {
+		t   string // the address (an enabled entry) or the whole text of the entry (a disabled one)
+		off bool
+	}
 	mode, level := map[string]string{}, map[string]string{}
-	var order []string
+	var order []ent
+	seenOff := map[string]bool{}
 	for _, s := range list {
 		f := strings.Fields(s)
 		if len(f) == 0 {
 			continue
 		}
+		off := false
+		if last := strings.ToLower(f[len(f)-1]); len(f) > 1 && last == "disabled" {
+			off, f = true, f[:len(f)-1]
+		}
 		if len(f) > 3 {
-			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level", s)
+			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level, then disabled to switch it off", s)
 		}
 		rw, lvl := false, ""
 		for _, w := range f[1:] {
@@ -85,8 +96,23 @@ func normMCPACL(list []string) ([]string, error) {
 				return nil, fmt.Errorf("mcp: access list: %q: read-write is for a single address, not a network or a host name", s)
 			}
 		}
+		if off {
+			text := t
+			if rw {
+				text += " rw"
+			}
+			if lvl != "" {
+				text += " " + lvl
+			}
+			text += " disabled"
+			if !seenOff[text] {
+				seenOff[text] = true
+				order = append(order, ent{t: text, off: true})
+			}
+			continue
+		}
 		if _, ok := mode[t]; !ok {
-			order = append(order, t)
+			order = append(order, ent{t: t})
 		}
 		if rw || mode[t] == "" {
 			mode[t] = map[bool]string{true: "rw", false: "ro"}[rw || mode[t] == "rw"]
@@ -94,7 +120,12 @@ func normMCPACL(list []string) ([]string, error) {
 		level[t] = strictestLevel(level[t], lvl)
 	}
 	out := make([]string, 0, len(order))
-	for _, t := range order {
+	for _, e := range order {
+		if e.off {
+			out = append(out, e.t)
+			continue
+		}
+		t := e.t
 		if mode[t] == "rw" {
 			t += " rw"
 		}
@@ -104,6 +135,12 @@ func normMCPACL(list []string) ([]string, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// aclOff says that an entry of the access list is disabled (it stays in the list and allows nothing).
+func aclOff(e string) bool {
+	f := strings.Fields(e)
+	return len(f) > 1 && strings.EqualFold(f[len(f)-1], "disabled")
 }
 
 // t0 is the address of an entry written "ADDRESS [rw]".
@@ -163,6 +200,9 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 		var ro, rw []string
 		lv := map[string][]string{}
 		for _, e := range acl {
+			if aclOff(e) {
+				continue
+			}
 			f := strings.Fields(e)
 			if len(f) > 1 && f[1] == "rw" {
 				rw = append(rw, f[0])

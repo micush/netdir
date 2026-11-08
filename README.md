@@ -425,6 +425,7 @@ A platform is one file in `source/device/`. It implements `device.Driver` (Facts
 
 1. **Allow the caller.**
    - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change things (rw is for single addresses only). A privacy level may follow: `"10.0.0.0/24 strict"` (see [Privacy levels](#privacy-levels)).
+   - An entry (or a key) can be switched off without deleting it: right-click ▸ **Disable**. In the file an address then ends with `disabled` (`"10.0.0.20 rw disabled"`) and a key has `"disabled": true`; it allows nothing until enabled.
    - Or with a key that works from any address: Configure ▸ MCP ▸ Keys ▸ right-click ▸ **Add key** makes one and shows it once. In the file, `{"name": "laptop", "access": "rw", "key": "<at least 32 random characters>"}` in `settings.mcp_keys` does the same. Only a SHA-256 hash of the key is kept.
 2. **Give the gateway a certificate the client trusts.** The GUI starts with a self-signed one; install yours with `netdir --tls-install --cert-file F --key-file F`. The primary's certificate is copied to every node.
 3. **Point the client at the VIP.** For Claude Code:

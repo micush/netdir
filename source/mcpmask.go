@@ -44,12 +44,13 @@ func maskTag(prefix, v string) string {
 
 var (
 	reV4    = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	reHexIP = regexp.MustCompile(`(?i)\b0x[0-9a-f]{8}\b`)
 	reV6    = regexp.MustCompile(`(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}`)
 	reAS    = regexp.MustCompile(`\bAS ?(\d{1,10})\b`)
 	reASKw  = regexp.MustCompile(`(?i)\b((?:remote|local|peer|neighbor|origin)-as|router bgp|bgp-as|as-number|autonomous-system)(\s*[:=]?\s*"?)(\d{1,10})\b`)
 	reMail  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
 	reNum   = regexp.MustCompile(`\d{1,10}`)
-	reMAC   = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}`)
+	reMAC   = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|[0-9a-f]{6}\.[0-9a-f]{6}|[0-9a-f]{12}`)
 	reArpa4 = regexp.MustCompile(`(?i)\b(?:\d{1,3}\.){1,4}in-addr\.arpa\b`)
 	reArpa6 = regexp.MustCompile(`(?i)\b(?:[0-9a-f]\.){1,32}ip6\.arpa\b`)
 	reDash  = regexp.MustCompile(`\b\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`)
@@ -200,6 +201,20 @@ func ip6Keep(a netip.Addr, tag string, keep int) string {
 }
 
 // text hides what a piece of text says, as the rules ask.
+// unpad4 takes the leading zeros out of the parts of a dotted address, which netip refuses.
+func unpad4(x string) string {
+	p := strings.Split(x, ".")
+	for i, d := range p {
+		if len(d) > 1 && d[0] == '0' {
+			p[i] = strings.TrimLeft(d, "0")
+			if p[i] == "" {
+				p[i] = "0"
+			}
+		}
+	}
+	return strings.Join(p, ".")
+}
+
 func (m *maskRules) text(s string) string {
 	if s == "" || m == nil || m.none {
 		return s
@@ -215,6 +230,15 @@ func (m *maskRules) text(s string) string {
 		s = replaceMAC(s, func(x string) string {
 			low := strings.ToLower(x)
 			tag := maskTag("MASKED-MAC", strings.NewReplacer("-", ":", ".", "").Replace(low))
+			if len(x) == 12 || len(x) == 13 && x[6] == '.' { // aabbccddeeff and aabbcc.ddeeff
+				if r.MACs == "nic" {
+					return tag + x[6:]
+				}
+				if r.MACs == "oui" {
+					return x[:6] + tag
+				}
+				return tag
+			}
 			if r.MACs == "nic" { // the last three bytes, the part that is the card's own
 				if strings.Contains(x, ".") {
 					return tag + "." + x[len(x)-7:]
@@ -276,10 +300,24 @@ func (m *maskRules) text(s string) string {
 			return ip4Keep(a, maskTag("PRIVATE-IP", a.String()), r.IPKeep)
 		})
 		s = reV4.ReplaceAllStringFunc(s, func(x string) string {
-			a, err := netip.ParseAddr(x)
+			a, err := netip.ParseAddr(unpad4(x)) // 192.168.005.005 is the same address
 			if err != nil {
 				return x
 			}
+			switch {
+			case r.PublicIPs && publicAddr(a):
+				return ip4Keep(a, maskTag("PUBLIC-IP", a.String()), r.IPKeep)
+			case r.PrivateIPs && privateAddr(a):
+				return ip4Keep(a, maskTag("PRIVATE-IP", a.String()), r.IPKeep)
+			}
+			return x
+		})
+		s = reHexIP.ReplaceAllStringFunc(s, func(x string) string { // 0xc0a80505
+			n, err := strconv.ParseUint(x[2:], 16, 32)
+			if err != nil {
+				return x
+			}
+			a := netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
 			switch {
 			case r.PublicIPs && publicAddr(a):
 				return ip4Keep(a, maskTag("PUBLIC-IP", a.String()), r.IPKeep)
@@ -405,33 +443,62 @@ func isAlnum(c byte) bool {
 
 // replaceMAC replaces the MAC addresses of s that stand alone (not a piece of a longer colon- or dot-separated run, such as an IPv6 address).
 func replaceMAC(s string, f func(string) string) string {
-	idx := reMAC.FindAllStringIndex(s, -1)
-	if len(idx) == 0 {
+	if !reMAC.MatchString(s) {
 		return s
 	}
+	// a word before or after the separator ("mac:", "hwaddr-") ends the address; a run of up to four hex digits ("dead:") is a piece of a longer one
+	word := func(i, d int) bool {
+		n, hex := 0, true
+		for ; i >= 0 && i < len(s) && isAlnum(s[i]); i += d {
+			n++
+			hex = hex && (s[i] >= '0' && s[i] <= '9' || s[i] >= 'a' && s[i] <= 'f' || s[i] >= 'A' && s[i] <= 'F')
+		}
+		return n > 0 && !(hex && n <= 4)
+	}
 	var b strings.Builder
-	at := 0
-	for _, sp := range idx {
+	at, from := 0, 0
+	for from < len(s) {
+		loc := reMAC.FindStringIndex(s[from:])
+		if loc == nil {
+			break
+		}
+		sp := [2]int{from + loc[0], from + loc[1]}
 		edge := func(i int) bool {
 			if i < 0 || i >= len(s) {
 				return true
 			}
 			c := s[i]
+			if (c == ':' || c == '-') && (i == sp[0]-1 && word(i-1, -1) || i == sp[1] && word(i+1, 1)) {
+				return true
+			}
 			if c == '.' && i == sp[1] && (i+1 >= len(s) || !isAlnum(s[i+1])) {
 				return true // the full stop at the end of a sentence
 			}
 			return !(c == ':' || c == '-' || c == '.' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z')
 		}
-		b.WriteString(s[at:sp[0]])
-		if edge(sp[0]-1) && edge(sp[1]) {
+		if edge(sp[0]-1) && edge(sp[1]) && !digitsOnly12(s[sp[0]:sp[1]]) {
+			b.WriteString(s[at:sp[0]])
 			b.WriteString(f(s[sp[0]:sp[1]]))
+			at, from = sp[1], sp[1]
 		} else {
-			b.WriteString(s[sp[0]:sp[1]])
+			from = sp[0] + 1 // not an address standing alone: look again from the next character
 		}
-		at = sp[1]
 	}
 	b.WriteString(s[at:])
 	return b.String()
+}
+
+// digitsOnly12 is a twelve-digit number, which is far more likely to be a counter or a time than an address written without separators.
+func digitsOnly12(x string) bool {
+	if len(x) != 12 {
+		return false
+	}
+	for i := 0; i < len(x); i++ {
+		if x[i] < '0' || x[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // maskText hides what a piece of text says about the public network, as the standard level does.

@@ -2330,7 +2330,7 @@
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
-    const data = (lines || []).map((l) => ({ v: spec.parse(l) }));
+    const data = (lines || []).map((l) => ({ v: spec.parse(l), off: !!(spec.isOff && spec.isOff(l)) }));
     let page = 0, size = small ? 1e9 : 50, dragging = null;
     const tbody = h("tbody", {});
     const tbl = h("table", { class: "policy zones rows" + (N === 1 ? " one" : "") },
@@ -2385,7 +2385,7 @@
       changed();
     }
     function mk(row) {
-      const tr = h("tr", {});
+      const tr = h("tr", { class: row.off ? "off" : "" });
       tr._row = row;
       const grip = h("span", { class: "grip-h", draggable: "true", title: "Drag to reorder", "aria-hidden": "true" }, "⋮⋮");
       tr.append(h("td", { class: "grip" }, h("span", { class: "rownum" }, String(data.indexOf(row) + 1)), grip));
@@ -2474,6 +2474,7 @@
         ["Copy", () => { rowClips[spec.key] = cells(row).map((x, i) => (spec.cols[i].secret ? "" : x)); try { navigator.clipboard.writeText(rowClips[spec.key].join("\t")); } catch (e) { /* the row stays in the page's own clipboard */ } }],
         ["Paste", () => paste(row)],
         ["Add", () => focusRow(insert([], row), 0)],
+        ...(spec.isOff ? [[row.off ? "Enable" : "Disable", () => { row.off = !row.off; render(); changed(); }]] : []),
         ...(i > 0 ? [["Move up", () => moveTo(row, vis[i - 1], false)]] : []),
         ...(i >= 0 && i < vis.length - 1 ? [["Move down", () => moveTo(row, vis[i + 1], true)]] : []),
         ...(di > 0 ? [["Move to top", () => moveTo(row, data[0], false)]] : []),
@@ -2498,7 +2499,7 @@
     return {
       el: box,
       get: () => (spec.obj ? data.filter((r) => !spec.mark(cells(r))).map((r) => spec.obj(cells(r)))
-        : data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r))))),
+        : data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r)).map((x) => (r.off ? x + " disabled" : x))))),
     };
   }
 
@@ -2537,6 +2538,7 @@
       },
       format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "")),
       mark: (c) => !c[0],
+      isOff: (l) => /\sdisabled\s*$/i.test(String(l)),   // a row switched off with right-click ▸ Disable stays in the list but allows nothing
     },
     neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
     morevip4: oneCol("morevip4", "IPv4 address", "10.0.0.11", "No more IPv4 addresses."),
@@ -2715,7 +2717,7 @@
         // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
         const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
           value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
-        const tr = h("tr", {},
+        const tr = h("tr", { class: k.disabled ? "off" : "" },
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
           h("td", {}, name),
           h("td", {}, acc),
@@ -2726,6 +2728,7 @@
           ["Add key", addKey],
           ["Copy key", () => { try { navigator.clipboard.writeText(k.key); } catch (_) { /* nothing to copy to */ } }, "", null, shown(k) ? "" : "No key is kept for this row: Replace key"],
           ["Replace key", () => replaceKey(k)],
+          [k.disabled ? "Enable" : "Disable", () => { if (k.disabled) delete k.disabled; else k.disabled = true; changed(); }],
           ["Delete", () => { if (confirm("Delete the key " + k.name + "?\n\nWhatever uses it can no longer connect to /mcp.")) { keys.splice(keys.indexOf(k), 1); changed(); } }, "danger"],
         ]));
         return tr;

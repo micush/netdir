@@ -39,6 +39,8 @@ type MCPKey struct {
 	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key (worked out from Key when there is one)
 	Key     string `json:"key,omitempty"`     // the key itself; empty for a key made before it was kept
 	Created int64  `json:"created,omitempty"` // unix time the key was added
+	// Disabled keeps the key in the list and lets it do nothing: the caller is refused like one with an unknown key (right-click ▸ Disable).
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 func mcpKeyHash(key string) string {
@@ -110,7 +112,7 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 func mcpKeyAccess(keys []MCPKey, presented string) (name, access string) {
 	got := mcpKeyHash(presented)
 	for _, k := range keys {
-		if subtle.ConstantTimeCompare([]byte(got), []byte(k.Hash)) == 1 && name == "" {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(k.Hash)) == 1 && name == "" && !k.Disabled {
 			name, access = k.Name, k.Access
 		}
 	}

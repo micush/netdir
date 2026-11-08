@@ -1,5 +1,29 @@
 # Changelog
 
+## [v82] - 2026-11-08 — privacy: more ways of writing an address or a MAC are hidden
+
+### Fixed
+- **A MAC address written after a label was not hidden.** `MAC:BC:24:11:3D:2D:D8` and `hwaddr-bc-24-11-3d-2d-d8` were skipped, because the colon or dash in front made the masker take the address for a piece of a longer one. A word in front ("mac", "hwaddr") now ends the address; a run of up to four hex digits ("dead:") still counts as a piece of an IPv6 address.
+- **A MAC in Cisco's `bc2411.3d2dd8` form, or written as twelve hex digits (`bc24113d2dd8`), was not hidden.** Both are now, at every setting (show, oui, nic, hide). A twelve-digit number made of digits only is left alone: it is far more likely a counter or a time.
+- **An IPv4 address with leading zeros (`192.168.005.005`) or in hex (`0xc0a80505`) was not hidden.** Both now are, by the same rules as `192.168.5.5`.
+
+### Verified
+- `TestMaskOddForms`, including text that must stay as it is (a long count, a hash, an IPv6 address, a time).
+
+### Not verified
+- An address written as one decimal number (`3232236805`) is still not hidden: a number that size is as often a counter. Whether this was why pbs1's MAC showed is not known; I could not reproduce it with a real Proxmox answer.
+
+## [v81] - 2026-11-08 — MCP: switch an allowed source or a key off and on
+
+### Added
+- **Right-click ▸ Disable / Enable on a row of Configure ▸ MCP ▸ Allowed sources and on a key.** A disabled entry stays in the list (greyed out) and allows nothing: a disabled address is skipped when the access is worked out, and a disabled key is refused with 401. Enable switches it on again. In the saved list an address reads `10.1.1.50 rw strict disabled`; a key has `"disabled": true`.
+
+### Verified
+- `TestMCPACLDisabledEntries` and `TestMCPKeyDisabled`; the full checklist (gofmt, vet, tests, CGO off, node --check, leak test).
+
+### Not verified
+- The right-click menu and the greyed rows have not been looked at in a browser.
+
 ## [v80] - 2026-11-07 — federation: a device cannot come back through the director that published it
 
 ### Fixed
