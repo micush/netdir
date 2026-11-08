@@ -693,7 +693,7 @@
     };
         const CV_ZOOM_MIN = 0.2, CV_ZOOM_MAX = 3;   // what the mouse wheel can zoom the drawing to
     const CV_MIN_SCALE = 0.65;   // the drawing shrinks to fit the window down to this, then scrolls
-    const cv = { cfg: null, orig: null, gid: null, sel: null, view: [], loaded: false, drawn: null, ro: null };
+    const cv = { cfg: null, orig: null, gid: null, sel: null, multi: null, view: [], loaded: false, drawn: null, ro: null };
     let svgHost, legendEl, pending = 0;
 
     const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
@@ -841,10 +841,21 @@
       const devAt = (k) => { const r = Math.floor(k / DEV_ROW), n = Math.min(DEV_ROW, devs.length - r * DEV_ROW); return { x: (W - n * COLW) / 2 + (k % DEV_ROW) * COLW + (COLW - SW) / 2, y: SY + r * (SH + RG) }; };
       const svg = sv("svg", { class: "cv", viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "group", "aria-label": "Gateway diagram", tabindex: "0",
         onkeydown: (e) => { if ((e.key === "Delete" || e.key === "Backspace") && cv.sel && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); delSel(); } },
-        onclick: (e) => { if (e.target === svg) { cv.sel = null; refresh(); } } });
-      const sel = (kind, addr) => cv.sel && cv.sel.kind === kind && cv.sel.addr === addr;
+        onclick: (e) => { if (e.target === svg) { cv.sel = null; cv.multi = null; refresh(); } } });
+      // Shift-click picks the devices from the last one clicked to this one, Ctrl-click (or Cmd-click) adds or takes one away; a plain click picks one
+      const sel = (kind, addr) => cv.sel && cv.sel.kind === kind && cv.sel.addr === addr || kind === "dev" && !!cv.multi && cv.multi.has(addr);
       const pick = (kind, addr) => (e) => {
-        e.stopPropagation(); cv.sel = { kind, addr }; refresh();
+        e.stopPropagation();
+        if (kind === "dev" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+          const cur = cv.multi ? new Set(cv.multi) : new Set(cv.sel && cv.sel.kind === "dev" ? [cv.sel.addr] : []);
+          if (e.shiftKey && cv.sel && cv.sel.kind === "dev" && devs.includes(cv.sel.addr)) {
+            const a = devs.indexOf(cv.sel.addr), b = devs.indexOf(addr);
+            for (let i = Math.min(a, b); i <= Math.max(a, b); i++) cur.add(devs[i]);
+          } else if (cur.has(addr)) cur.delete(addr); else cur.add(addr);
+          cv.multi = cur.size > 1 ? cur : null;
+          cv.sel = cur.size ? { kind, addr: cur.has(addr) ? addr : [...cur][cur.size - 1] } : null;
+        } else { cv.multi = null; cv.sel = { kind, addr }; }
+        refresh();
         const el = svgHost.querySelector("svg"); if (el) el.focus({ preventScroll: true }); // keep the Delete key working after the redraw
       };
       const label = (x, y, t, cls) => sv("text", { x, y, "text-anchor": "middle", class: cls || "" }, t);
@@ -1078,7 +1089,9 @@
     function form(title, fields, onOk, okLabel, noSave) {
       const els = {}, hints = {};
       const grid = h("div", { class: "grid" }, fields.map((f) => {
-        els[f.k] = f.options
+        els[f.k] = f.multi
+          ? h("select", { multiple: true, size: String(Math.min(f.options.length, 8)) }, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))   // Shift-click and Ctrl-click pick several
+          : f.options
           ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, PLATFORM_LABEL[o] || o)))
           : h("input", { type: f.secret ? "password" : "text", autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
@@ -1091,7 +1104,7 @@
       const submit = (e) => {
         e.preventDefault();
         const vals = {};
-        for (const f of fields) vals[f.k] = els[f.k].value.trim();
+        for (const f of fields) vals[f.k] = f.multi ? [...els[f.k].selectedOptions].map((o) => o.value).join("\n") : els[f.k].value.trim();
         const m = onOk(vals);
         if (m) { errorBox(err, m); return; }
         closeEditor();
@@ -1309,12 +1322,12 @@
       const others = inventory().map((x) => x.name).filter((n) => !(g.devices || []).includes(n));
       const ls = logins().map((c) => c.name);
       const show = (els) => {
-        const fresh = !els.pick || els.pick.value === NEW_DEV, newLogin = els.login.value === NEW_LOGIN;
+        const fresh = !els.pick || [...els.pick.selectedOptions].some((o) => o.value === NEW_DEV) || !els.pick.selectedOptions.length, newLogin = els.login.value === NEW_LOGIN;
         for (const k of ["name", "platform", "address", "port", "opts", "tags", "cert", "login"]) els[k].closest("label").style.display = fresh ? "" : "none";
         for (const k of ["user", "pass", "token"]) els[k].closest("label").style.display = fresh && newLogin ? "" : "none";
       };
       form(edit ? "Edit device " + edit : "Add device", [
-        ...(edit || !others.length ? [] : [{ k: "pick", l: "Device", options: [NEW_DEV, ...others], v: NEW_DEV, on: show }]),
+        ...(edit || !others.length ? [] : [{ k: "pick", l: "Device", options: [NEW_DEV, ...others], v: NEW_DEV, on: show, multi: true, hint: "Shift-click or Ctrl-click to pick several." }]),
         { k: "name", l: "Name", v: d ? d.name : "", ph: "core-sw1" },
         // a cloud service has one API address: choosing it fills the address in (an address typed by hand is left alone)
         { k: "platform", l: "Platform", options: PLATFORMS, v: d ? d.platform : PLATFORMS[0], initOn: true, on: (els) => {
@@ -1334,7 +1347,9 @@
         { k: "pass", l: "Password", v: "", secret: true },
         { k: "token", l: "Token", v: "", secret: true },
       ], (v) => {
-        if (v.pick && v.pick !== NEW_DEV) { g.devices = (g.devices || []).concat(v.pick); cv.sel = { kind: "dev", addr: v.pick }; return null; }
+        const picked = (v.pick || "").split("\n").filter(Boolean);
+        if (picked.includes(NEW_DEV) && picked.length > 1) return "Pick " + NEW_DEV + " on its own, or pick devices of the inventory.";
+        if (picked.length && picked[0] !== NEW_DEV) { g.devices = (g.devices || []).concat(picked.filter((n) => !(g.devices || []).includes(n))); cv.sel = { kind: "dev", addr: picked[picked.length - 1] }; return null; }
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v.name)) return "A name is up to 64 letters, digits, '.', '-' or '_'.";
         if (inventory().some((x) => x.name.toLowerCase() === v.name.toLowerCase() && x !== d)) return "There is a device called " + v.name + " already.";
         if (!v.address && v.platform === "meraki") v.address = "api.meraki.com";
@@ -1382,6 +1397,15 @@
         cv.cfg.settings.devices = inventory().filter((x) => x.name !== name);
         for (const gg of groups()) if (gg.devices) { gg.devices = gg.devices.filter((n) => n !== name); if (!gg.devices.length) delete gg.devices; }
         cv.sel = null; commit();
+      });
+    }
+    // several devices picked on the map: delete them from the inventory
+    function deleteDevices(names) {
+      const set = new Set(names);
+      confirmDialog("Delete " + names.length + " devices?", "This takes " + names.join(", ") + " out of the inventory and off every gateway they are on. Their logins stay. You can restore them later from History.", "Delete " + names.length + " devices", () => {
+        cv.cfg.settings.devices = inventory().filter((x) => !set.has(x.name));
+        for (const gg of groups()) if (gg.devices) { gg.devices = gg.devices.filter((n) => !set.has(n)); if (!gg.devices.length) delete gg.devices; }
+        cv.sel = null; cv.multi = null; commit();
       });
     }
     const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["Add device", () => deviceForm(g)], pasteItem(g),
@@ -1567,8 +1591,18 @@
     };
     // right-click on a shape: select it, then show what can be done with it
     const rightClick = (kind, addr) => (e) => {
-      cv.sel = { kind, addr }; refresh();
       const g = curGroup();
+      if (kind === "dev" && cv.multi && cv.multi.size > 1 && cv.multi.has(addr)) {   // several devices picked: what can be done with all of them
+        const list = [...cv.multi].map(devByName).filter(Boolean);
+        refresh();
+        openMenu(e, [[list.length + " devices", () => {}, "", null, "Shift-click or Ctrl-click picks more"], "-",
+          ["Enable", () => { for (const d of list) delete d.disabled; commit(); }, "", null, list.some((d) => d.disabled) ? "" : "None of them is disabled"],
+          ["Disable", () => { for (const d of list) d.disabled = true; commit(); }, "", null, list.every((d) => d.disabled) ? "All of them are disabled" : ""],
+          ["Copy devices", () => { devClip = list.map((d) => d.name); }], "-",
+          ["Remove from this gateway", delSel], ["Delete devices", () => deleteDevices(list.map((d) => d.name)), "danger"]]);
+        return;
+      }
+      cv.multi = null; cv.sel = { kind, addr }; refresh();
       openMenu(e, kind === "gw" ? gwItems(g) : kind === "dev" ? devItems(g, addr) : anyItems(g, addr));
     };
 
@@ -1651,7 +1685,7 @@
     function delSel() {
       const g = curGroup(), s = cv.sel;
       if (!g || !s) return;
-      const finish = () => { cv.sel = null; closeEditor(); commit(); };
+      const finish = () => { cv.sel = null; cv.multi = null; closeEditor(); commit(); };
       if (s.kind === "gw") {
         confirmDialog("Delete gateway " + gwLabel(g) + "?",
           "This removes its shared address from the configuration. You can restore it later from History.", "Delete gateway", () => {
@@ -1660,7 +1694,8 @@
             finish();
           });
       } else if (s.kind === "dev") {   // off this gateway only; the device stays in the inventory (Delete device… removes it)
-        g.devices = (g.devices || []).filter((n) => n !== s.addr);
+        const gone = cv.multi && cv.multi.has(s.addr) ? cv.multi : new Set([s.addr]);   // the Delete key takes off every picked device
+        g.devices = (g.devices || []).filter((n) => !gone.has(n));
         if (!g.devices.length) delete g.devices;
         finish();
       } else if (s.kind === "any") {

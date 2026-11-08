@@ -1,5 +1,38 @@
 # Changelog
 
+## [v94] - 2026-11-08 — topology: remove or delete the picked devices
+
+### Added
+- With several devices picked on the map, right-click ▸ **Remove from this gateway** (they stay in the inventory) and **Delete devices** (out of the inventory and every gateway, after a confirmation). The Delete key takes every picked device off the gateway.
+
+### Verified
+- `node --check` of `app.js` only; nothing in Go changed.
+
+### Not verified
+- Not looked at in a browser.
+
+## [v93] - 2026-11-08 — topology: pick several devices
+
+### Added
+- **On the topology map, Shift-click picks a run of devices and Ctrl-click (Cmd-click) adds or removes one.** Right-click one of the picked devices: **Enable**, **Disable** or **Copy devices** for all of them at once (then **Paste N devices** on another gateway). A plain click, a click on the empty drawing, or a right-click on a device that is not picked goes back to one.
+
+### Verified
+- `node --check` of `app.js` and `help.js` only; nothing in Go changed.
+
+### Not verified
+- Not looked at in a browser. Delete and drag still act on the one device last clicked, not on the picked set.
+
+## [v92] - 2026-11-08 — Add device: pick several at once
+
+### Changed
+- **Add device on a gateway:** the Device list is now a multi-select. Shift-click or Ctrl-click picks several inventory devices and all are added to the gateway (ones already on it are left out). *＋ new device* still stands alone: picking it with others is refused.
+
+### Verified
+- `node --check` of `app.js` and `help.js` only; the Go tests were not run for this change (nothing in Go changed).
+
+### Not verified
+- Not looked at in a browser: the list's height and the new-device fields hiding and showing as the selection changes.
+
 ## [v91] - 2026-11-08 — version bump
 
 ### Changed
