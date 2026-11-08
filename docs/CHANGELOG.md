@@ -1,5 +1,9 @@
 # Changelog
 
+## [v103] - 2026-11-08 — version bump only
+
+No code change since v102.
+
 ## [v102] - 2026-11-08 — hidden values are written with x
 
 ### Changed
