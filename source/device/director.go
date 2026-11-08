@@ -12,10 +12,11 @@ import (
 	"strings"
 )
 
-// The two sibling products, reached through their own MCP endpoint (POST /mcp on the GUI port, JSON answers):
+// The sibling products and other Network Directors, reached through their own MCP endpoint (POST /mcp on the GUI port, JSON answers):
 //
 //	dnsdir   AnyName DNS Director: DNS proxy gateways served by a cluster of nodes (GUI and MCP port 53853)
 //	ntpdir   NTP Director: the same for NTP (port 12380)
+//	netdir   MCP Network Director: another one of these (port 22161); the devices it reaches are reachable here too (downstream.go)
 //
 // The credential is an MCP key as the token ("Authorization: Bearer KEY", made under Configure ▸ Monitoring ▸ MCP ▸ Keys of
 // that director); the key's ro or rw is the access, as everywhere here (an address of this gateway in the director's mcp_acl
@@ -28,12 +29,13 @@ import (
 func init() {
 	Register("dnsdir", func(d Device, c Credential) (Driver, error) { return newDirector(d, c, "dns") })
 	Register("ntpdir", func(d Device, c Credential) (Driver, error) { return newDirector(d, c, "ntp") })
+	Register("netdir", func(d Device, c Credential) (Driver, error) { return newDirector(d, c, "net") })
 }
 
 type director struct {
 	d    Device
 	api  *apiClient
-	kind string // dns or ntp
+	kind string // dns, ntp or net
 	node string
 }
 
@@ -43,10 +45,7 @@ func newDirector(d Device, c Credential, kind string) (Driver, error) {
 	if c.Token == "" {
 		return nil, fmt.Errorf("device %s: a director needs an MCP key as the credential's token (Configure ▸ Monitoring ▸ MCP ▸ Keys on the director)", d.Name)
 	}
-	port := 53853
-	if kind == "ntp" {
-		port = 12380
-	}
+	port := map[string]int{"dns": 53853, "ntp": 12380, "net": 22161}[kind]
 	api, err := newAPIClient(d, port)
 	if err != nil {
 		return nil, err
@@ -60,8 +59,11 @@ func newDirector(d Device, c Credential, kind string) (Driver, error) {
 }
 
 func (m *director) product() (vendor, model string) {
-	if m.kind == "ntp" {
+	switch m.kind {
+	case "ntp":
 		return "NTP Director", "NTP gateway cluster"
+	case "net":
+		return "MCP Network Director", "gateway cluster"
 	}
 	return "AnyName", "DNS Director"
 }
@@ -76,6 +78,11 @@ func (m *director) call(ctx context.Context, tool string, args map[string]any) (
 			args["node"] = m.node
 		}
 	}
+	return m.callPlain(ctx, tool, args)
+}
+
+// callPlain is call without the node option: the device tools of a Network Director take no node.
+func (m *director) callPlain(ctx context.Context, tool string, args map[string]any) (any, error) {
 	req := map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": args}}
 	b, err := m.api.do(ctx, http.MethodPost, "/mcp", req, http.Header{"Accept": {"application/json, text/event-stream"}})
 	if err != nil {
@@ -231,14 +238,30 @@ var directorShow = map[string]string{
 	"nodes": "list_nodes", "topology": "get_topology", "gateways": "get_gateways", "alerts": "get_alerts", "log": "get_log",
 	"query-stats": "get_query_stats", "host-stats": "get_host_stats", "server-stats": "get_server_stats", "schedule": "get_schedule",
 	"updates": "get_updates", "node-status": "get_node_status", "lldp": "get_lldp",
-	"dns": "get_dns", "ntp": "get_ntp", "time": "get_time",
+	"dns": "get_dns", "ntp": "get_ntp", "time": "get_time", "devices": "list_devices",
+}
+
+// hasTool says whether a director of this kind has the read tool: the DNS and NTP products each have their own, and only a
+// Network Director has devices and no query or server statistics.
+func hasTool(kind, tool string) bool {
+	switch tool {
+	case "get_dns":
+		return kind == "dns"
+	case "get_ntp", "get_time":
+		return kind == "ntp"
+	case "get_query_stats", "get_server_stats":
+		return kind != "net"
+	case "list_devices":
+		return kind == "net"
+	}
+	return true
 }
 
 var directorShowArgs = map[string]string{"node": "s", "range": "s", "top": "i", "gateway": "i", "transport": "s", "lines": "i", "level": "s"}
 
 // Show takes "show NAME [key=value ...]": NAME is one of the director's read tools without its get_ (show nodes, show topology,
 // show gateways, show alerts, show log, show query-stats, show host-stats, show server-stats, show schedule, show updates,
-// show node-status, show lldp, and show dns or show time and show ntp for the product that has them), and the keys node, range,
+// show node-status, show lldp, and show dns, show time, show ntp or show devices for the product that has them), and the keys node, range,
 // top, gateway, transport, lines and level are the tool's arguments.
 func (m *director) Show(ctx context.Context, cmd string) (string, error) {
 	f := strings.Fields(cmd)
@@ -246,7 +269,7 @@ func (m *director) Show(ctx context.Context, cmd string) (string, error) {
 		return "", errors.New(`show NAME [node=… range=… top=… gateway=… transport=…], e.g. show topology; names: ` + strings.Join(m.showNames(), ", "))
 	}
 	tool, ok := directorShow[strings.ToLower(f[1])]
-	if !ok || (tool == "get_dns" && m.kind != "dns") || (tool == "get_ntp" && m.kind != "ntp") || (tool == "get_time" && m.kind != "ntp") {
+	if !ok || !hasTool(m.kind, tool) {
 		return "", fmt.Errorf("show %s: not a read this director has; names: %s", f[1], strings.Join(m.showNames(), ", "))
 	}
 	args := map[string]any{}
@@ -277,7 +300,7 @@ func (m *director) Show(ctx context.Context, cmd string) (string, error) {
 func (m *director) showNames() []string {
 	var n []string
 	for k, t := range directorShow {
-		if (t == "get_dns" && m.kind != "dns") || ((t == "get_ntp" || t == "get_time") && m.kind != "ntp") {
+		if !hasTool(m.kind, t) {
 			continue
 		}
 		n = append(n, k)

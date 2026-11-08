@@ -964,7 +964,7 @@
           sv("title", {}, devTip(d, info)),
           sv("rect", { x, y, width: SW, height: SH, rx: 4 }),
           label(mx, y + 19, fitPx(name, SW - 20, "600 13px system-ui, sans-serif"), "t1"),
-          label(mx, y + 35, fitPx(d.address + " · " + d.platform, SW - 20, "400 11px system-ui, sans-serif"), "t2")));
+          label(mx, y + 35, fitPx(d.address + " · " + platformName(d.platform), SW - 20, "400 11px system-ui, sans-serif"), "t2")));
       });
       svg.append(...lines, ...shapes);
       // The scrolling box (.cv-wrap) is made once and kept: only the drawing inside it is swapped on each refresh, so its
@@ -1079,7 +1079,7 @@
       const els = {}, hints = {};
       const grid = h("div", { class: "grid" }, fields.map((f) => {
         els[f.k] = f.options
-          ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))
+          ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, PLATFORM_LABEL[o] || o)))
           : h("input", { type: f.secret ? "password" : "text", autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
@@ -1203,7 +1203,7 @@
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
     const devTip = (d, info) => {
       const h = (info && info.health) || {}, f = h.facts || {};
-      return [d.name + " — " + d.platform + ", " + d.address + (d.port ? ":" + d.port : ""), info ? info.detail : "Not checked yet",
+      return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""), info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
         f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
         (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : ""].filter(Boolean).join("\n");
@@ -1311,7 +1311,7 @@
           if (!pc || Object.values(PORT_DEF).concat("443").includes(pc)) els.port.value = pd;   // a port typed by hand is kept
         } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
-        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Default 443 (Proxmox 8006)." },
+        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Default 443 (Proxmox VE 8006)." },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
         { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core" },
         { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip: self-signed certificate." },
@@ -1904,7 +1904,7 @@
     const OPS = [["facts", "Facts"], ["interfaces", "Interfaces"], ["ports", "Ports"], ["neighbors", "Neighbors"], ["neighbor_details", "LLDP and CDP details"], ["routes", "Routes"], ["routing", "Routing protocols"], ["firewall", "Firewall"], ["resources", "CPU, memory and power"], ["vlans", "VLANs"], ["api_catalog", "API catalog"], ["api", "API path"], ["config", "Configuration"], ["show", "Show command"]];
     const upFor = (s) => (!s ? "" : s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d");
     const yes = (b) => (b == null ? "–" : b ? pill("up", "ok tiny") : pill("down", "bad tiny"));
-    const resultHead = (r) => h("header", {}, h("h2", {}, r.device), h("span", { class: "muted" }, r.platform + " · " + r.ms + " ms"),
+    const resultHead = (r) => h("header", {}, h("h2", {}, r.device), h("span", { class: "muted" }, platformName(r.platform) + " · " + r.ms + " ms"),
       r.ok ? null : pill("failed", "bad"));
     function drawResults(d) {
       clear(out);
@@ -2091,23 +2091,28 @@
     async function load() {
       const d = (await api("GET", "/api/devices")).data;
       lastAt = Date.now();
-      const st = (x) => (x.disabled ? "paused" : ((d.health || {})[x.name] || {}).status || "");
-      const n = (k) => d.devices.filter((x) => st(x) === k).length;
+      // the devices below the Network Directors that are devices here come with their own health (Via: the directors between)
+      const all = d.devices.concat((d.remote || []).map((r) => Object.assign({}, r, { remote: true })));
+      const hl = (x) => (x.remote ? { status: x.status, detail: x.detail } : (d.health || {})[x.name] || {});
+      const st = (x) => (x.disabled ? "paused" : hl(x).status || "");
+      const n = (k) => all.filter((x) => st(x) === k).length;
       const tile = (cls, label, value, sub) => h("div", { class: "qtile " + cls }, h("div", { class: "qv" }, value), h("div", { class: "qs" }, sub || "\u00a0"), h("div", { class: "ql" }, label));
-      const plats = new Set(d.devices.map((x) => x.platform));
+      const plats = new Set(all.map((x) => x.platform));
       clear(tiles).append(
-        tile("t1", "Devices", String(d.devices.length), plats.size + (plats.size === 1 ? " platform" : " platforms")),
+        tile("t1", "Devices", String(all.length), plats.size + (plats.size === 1 ? " platform" : " platforms")),
         tile("t3", "Answering", String(n("ok")), "asked and answered"),
         tile("t5", "Refusing", String(n("warn")), "answered with an error"),
         tile("t6", "Unreachable", String(n("bad")), "no answer"),
         tile("t2", "Disabled", String(n("paused")), "never contacted"));
-      clear(inv).append(d.devices.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-        h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Tags", ""].map((t) => h("th", {}, t)))),
-        h("tbody", {}, d.devices.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Click to ask only this device; right-click for the network tools",
+      const below = d.remote_errors || {};
+      clear(inv).append(all.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
+        h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Via", "Tags", ""].map((t) => h("th", {}, t)))),
+        h("tbody", {}, all.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Click to ask only this device; right-click for the network tools",
           onclick: () => { targetIn.value = x.name; }, oncontextmenu: rowMenu(toolItems(x.address)) },
-          h("td", { class: "nname" }, x.name), h("td", { title: ((d.health || {})[x.name] || {}).detail || "not checked yet" },
-            pill(...({ ok: ["answering", "ok tiny"], warn: ["refusing", "warn tiny"], bad: ["unreachable", "bad tiny"], paused: ["disabled", "tiny"] }[((d.health || {})[x.name] || {}).status] || ["not checked", "tiny"]))),
-          h("td", {}, x.platform), h("td", { class: "mono" }, x.address + (x.port ? ":" + x.port : "")),
+          h("td", { class: "nname" }, x.name), h("td", { title: [hl(x).detail || "not checked yet", below[x.name] ? "Below it: " + below[x.name] : ""].filter(Boolean).join(". ") },
+            pill(...({ ok: ["answering", "ok tiny"], warn: ["refusing", "warn tiny"], bad: ["unreachable", "bad tiny"], paused: ["disabled", "tiny"] }[hl(x).status] || ["not checked", "tiny"]))),
+          h("td", {}, platformName(x.platform)), h("td", { class: "mono" }, x.address + (x.port ? ":" + x.port : "")),
+          h("td", {}, (x.via || []).join(" \u25b8 ")),
           h("td", {}, (x.tags || []).map((t) => [pill(t, "info tiny"), " "])), h("td", {}, x.disabled ? pill("disabled") : ""))))))
         : h("div", { class: "empty" }, "No devices yet. Add them under Configure ▸ Devices."));
     }
@@ -2145,7 +2150,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { proxmox: "8006", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380" };   // the API port of a platform that is not 443
+  const PORT_DEF = { proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2388,7 +2393,7 @@
         let inp;
         if (c.opts) {
           const opts = c.opts.includes(row.v[i]) || !row.v[i] ? c.opts : [...c.opts, row.v[i]];   // a value this list does not know is kept
-          inp = h("select", { "aria-label": c.name }, opts.map((o) => h("option", { value: o }, o)));
+          inp = h("select", { "aria-label": c.name }, opts.map((o) => h("option", { value: o }, PLATFORM_LABEL[o] || o)));
           if (!row.v[i]) row.v[i] = c.opts[0];
           inp.value = row.v[i];
           inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
@@ -2508,7 +2513,16 @@
   // the drivers in device/, alphabetical: a new device starts with the first; the daemon checks the name when the page saves
   // the API address of the platforms that are a cloud service
   const SERVICE_ADDR = { meraki: "api.meraki.com", entra: "graph.microsoft.com", nsone: "api.nsone.net", rcode0: "my.rcodezero.at" };
-  const PLATFORMS = ["afc", "aoscx", "aviatrix", "bigip", "centreon", "dnsdir", "entra", "eos", "fortios", "iosxe", "ipfabric", "junos", "meraki", "nios", "nsone", "ntpdir", "nxos", "observium", "panorama", "panos", "proxmox", "rcode0", "technitium", "vcenter"];
+  // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
+  const PLATFORM_LABEL = {
+    afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
+    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", iosxe: "Cisco IOS-XE",
+    proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
+    meraki: "Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
+    netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
+  };
+  const platformName = (p) => PLATFORM_LABEL[p] || p;
+  const PLATFORMS = Object.keys(PLATFORM_LABEL).sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b]));   // as the person reads them
   const ROW_TABLES = {
     snmpacl: oneCol("snmpacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may ask."),
     metricsacl: oneCol("metricsacl", "Address or network", "10.1.0.0/24, 192.0.2.5, 2001:db8::/32", "Nobody may read /metrics."),

@@ -88,6 +88,7 @@ type mChg struct{ mx }
 type mUser struct{ mx }
 type mCli struct{ mx }
 type mCap struct{ mx }
+type mDown struct{ mx }
 
 func (m mAPI) APIGet(ctx context.Context, p string) (any, bool, error) {
 	v, text, err := m.d.(APIer).APIGet(ctx, p)
@@ -155,6 +156,17 @@ func (m mCap) Capture(ctx context.Context, r CaptureReq) (CaptureResult, error) 
 	return v, err
 }
 
+func (m mDown) Below(ctx context.Context) (string, []Below, error) {
+	inst, v, err := m.d.(Downstream).Below(ctx)
+	leakAdd(m.plat, "below", v, err)
+	return inst, v, err
+}
+func (m mDown) Ask(ctx context.Context, op string, names []string, arg string) ([]Result, error) {
+	v, err := m.d.(Downstream).Ask(ctx, op, names, arg)
+	leakAdd(m.plat, "ask", v, err)
+	return v, err
+}
+
 // wrapLeak returns a driver that records what it answers and has the methods of the driver it wraps; one for each set of
 // optional interfaces the platforms have (a driver with another set is not wrapped, so its answers are not recorded).
 func wrapLeak(plat string, drv Driver) Driver {
@@ -177,6 +189,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 	_, user := drv.(UserDeviceLooker)
 	_, cli := drv.(ClientReporter)
 	_, capt := drv.(Capturer)
+	_, down := drv.(Downstream)
 	add(api, "api")
 	add(raw, "raw")
 	add(fw, "fw")
@@ -188,6 +201,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 	add(user, "user")
 	add(cli, "cli")
 	add(capt, "cap")
+	add(down, "down")
 	switch set {
 	case "api raw fw port route res vlan chg cap ": // eos
 		return struct {
@@ -274,14 +288,15 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mVLAN
 			mChg
 		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}}
-	case "api raw res cap ": // dnsdir, ntpdir
+	case "api raw res cap down ": // dnsdir, ntpdir, netdir
 		return struct {
 			recDrv
 			mAPI
 			mRaw
 			mRes
 			mCap
-		}{rd, mAPI{m}, mRaw{m}, mRes{m}, mCap{m}}
+			mDown
+		}{rd, mAPI{m}, mRaw{m}, mRes{m}, mCap{m}, mDown{m}}
 	}
 	return drv
 }

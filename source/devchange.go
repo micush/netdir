@@ -90,6 +90,9 @@ func (m *Mgmt) deviceChange(raw json.RawMessage, actor string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseRemote(target); err != nil {
+		return nil, err
+	}
 	picked, err := device.Select(devs, target)
 	if err != nil {
 		return nil, err

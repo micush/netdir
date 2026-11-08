@@ -945,6 +945,7 @@ func init() {
 			}},
 		{name: "list_devices", title: "Managed devices", noNode: true,
 			desc: "The switches and firewalls this gateway manages: name, platform, address, tags and whether each is disabled, and the platforms that have a driver. " +
+				"remote lists the devices below the Network Directors (platform netdir) that are devices here, with the directors they are reached through (via) and their health: every device_* tool takes them as a target like any other and the request goes down to the director that has the login. " +
 				"Add or change devices with edit_config (settings.devices and settings.device_credentials).",
 			run: func(c *mcpCtx) (any, error) { b, err := c.call("GET", "/api/devices", nil, ""); return asAny(b), err }},
 		mcpDeviceTool("device_facts", "Device facts", "facts",

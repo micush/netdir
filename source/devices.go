@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"netdir/device"
@@ -62,7 +63,13 @@ func (w *WebServer) handleDevices(rw http.ResponseWriter, r *http.Request, s *se
 	if devs == nil {
 		devs = []device.Device{}
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"devices": devs, "platforms": device.Platforms(), "health": health}})
+	// remote: the devices below the Network Directors that are devices here (downstream.go), which a Network Director above lists in turn
+	remote, rerrs := w.status.sup.remoteDevices(1500*time.Millisecond, false)
+	if remote == nil {
+		remote = []RemoteDevice{}
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"devices": devs, "platforms": device.Platforms(), "health": health,
+		"remote": remote, "remote_errors": rerrs, "instance": instanceID()}})
 }
 
 // deviceOps are the requests a device can be asked; the bool says the op hands over secrets (refused to read-only).
@@ -107,7 +114,8 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		}
 	}
 	devs, creds := w.status.sup.deviceInventory()
-	if len(devs) == 0 {
+	rem, _ := w.status.sup.remoteDevices(2*time.Second, false)
+	if len(devs) == 0 && len(rem) == 0 {
 		jsonError(rw, http.StatusNotFound, "no devices are configured (settings.devices)")
 		return
 	}
@@ -116,7 +124,12 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		jsonError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	picked, err := device.Select(devs, target)
+	picked, err := device.Select(append(append([]device.Device(nil), devs...), remoteAsDevices(rem)...), target)
+	if err != nil && len(directorsHere(devs)) > 0 {
+		// a name below a Network Director that the index does not have yet: look again now, and wait for it
+		rem, _ = w.status.sup.remoteDevices(downTimeout, true)
+		picked, err = device.Select(append(append([]device.Device(nil), devs...), remoteAsDevices(rem)...), target)
+	}
 	if err != nil {
 		jsonError(rw, http.StatusBadRequest, err.Error())
 		return
@@ -126,9 +139,42 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		to = deviceConfigTO
 	}
 	infof("devices: %q asked %s of %s (%d devices)", s.user, opLabel(op, cmd), q.Get("target"), len(picked))
-	res := device.Fanout(r.Context(), picked, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (any, error) {
+	isRemote := map[string]bool{}
+	for _, x := range rem {
+		isRemote[strings.ToLower(x.Name)] = true
+	}
+	var here []device.Device
+	for _, p := range picked {
+		if !isRemote[strings.ToLower(p.Name)] {
+			here = append(here, p)
+		}
+	}
+	got := map[string]device.Result{}
+	var gwg sync.WaitGroup
+	if len(here) < len(picked) {
+		gwg.Add(1)
+		go func() {
+			defer gwg.Done()
+			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(devs), op, cmd, to, got)
+		}()
+	}
+	local := device.Fanout(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (any, error) {
 		return runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp)
 	})
+	gwg.Wait()
+	byLocal := map[string]device.Result{}
+	for _, x := range local {
+		byLocal[strings.ToLower(x.Device)] = x
+	}
+	res := make([]device.Result, 0, len(picked))
+	for _, p := range picked {
+		k := strings.ToLower(p.Name)
+		if x, ok := got[k]; ok {
+			res = append(res, x)
+		} else if x, ok := byLocal[k]; ok {
+			res = append(res, x)
+		}
+	}
 	failed := 0
 	for _, x := range res {
 		if !x.OK {

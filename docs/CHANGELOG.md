@@ -1,5 +1,49 @@
 # Changelog
 
+## [v76] - 2026-11-07 — federation: Network Directors chained, devices below show up like any other
+
+### Added
+- **`netdir` platform, shown as "MCP Network Director".** A device of this platform is another Network Director, reached through its MCP endpoint (GUI port 22161, an MCP key as the token). It works like the dnsdir and ntpdir devices (facts, interfaces, resources, neighbors, `show nodes|topology|gateways|alerts|log|host-stats|schedule|updates|node-status|lldp|devices`, configuration, API request, `device_change_raw`), and in addition its devices are reachable from here.
+- **Federation.** The devices a Network Director reaches, and those below the directors it has as devices, are listed here (`remote` of `GET /api/devices` and of `list_devices`; Monitor ▸ Devices with a *Via* column and the health the owning director sees) and are targets of every device request (a name, `tag:`, `platform:`, `all`). The read goes down to the director that has the login, which asks the device (or the director below it) and hides the secrets; the answer comes up the same way. Links go downward only. A name that is taken is shown as `name@director`; a device that comes back through a loop is dropped, one reached two ways is listed once, a chain is cut at six directors. The index is made in the background every minute and when someone looks at the list (at most every 20 s); a name it does not have yet makes the request look again and wait up to 8 s.
+- `device/downstream.go` (the `Downstream` interface: `Below`, `Ask`) and `downstream.go` (index, routing, loop guard), tests for both.
+- The leak test's recording wrapper passes `Below` and `Ask` on and records their answers (27 platforms).
+
+### Changed
+- A change, a raw change or a capture for a device below another director is refused with the name of the director that owns it (the reads go down, the changes do not). A device's configuration is not passed on.
+- `list_devices` also names `remote` and `instance` (the installation's identity, derived from the cluster secret without giving it away).
+
+### Verified
+- Stub Network Directors: the driver's facts and shows, `Below` (own devices with their health, devices below with their chain), `Ask` (names sorted, show and API arguments, no configuration, no names), a request through the MCP tool for a device below and for a name that is taken, an unknown name looked up again and refused, a director that does not answer, the index builder (taken names, duplicates by the longer way, the loop, the depth cut). Race detector on the new tests, `TestEveryPlatformIsWritable`, the full test suite, `node --check` and the leak test.
+
+### Not verified
+- **Only one level was tried against a stub; no two real Network Directors, no firewalled link, no chain of three.** The GUI was not looked at in a browser. The alerts of a device below are raised by the director that owns it and are not collected above. The timeouts for a long chain (15 s per director added to the request's own) were not measured.
+
+## [v75] - 2026-11-07 — platform names as people write them
+
+### Changed
+- The platforms are shown by name in the platform list of Add device, the device table, the tiles and the tooltips: Aruba Fabric Controller, ArubaOS-CX, Aviatrix, F5 BigIP, Centreon, AnyName DNS Director, AnyTime NTP Director, Microsoft Entra ID, Arista EOS, Fortinet FortiOS, Cisco IOS-XE, Proxmox VE, Proxmox Backup Server, Proxmox Datacenter Manager, IP Fabric, Juniper Junos, Meraki, Infoblox NIOS, NSOne, Cisco NX-OS, Observium, Palo Alto Panorama, Palo Alto PanOS, RcodeZero, Technitium DNS Server, VMware vCenter Server. The list is sorted by these names. The stored names (`iosxe`, `proxmox`, ...) are unchanged, so no configuration changes. `TestGUIPlatformLabelsMatchTheDrivers` fails when a driver has no name in the list.
+
+### Verified
+- The new test, `node --check`, the full test suite and the leak test.
+
+### Not verified
+- Not looked at in a browser.
+
+## [v74] - 2026-11-07 — Proxmox Backup Server and Proxmox Datacenter Manager; "proxmox ve"
+
+### Added
+- **`pbs` (Proxmox Backup Server)** and **`pdm` (Proxmox Datacenter Manager)** drivers over their REST APIs (`device/pxmx.go` holds what they share with the Proxmox VE one: the `/api2/json` client, the token or ticket login, the read and change guards, task waiting). Backup Server on port 8007, Datacenter Manager on 8443; the token is `user@realm!id:secret` (a colon, not the equals sign of VE) and is sent as `PBSAPIToken=…` or `PDMAPIToken=…`, or a user name and password for a ticket. Facts, Interfaces, `show` (PBS: datastores, usage, groups, snapshots, jobs, tasks, failed tasks, node status; PDM: remotes, resources, remote tasks, per remote PVE and PBS views), the read-only API request, and `device_change_raw` for rw keys with the usual refusals (users, tokens, permissions, certificates, consoles, restart and shutdown, wiping disks; PBS also: deleting datastores, groups and snapshots, a prune that is not a dry run, `remove-vanished`; PDM also: removing a remote, deleting a guest, a rollback, a cross-cluster migration). A PBS change that starts a task is waited for; a PDM one names its task. The device check connects to 8007 and 8443.
+- Add device fills the port for them, and the platform list, help, README and the `devices` text of `netdir --help` name them.
+
+### Changed
+- **Proxmox VE is shown as "proxmox ve"** (and the new ones as "proxmox backup server" and "proxmox datacenter manager") in the platform lists, the device tiles and the device table. The stored name stays `proxmox`, so no configuration changes.
+
+### Verified
+- Stub servers for both products: the exact token headers, the ticket login with its CSRF token and percent-encoded cookie, every `show`, secrets hidden, each refused read and change is refused without reaching the server, a dry run, an applied change, a waited-for task; `TestEveryPlatformIsWritable`, the full test suite and the leak test.
+
+### Not verified
+- **Not run against a real Backup Server or Datacenter Manager.** The paths come from Proxmox's API viewers and forum reports; the Datacenter Manager ones are the least certain (an unknown `show` can be replaced by an API request), and so is its ticket cookie name. The GUI was not looked at in a browser.
+
 ## [v73] - 2026-11-07 — Clients: callers of the last 5 minutes, over all serving nodes
 
 ### Changed
