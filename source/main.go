@@ -71,8 +71,8 @@ the web GUI):
                                         (look a user up in Entra and follow their most recently used device on the Meraki
                                          network over the last N hours (default 6): client, usage, wireless or switch-port health)
                    --device-import OBSERVIUM [--dry-run]
-                                        (add the devices an Observium server monitors to the inventory, each one disabled
-                                         and with no login; those whose OS has no driver, or already there, are listed as skipped)
+                                        (add the devices an Observium, IP Fabric, Centreon, Panorama, PDM or AFC server knows to the inventory,
+                                         each one disabled and with no login; those with no driver, or already there, are listed as skipped)
                    --device-signin DEVICE
                                         (sign in to Microsoft Entra with a browser: prints a code and a link, then waits)
                    --device-capture IFACE|default --target DEVICES [--capture-filter EXPR] [--capture-seconds N]

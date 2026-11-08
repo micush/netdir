@@ -10,8 +10,8 @@ import (
 	"netdir/device"
 )
 
-// deviceImportObservium adds the devices an Observium server monitors to the inventory, each one disabled and with no login
-// (device/obsimport.go has the rules).  dry_run only lists them.  It runs from the GUI, the CLI and the API; MCP cannot change the
+// deviceImportObservium adds the devices an Observium, IP Fabric or Centreon server knows to the inventory, each one disabled and with no login
+// (device/import.go has the rules).  dry_run only lists them.  It runs from the GUI, the CLI and the API; MCP cannot change the
 // configuration, so there is no tool for it.
 func (m *Mgmt) deviceImportObservium(raw json.RawMessage, actor string) (any, error) {
 	var a struct {
@@ -34,8 +34,8 @@ func (m *Mgmt) deviceImportObservium(raw json.RawMessage, actor string) (any, er
 	if srv == nil {
 		return nil, fmt.Errorf("device %q: not in the inventory", a.Device)
 	}
-	if srv.Platform != "observium" {
-		return nil, fmt.Errorf("device %s: only an Observium device can be imported from", srv.Name)
+	if !device.ImportSources[srv.Platform] {
+		return nil, fmt.Errorf("device %s: devices are imported from an Observium, IP Fabric, Centreon, Panorama, Proxmox Datacenter Manager or Aruba Fabric Composer device only", srv.Name)
 	}
 	if srv.Disabled {
 		return nil, fmt.Errorf("device %s is disabled: enable it first", srv.Name)
@@ -51,7 +51,7 @@ func (m *Mgmt) deviceImportObservium(raw json.RawMessage, actor string) (any, er
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	add, skipped, err := device.ObserviumImport(ctx, *srv, *cred, dc.Settings.Devices)
+	add, skipped, err := device.ImportDevices(ctx, *srv, *cred, dc.Settings.Devices)
 	if err != nil {
 		return nil, err
 	}

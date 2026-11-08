@@ -1,5 +1,64 @@
 # Changelog
 
+## [v90] - 2026-11-08 — import from Proxmox Datacenter Manager and Aruba Fabric Composer
+
+### Added
+- **Import Devices from a Proxmox Datacenter Manager:** the nodes of each remote it manages, a Proxmox VE remote's as `proxmox` and a Backup Server remote's as `pbs`, disabled, with no login, tagged `source=pdm` and `remote=ID`. A node listed by IP address is named `ID-N`.
+- **Import Devices from an Aruba Fabric Composer:** its switches as `aoscx`, tagged `source=afc` and `fabric=NAME`, by management address (else the switch name).
+
+### Changed
+- The GUI menu is **Import ▸ Devices** and **Import ▸ Preview** (one submenu) on every import source.
+
+### Verified
+- `TestImportFromPDMAndAFC` (names, platforms, tags, the AFC stub); the full checklist.
+
+### Not verified
+- Not run against a real PDM or AFC. PDM's `/remotes/remote` is assumed to list each remote's `nodes` with a `hostname` (the test stub lists none); a PDM that does otherwise falls back to the remote's own `server`/`host`, or skips. AFC's switch fields (`ip_address`, `name`, `fabric_name`) are my reading of its API Explorer, not checked: a switch without an address is imported by its name, so it must resolve in DNS.
+- The Proxmox `node` option is not set on imported hosts.
+
+## [v89] - 2026-11-08 — import from Panorama; copy all devices of a gateway
+
+### Added
+- **Import Devices from a Panorama:** the firewalls it manages (`show devices all`) are added as `panos` devices, disabled and with no login, tagged `source=panorama` and `dg=DEVICE_GROUP`, named by host name (the same rules as the other imports; one already there is skipped).
+- **Right-click a gateway ▸ Copy all devices,** then **Paste N devices** on another gateway (circle or empty drawing). Paste leaves out the ones already there and any no longer in the inventory. **Copy device** still copies one.
+
+### Verified
+- `TestImportFromPanorama` (against the Panorama stub); the full checklist.
+
+### Not verified
+- Not run against a real Panorama: the shape of `show devices all` is the one in the driver's test stub. A Panorama that names the fields otherwise would skip devices as having no address.
+- The copy and paste menu has not been looked at in a browser.
+
+## [v88] - 2026-11-08 — import: Infoblox and Proxmox, shorter names, existing devices skipped
+
+### Changed
+- Observium's OS `infoblox` imports as `nios` and `pve` (and `proxmox`) as `proxmox`.
+- The inventory name is the first label of the host name, without a trailing `-m` or `-new` (`aptxipm02-m.net.axway.int` becomes `aptxipm02`).
+- A device whose name is already in the inventory is **skipped** ("already in the inventory (same name …)"), as one with the same address already was. Before, it was imported as `NAME-2`. Two hosts that shorten to the same name (`x` and `x-m`) import once, the first.
+
+### Verified
+- `TestObserviumImportRows` now covers the new OS names, the suffixes and the same-name skip; the full checklist.
+
+### Not verified
+- Not run against your Observium: the OS names `infoblox` and `pve` are the ones from your list.
+
+## [v87] - 2026-11-08 — import devices from IP Fabric and Centreon too
+
+### Added
+- **Import Devices works from IP Fabric and Centreon as well as Observium** (same right-click item, `netdir --device-import`, `POST /api/devices/import`). Devices are added disabled, with no login, tagged `source=ipfabric|centreon`; IP Fabric adds `site=` from its site name, Centreon `poller=` from the monitoring server. The driver comes from IP Fabric's vendor/family/platform, or from the names of a Centreon host's templates, categories and groups; one that does not say is skipped with the reason.
+
+### Changed
+- The import code is one path (`device/import.go`) for the three sources; the Observium behaviour of v86 is unchanged.
+
+### Verified
+- `TestImportPlatformGuesses`, `TestImportFromIPFabricAndCentreon` (against the IP Fabric and Centreon stubs), the v86 Observium tests; the full checklist.
+
+### Not verified
+- Not run against a real IP Fabric or Centreon. The platform guesses (IP Fabric's vendor and family strings, Centreon's plugin-pack template names such as `Net-Cisco-Standard-SNMP`) are from memory, not checked; a wrong guess skips a device, it does not import it under the wrong driver, except that a Cisco template cannot tell IOS-XE from classic IOS or Nexus-style names it does not know.
+- The Centreon stub has no `/configuration/hosts`, so the template read is exercised only as "refused": every stub host is skipped.
+- IP Fabric's address is the `loginIpv4` column (else the host name); a release that names it otherwise falls back to the host name.
+- The GUI menu items for IP Fabric and Centreon have not been looked at in a browser.
+
 ## [v86] - 2026-11-08 — import devices from Observium
 
 ### Added

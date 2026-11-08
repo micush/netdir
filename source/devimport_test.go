@@ -11,7 +11,7 @@ func TestDeviceImportRefusals(t *testing.T) {
 	guiEditConfig(t, e, `{"settings":{"device_credentials":[{"name":"c","token":"tok"}],"devices":[
 		{"name":"sw1","platform":"iosxe","address":"10.0.0.1","credential":"c"},
 		{"name":"obs-off","platform":"observium","address":"obs.example.com","credential":"c","disabled":true}]}}`)
-	for _, tc := range []struct{ dev, want string }{{"nope", "not in the inventory"}, {"sw1", "only an Observium device"}, {"obs-off", "is disabled"}} {
+	for _, tc := range []struct{ dev, want string }{{"nope", "not in the inventory"}, {"sw1", "Observium, IP Fabric, Centreon"}, {"obs-off", "is disabled"}} {
 		b, _ := json.Marshal(map[string]any{"device": tc.dev})
 		if _, err := e.mg.Op("device.import_observium", b, "alice"); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", tc.dev, err)

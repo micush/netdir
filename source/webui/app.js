@@ -1250,7 +1250,7 @@
         if (live()) put("The code expired. Run again.");
       }, link);
     }
-    // Observium: add the devices it monitors to the inventory, disabled and with no login (the daemon saves it, so the page loads the config again)
+    // Observium, IP Fabric, Centreon: add the devices the server knows to the inventory, disabled and with no login (the daemon saves it, so the page loads the config again)
     const importText = (r) => (r.dry_run ? "Would import " : "Imported ") + r.added.length + " devices (disabled, no login: give each a login, then enable it)\n\n" +
       r.added.map((d) => "  " + d.name.padEnd(24) + d.platform.padEnd(9) + d.address).join("\n") +
       (r.skipped.length ? "\n\nSkipped " + r.skipped.length + ":\n" + r.skipped.map((s) => "  " + s.name.padEnd(30) + s.reason).join("\n") : "");
@@ -1258,7 +1258,7 @@
       textPopup("Import devices from " + name, async (put) => { put(importText((await api("POST", "/api/devices/import", { device: name, dry_run: true })).data)); });
     }
     function importDevices(name) {
-      confirmDialog("Import devices from " + name + "?", "Every device Observium monitors that has a driver here and is not in the inventory yet is added, disabled and with no login. Nothing is contacted until you give it a login and enable it. Use Preview to see the list first.", "Import", () => {
+      confirmDialog("Import devices from " + name + "?", "Every device the server knows that has a driver here and is not in the inventory yet is added, disabled and with no login. Nothing is contacted until you give it a login and enable it. Use Preview to see the list first.", "Import", () => {
         textPopup("Import devices from " + name, async (put) => { const r = (await api("POST", "/api/devices/import", { device: name })).data; put(importText(r)); await load(); refresh(); });
       }, "btn");
     }
@@ -1285,20 +1285,21 @@
     }
     // Ask every device of the gateway at once: Monitor ▸ Devices, with the target filled in and the question asked
     const askGateway = (g, op) => { state.prefill.devices = { target: "gateway:" + g.group_id, op }; selectTab("devices"); };
-    // Copy a device (right-click it) and paste it on another gateway (right-click the circle, or the empty drawing)
-    let devClip = null;
-    const pasteWhy = (g) => (!devClip ? "Nothing copied yet: right-click a device ▸ Copy device" : !devByName(devClip) ? "The copied device is no longer in the inventory" : (g.devices || []).includes(devClip) ? devClip + " is already on this gateway" : "");
-    const pasteDevice = (g) => quick(() => { g.devices = (g.devices || []).concat(devClip); cv.sel = { kind: "dev", addr: devClip }; });
-    const pasteItem = (g) => ["Paste device" + (devClip ? " " + devClip : ""), () => pasteDevice(g), "", null, pasteWhy(g)];
+    // Copy a device (right-click it), or every device of a gateway (right-click the gateway), and paste them on another gateway (right-click the circle, or the empty drawing)
+    let devClip = [];
+    const clipNew = (g) => devClip.filter((n) => devByName(n) && !(g.devices || []).includes(n));
+    const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy device, or a gateway ▸ Copy all devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
+    const pasteDevice = (g) => quick(() => { const add = clipNew(g); g.devices = (g.devices || []).concat(add); cv.sel = { kind: "dev", addr: add[add.length - 1] }; });
+    const pasteItem = (g) => [devClip.length > 1 ? "Paste " + devClip.length + " devices" : "Paste device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), "", null, pasteWhy(g)];
     const devItems = (g, name) => {
       const d = devByName(name);
       return [["Ask", null, "", [["Facts", () => devAsk(name, "facts")], ["Interfaces", () => devAsk(name, "interfaces")], ["Ports", () => devAsk(name, "ports")], ["Neighbors", () => devAsk(name, "neighbors")],
         ["LLDP and CDP details", () => devAsk(name, "neighbor_details")], ["Routes", () => devAsk(name, "routes")], ["Routing protocols", () => devAsk(name, "routing")], ["Firewall", () => devAsk(name, "firewall")], ["CPU, memory and power", () => devAsk(name, "resources")], ["VLANs", () => devAsk(name, "vlans")], ["API catalog", () => devAsk(name, "api_catalog")],
         ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)]]],
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
-        ...(d.platform === "observium" && !(d.options && d.options.device) ? [["Import devices", () => importDevices(name)], ["Preview import", () => importPreview(name)]] : []),
+        ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user", () => troubleForm(name)], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
-        [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = name; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
+        [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes
     // the device everywhere it is drawn.
@@ -1384,6 +1385,7 @@
       });
     }
     const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["Add device", () => deviceForm(g)], pasteItem(g),
+      ["Copy all devices", () => { devClip = [...(g.devices || [])]; }, "", null, (g.devices || []).length ? "" : "This gateway has no devices"],
       ...((g.devices || []).length ? [["Ask its devices", null, "", [["Facts", () => askGateway(g, "facts")], ["Interfaces", () => askGateway(g, "interfaces")], ["Neighbors", () => askGateway(g, "neighbors")]]]] : []),
       "-", ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
