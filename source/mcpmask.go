@@ -43,19 +43,22 @@ func maskTag(prefix, v string) string {
 }
 
 var (
-	reV4    = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	reHexIP = regexp.MustCompile(`(?i)\b0x[0-9a-f]{8}\b`)
-	reV6    = regexp.MustCompile(`(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}`)
-	reAS    = regexp.MustCompile(`\bAS ?(\d{1,10})\b`)
-	reASKw  = regexp.MustCompile(`(?i)\b((?:remote|local|peer|neighbor|origin)-as|router bgp|bgp-as|as-number|autonomous-system)(\s*[:=]?\s*"?)(\d{1,10})\b`)
-	reMail  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
-	reNum   = regexp.MustCompile(`\d{1,10}`)
-	reMAC   = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|[0-9a-f]{6}\.[0-9a-f]{6}|[0-9a-f]{12}`)
-	reArpa4 = regexp.MustCompile(`(?i)\b(?:\d{1,3}\.){1,4}in-addr\.arpa\b`)
-	reArpa6 = regexp.MustCompile(`(?i)\b(?:[0-9a-f]\.){1,32}ip6\.arpa\b`)
-	reDash  = regexp.MustCompile(`\b\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`)
-	reB64   = regexp.MustCompile(`[A-Za-z0-9+/_-]{16,}={0,2}`)
-	reToken = regexp.MustCompile(`(?:(?:PUBLIC|PRIVATE)-(?:IP|IP6|AS)|MASKED-[A-Z]+)-[0-9a-f]{6}`)
+	reV4 = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	// an address written as one decimal number, 3232236805: only where a word before it says it is an address (a count of bytes is not)
+	reDecIP  = regexp.MustCompile(`(?i)((?:^|[^a-z0-9])(?:[a-z0-9]+[_-])*(?:ip|ipv4|addr|address|gateway|gw|host|src|dst|hop|nexthop|via|peer|neighbor)(?:[_-][a-z0-9]+)*\s*[:=]?\s*"?)(\d{8,10})\b`)
+	reAddrKy = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:ip|ipv4|addr|address|gateway|gw|host|src|dst|hop|nexthop|via|peer|neighbor)(?:$|[^a-z])|ipaddr|ipaddress|nexthop`)
+	reHexIP  = regexp.MustCompile(`(?i)\b0x[0-9a-f]{8}\b`)
+	reV6     = regexp.MustCompile(`(?i)(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}`)
+	reAS     = regexp.MustCompile(`\bAS ?(\d{1,10})\b`)
+	reASKw   = regexp.MustCompile(`(?i)\b((?:remote|local|peer|neighbor|origin)-as|router bgp|bgp-as|as-number|autonomous-system)(\s*[:=]?\s*"?)(\d{1,10})\b`)
+	reMail   = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
+	reNum    = regexp.MustCompile(`\d{1,10}`)
+	reMAC    = regexp.MustCompile(`(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}|[0-9a-f]{2}(?:-[0-9a-f]{2}){5}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|[0-9a-f]{6}\.[0-9a-f]{6}|[0-9a-f]{12}`)
+	reArpa4  = regexp.MustCompile(`(?i)\b(?:\d{1,3}\.){1,4}in-addr\.arpa\b`)
+	reArpa6  = regexp.MustCompile(`(?i)\b(?:[0-9a-f]\.){1,32}ip6\.arpa\b`)
+	reDash   = regexp.MustCompile(`\b\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3}\b`)
+	reB64    = regexp.MustCompile(`[A-Za-z0-9+/_-]{16,}={0,2}`)
+	reToken  = regexp.MustCompile(`(?:(?:PUBLIC|PRIVATE)-(?:IP|IP6|AS)|MASKED-[A-Z]+)-[0-9a-f]{6}`)
 )
 
 var nonPublic4 = mustPrefixes("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
@@ -201,6 +204,22 @@ func ip6Keep(a netip.Addr, tag string, keep int) string {
 }
 
 // text hides what a piece of text says, as the rules ask.
+// decIP is the stand-in for a number that is an IPv4 address, if the rules hide that address.
+func (m *maskRules) decIP(digits string) (string, bool) {
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil || n > 0xffffffff || n < 1<<24 {
+		return "", false
+	}
+	a := netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
+	switch {
+	case m.r.PublicIPs && publicAddr(a):
+		return ip4Keep(a, maskTag("PUBLIC-IP", a.String()), m.r.IPKeep), true
+	case m.r.PrivateIPs && privateAddr(a):
+		return ip4Keep(a, maskTag("PRIVATE-IP", a.String()), m.r.IPKeep), true
+	}
+	return "", false
+}
+
 // unpad4 takes the leading zeros out of the parts of a dotted address, which netip refuses.
 func unpad4(x string) string {
 	p := strings.Split(x, ".")
@@ -309,6 +328,13 @@ func (m *maskRules) text(s string) string {
 				return ip4Keep(a, maskTag("PUBLIC-IP", a.String()), r.IPKeep)
 			case r.PrivateIPs && privateAddr(a):
 				return ip4Keep(a, maskTag("PRIVATE-IP", a.String()), r.IPKeep)
+			}
+			return x
+		})
+		s = reDecIP.ReplaceAllStringFunc(s, func(x string) string {
+			sub := reDecIP.FindStringSubmatch(x)
+			if t, ok := m.decIP(sub[2]); ok {
+				return sub[1] + t
 			}
 			return x
 		})
@@ -568,6 +594,11 @@ func (m *maskRules) value(v any, key string) any {
 		}
 		return t
 	case json.Number:
+		if reAddrKy.MatchString(key) && !m.none {
+			if tag, ok := m.decIP(t.String()); ok { // "ip": 3232236805
+				return tag
+			}
+		}
 		if asnKey(key) {
 			if tag, ok := m.asn(t.String()); ok {
 				return tag
@@ -587,6 +618,9 @@ func (m *maskRules) value(v any, key string) any {
 			}
 		}
 		switch {
+		case reAddrKy.MatchString(key) && len(strings.TrimSpace(t)) >= 8 && strings.Trim(strings.TrimSpace(t), "0123456789") == "" && func() bool { _, ok := m.decIP(strings.TrimSpace(t)); return ok }():
+			tag, _ := m.decIP(strings.TrimSpace(t))
+			return tag
 		case serialKey(key) && t != "" && m.r.Serials == "tail":
 			return serialTail(t)
 		case serialKey(key) && t != "" && m.r.Serials == "hide":

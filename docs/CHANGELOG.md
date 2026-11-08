@@ -1,5 +1,16 @@
 # Changelog
 
+## [v83] - 2026-11-08 — privacy: an address written as one decimal number is hidden
+
+### Fixed
+- **An IPv4 address written as a single number (`3232236805` for 192.168.5.5) was not hidden.** It is now, by the same rules as the dotted form, where something says it is an address: in JSON under a key that names one (`ip`, `addr`, `address`, `gateway`, `host`, `src`, `dst`, `hop`, `via`, `peer`, `neighbor`, also inside longer names such as `gw_addr`), as a number or as a string, and in text after such a word (`ip=3232236805`, `next hop 167772161`).
+
+### Changed
+- A number of 8 to 10 digits with no such word near it (a count of bytes, a time) is left alone, because it is far more often that than an address. So a decimal address with no label still gets through.
+
+### Verified
+- `TestMaskOddForms` (extended), `TestMaskDecimalAddressInJSON`, including counters and times that must stay.
+
 ## [v82] - 2026-11-08 — privacy: more ways of writing an address or a MAC are hidden
 
 ### Fixed
