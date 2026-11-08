@@ -1,5 +1,22 @@
 # Changelog
 
+## [v77] - 2026-11-07 — changes and captures go down the federation; the link's key decides
+
+### Added
+- **`device_change_raw`, `device_change` and `device_capture` for a device below a Network Director.** A target that names such a device (`vcenter`, `sw1@netdir3`) sends the same request, with the name that director knows, to the director it is reached through (and from there further down) and joins the answers with this director's own, in the order of the target. Whether it may is decided by the key of the link and the director's own ACL and refusals: a read-only key has no write tool there, so the answer for those devices is that director's refusal; this director's own gate for the caller is passed first. It is logged here (`devices: audit: ... sends device_change_raw for ... down through netdir3`) and on the director that makes the change.
+- `Downstream.Pass` in `device/downstream.go` (only `device_change_raw`, `device_change` and `device_capture` are passed).
+
+### Changed
+- **`all`, `tag:` and `platform:` in a change or a capture pick this director's own devices only**, as before: only a name reaches a device below, so a change never fans out through the federation by accident. (Reads are unchanged: every target form reaches the devices below.)
+- v76 refused a change for a device below with the name of the director that owns it; that refusal is gone, and so is `refuseRemote`.
+- Alerts stay on the director that owns the device (decided; the README says so).
+
+### Verified
+- Stub director: a dry-run `device_change_raw` for `vcenter` reaches the stub as `device_change_raw vcenter`, the answer is joined and keeps `dry_run`; `all` does not reach the devices below; `Pass` refuses any other tool and reports the director's own error for a tool it does not have. Race detector on the new tests, `TestEveryPlatformIsWritable`, the full test suite, `node --check` and the leak test (`Pass` is recorded too).
+
+### Not verified
+- **Not run against two real Network Directors or with a read-only key against a real one**: the stub has no key levels, so "a read-only key cannot change" rests on the director's existing rule that a read-only key is offered no write tools. A capture and a typed `device_change` through the chain were not run (they use the same path as `device_change_raw`). The GUI was not looked at in a browser.
+
 ## [v76] - 2026-11-07 — federation: Network Directors chained, devices below show up like any other
 
 ### Added

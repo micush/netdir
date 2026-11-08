@@ -167,6 +167,12 @@ func (m mDown) Ask(ctx context.Context, op string, names []string, arg string) (
 	return v, err
 }
 
+func (m mDown) Pass(ctx context.Context, tool string, args map[string]any) (any, error) {
+	v, err := m.d.(Downstream).Pass(ctx, tool, args)
+	leakAdd(m.plat, "pass", v, err)
+	return v, err
+}
+
 // wrapLeak returns a driver that records what it answers and has the methods of the driver it wraps; one for each set of
 // optional interfaces the platforms have (a driver with another set is not wrapped, so its answers are not recorded).
 func wrapLeak(plat string, drv Driver) Driver {

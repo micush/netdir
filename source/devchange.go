@@ -67,6 +67,11 @@ func describeChange(c device.Change) string {
 
 // deviceChange plans or makes the change on the devices the target picks.
 func (m *Mgmt) deviceChange(raw json.RawMessage, actor string) (any, error) {
+	return m.withBelow("device_change", raw, actor, m.deviceChangeHere)
+}
+
+// deviceChangeHere is deviceChange for this director's own devices.
+func (m *Mgmt) deviceChangeHere(raw json.RawMessage, actor string) (any, error) {
 	var a deviceChangeArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
@@ -88,9 +93,6 @@ func (m *Mgmt) deviceChange(raw json.RawMessage, actor string) (any, error) {
 	}
 	target, err := expandGatewayTargetsIn(dc, a.Target)
 	if err != nil {
-		return nil, err
-	}
-	if err := refuseRemote(target); err != nil {
 		return nil, err
 	}
 	picked, err := device.Select(devs, target)

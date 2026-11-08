@@ -50,6 +50,12 @@ func netdirStub(t *testing.T, calls *[]string, mu *sync.Mutex) device.Device {
 				rs = append(rs, map[string]any{"device": n, "platform": "vcenter", "ok": true, "data": map[string]any{"hostname": "host-of-" + n}, "ms": 5})
 			}
 			v = map[string]any{"op": "facts", "asked": len(rs), "failed": 0, "results": rs}
+		case "device_change_raw":
+			var rs []any
+			for _, n := range strings.Split(toStr(q.Params.Arguments["target"]), ",") {
+				rs = append(rs, map[string]any{"device": n, "platform": "vcenter", "ok": true, "data": map[string]any{"applied": q.Params.Arguments["dry_run"] != true}, "ms": 5})
+			}
+			v = map[string]any{"op": "raw", "dry_run": q.Params.Arguments["dry_run"] == true, "asked": len(rs), "failed": 0, "results": rs}
 		default:
 			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "error": map[string]any{"code": -32602, "message": "unknown tool"}})
 			return
@@ -62,8 +68,6 @@ func netdirStub(t *testing.T, calls *[]string, mu *sync.Mutex) device.Device {
 	p, _ := strconv.Atoi(port)
 	return device.Device{Name: "nd3", Platform: "netdir", Address: host, Port: p, Credential: "k", Insecure: true}
 }
-
-func toStr(v any) string { s, _ := v.(string); return s }
 
 func resetDown(t *testing.T) {
 	t.Helper()
@@ -143,13 +147,61 @@ func TestChainedDirectorsAnswerForDevicesBelow(t *testing.T) {
 		t.Error("a device nobody has was not an error")
 	}
 
-	// a change or a capture is made on the director that owns the device
-	if err := refuseRemote("vcenter"); err == nil || !strings.Contains(err.Error(), "nd4") {
-		t.Errorf("a change for a device below: %v", err)
+}
+
+// a change for a device below goes down for a name, never for all, a tag or a platform; the key of the link decides the rest
+func TestChangeGoesDownForANamedDevice(t *testing.T) {
+	resetDown(t)
+	var calls []string
+	var mu sync.Mutex
+	nd3 := netdirStub(t, &calls, &mu)
+	e, post := mcpEnv(t, "127.0.0.1 rw")
+	dc, _, err := e.mg.LiveConfig()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := refuseRemote("sw1,tag:x"); err != nil {
-		t.Errorf("a local device: %v", err)
+	dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
+	dc.Settings.Devices = []device.Device{nd3}
+	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
+		t.Fatal(err)
 	}
+	sup := e.ws.status.sup // the index is made from the supervisor's copy, the change reads the live one
+	sup.mu.Lock()
+	sup.dc.Settings.DeviceCredentials, sup.dc.Settings.Devices = dc.Settings.DeviceCredentials, dc.Settings.Devices
+	sup.mu.Unlock()
+	if list, _ := sup.remoteDevices(5*time.Second, true); len(list) == 0 {
+		t.Fatal("no index")
+	}
+	mu.Lock()
+	calls = nil
+	mu.Unlock()
+	_, m := post(mcpCall("device_change_raw", `{"target":"vcenter","method":"PATCH","path":"/x","body":"{}","dry_run":true}`))
+	txt, isErr := toolResult(t, m)
+	if isErr || !strings.Contains(txt, `"vcenter"`) || !strings.Contains(txt, `"dry_run": true`) && !strings.Contains(txt, `"dry_run":true`) || !strings.Contains(txt, `"asked": 1`) && !strings.Contains(txt, `"asked":1`) {
+		t.Fatalf("change for a device below: %v %s", isErr, txt)
+	}
+	mu.Lock()
+	last := calls[len(calls)-1]
+	mu.Unlock()
+	if last != "device_change_raw vcenter" {
+		t.Errorf("sent down: %q", last)
+	}
+	// all is this director's own devices (here the director nd3 itself, which refuses a PATCH): it does not go down for the devices below it
+	mu.Lock()
+	calls = nil
+	mu.Unlock()
+	_, m = post(mcpCall("device_change_raw", `{"target":"all","method":"PATCH","path":"/x","body":"{}","dry_run":true}`))
+	txt, _ = toolResult(t, m)
+	if strings.Contains(txt, `"vcenter"`) || strings.Contains(txt, `"obs"`) {
+		t.Errorf("a change for all reached the devices below: %s", txt)
+	}
+	mu.Lock()
+	for _, c := range calls {
+		if strings.HasPrefix(c, "device_change_raw") {
+			t.Errorf("a change for all went down: %v", calls)
+		}
+	}
+	mu.Unlock()
 }
 
 func TestDirectorBelowThatIsDown(t *testing.T) {

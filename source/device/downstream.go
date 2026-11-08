@@ -40,6 +40,10 @@ type Downstream interface {
 	// device requests (facts, interfaces, ports, neighbors, neighbor_details, routes, routing, firewall, resources, vlans,
 	// api_catalog, api with arg the path, show with arg the command).
 	Ask(ctx context.Context, op string, names []string, arg string) ([]Result, error)
+	// Pass sends a request that changes devices or captures on them (device_change_raw, device_change, device_capture) with the
+	// arguments it was made with, the target being names on that director.  Whether it may is the key's: a read-only key has no such
+	// tool there.  The answer is that tool's own (op, asked, failed, results).
+	Pass(ctx context.Context, tool string, args map[string]any) (any, error)
 }
 
 var _ Downstream = (*director)(nil)
@@ -47,6 +51,18 @@ var _ Downstream = (*director)(nil)
 var downstreamTool = map[string]string{"facts": "device_facts", "interfaces": "device_interfaces", "ports": "device_ports", "neighbors": "device_neighbors",
 	"neighbor_details": "device_neighbor_details", "routes": "device_routes", "routing": "device_routing", "firewall": "device_firewall",
 	"resources": "device_resources", "vlans": "device_vlans", "api_catalog": "device_api_catalog", "api": "device_api_get", "show": "device_show"}
+
+var downstreamPass = map[string]bool{"device_change_raw": true, "device_change": true, "device_capture": true}
+
+func (m *director) Pass(ctx context.Context, tool string, args map[string]any) (any, error) {
+	if m.kind != "net" {
+		return nil, ErrUnsupported
+	}
+	if !downstreamPass[tool] {
+		return nil, fmt.Errorf("%s: not a request a Network Director passes on", tool)
+	}
+	return m.callPlain(ctx, tool, args)
+}
 
 func (m *director) Below(ctx context.Context) (string, []Below, error) {
 	if m.kind != "net" {

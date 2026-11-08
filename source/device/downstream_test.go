@@ -50,6 +50,12 @@ func TestNetdirBelowAndAsk(t *testing.T) {
 	if _, err := ds.Ask(ctx, "show", []string{"obs"}, "show version"); err != nil || !strings.Contains(st.calls[len(st.calls)-1], `"command":"show version"`) {
 		t.Errorf("show: %v %v", err, st.calls)
 	}
+	if _, err := ds.Pass(ctx, "device_change_raw", map[string]any{"target": "obs"}); err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Errorf("a tool the stub does not have comes back as its error: %v", err) // the key decides: a read-only key has no write tool there
+	}
+	if _, err := ds.Pass(ctx, "edit_config", map[string]any{}); err == nil || !strings.Contains(err.Error(), "does not pass on") && !strings.Contains(err.Error(), "not a request") {
+		t.Errorf("only changes and captures of devices are passed: %v", err)
+	}
 	if _, err := ds.Ask(ctx, "config", []string{"obs"}, ""); err == nil {
 		t.Error("a configuration is not asked for down the chain")
 	}

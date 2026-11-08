@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,8 +24,9 @@ import (
 // Links go from the director above to the one below (the address and the key are the device's), so a firewall only has to allow
 // that direction.  Each director keeps the logins of its own devices and nothing else: a request for a device below goes down
 // to the director that has it, which asks the device, hides what must not leave it, and answers up the same way.  The index of
-// what is below comes from the directors' list_devices, kept for downTTL and refreshed in the background.  Only reads go down;
-// a change is made on the director that owns the device.
+// what is below comes from the directors' list_devices, kept for downTTL and refreshed in the background.  Reads go down for any
+// target; a change or a capture goes down for a device named in its target (never for all, a tag or a platform), and the key of the
+// link decides whether the director below allows it.
 
 const (
 	downTTL        = 20 * time.Second // a look at the directors below is this fresh when someone asks
@@ -249,22 +251,172 @@ func remoteAsDevices(rem []RemoteDevice) []device.Device {
 	return out
 }
 
-// refuseRemote answers the error for a request that changes or captures on devices when its target names one below a director: that
-// is made on the director that owns it (the reads go down, the changes do not).
-func refuseRemote(target string) error {
+// splitRemote takes the devices below a director out of the target of a change or a capture: only a name picks them (a change for
+// "all", a tag or a platform is for this director's own devices, as before), and the rest of the target is what stays here.
+func splitRemote(target string) (string, []RemoteDevice) {
 	down.mu.Lock()
 	list := down.list
 	down.mu.Unlock()
+	var local []string
+	var rem []RemoteDevice
 	for _, term := range strings.Split(target, ",") {
 		term = strings.TrimSpace(term)
+		found := false
 		for _, r := range list {
 			if strings.EqualFold(term, r.Name) {
-				return fmt.Errorf("device %s is reached through the Network Director %s: a change or a capture is made on the director that owns it (reads go down, changes do not)", r.Name, r.Via[len(r.Via)-1])
+				rem, found = append(rem, r), true
+				break
 			}
 		}
+		if !found && term != "" {
+			local = append(local, term)
+		}
 	}
-	return nil
+	return strings.Join(local, ","), rem
 }
+
+// withBelow makes a change or a capture for the devices of its target that are below a director by sending the same request, with their
+// names there, to the director each is reached through, and joins the answers with this director's own.  Whether the request may be made
+// is that director's (its key: a read-only one has no such tool) and what it refuses it refuses; this director's own gate has been
+// passed before the request gets here.
+func (m *Mgmt) withBelow(tool string, raw json.RawMessage, actor string, here func(json.RawMessage, string) (any, error)) (any, error) {
+	var args map[string]any
+	if json.Unmarshal(raw, &args) != nil {
+		return here(raw, actor) // it reports the arguments it cannot read
+	}
+	target, _ := args["target"].(string)
+	local, rem := splitRemote(target)
+	if len(rem) == 0 {
+		return here(raw, actor)
+	}
+	out := map[string]any{}
+	var results []any
+	if local != "" {
+		args["target"] = local
+		b, _ := json.Marshal(args)
+		v, err := here(b, actor)
+		if err != nil {
+			return nil, err
+		}
+		b, _ = json.Marshal(v)
+		_ = json.Unmarshal(b, &out)
+		results, _ = out["results"].([]any)
+	}
+	dc, _, err := m.LiveConfig()
+	if err != nil {
+		return nil, err
+	}
+	dirOf := map[string]device.Device{}
+	for _, d := range dc.Settings.Devices {
+		dirOf[d.Name] = d
+	}
+	cred := map[string]device.Credential{}
+	for _, c := range dc.Settings.DeviceCredentials {
+		cred[c.Name] = c
+	}
+	groups := map[string][]RemoteDevice{}
+	var order []string
+	for _, r := range rem {
+		if _, ok := groups[r.Via[0]]; !ok {
+			order = append(order, r.Via[0])
+		}
+		groups[r.Via[0]] = append(groups[r.Via[0]], r)
+	}
+	answers := make([][]any, len(order))
+	var wg sync.WaitGroup
+	for i, name := range order {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rs := groups[name]
+			fail := func(msg string) {
+				for _, r := range rs {
+					answers[i] = append(answers[i], map[string]any{"device": r.Name, "platform": r.Platform, "ok": false, "error": msg})
+				}
+			}
+			dir, ok := dirOf[name]
+			if !ok || dir.Disabled {
+				fail("the Network Director " + name + " is not in the inventory (enabled)")
+				return
+			}
+			deepest := 1
+			orig := map[string]RemoteDevice{}
+			names := make([]string, len(rs))
+			for k, r := range rs {
+				names[k] = r.Orig
+				orig[strings.ToLower(r.Orig)] = r
+				deepest = max(deepest, len(r.Via))
+			}
+			a := map[string]any{}
+			for k, v := range args {
+				a[k] = v
+			}
+			sort.Strings(names)
+			a["target"] = strings.Join(names, ",")
+			ctx, cancel := context.WithTimeout(context.Background(), deviceConfigTO+time.Duration(deepest)*downHopSlack)
+			defer cancel()
+			drv, err := device.Open(dir, cred[dir.Credential])
+			if err != nil {
+				fail(err.Error())
+				return
+			}
+			defer drv.Close(ctx)
+			ds, ok := drv.(device.Downstream)
+			if !ok {
+				fail(device.ErrUnsupported.Error())
+				return
+			}
+			warnf("devices: audit: %q sends %s for %s down through %s", actor, tool, a["target"], name)
+			v, err := ds.Pass(ctx, tool, a)
+			if err != nil {
+				fail(name + ": " + err.Error())
+				return
+			}
+			b, _ := json.Marshal(v)
+			var in map[string]any
+			_ = json.Unmarshal(b, &in)
+			if _, has := out["dry_run"]; !has {
+				if dr, ok := in["dry_run"]; ok {
+					out["dry_run"] = dr
+				}
+			}
+			got, _ := in["results"].([]any)
+			seen := map[string]bool{}
+			for _, x := range got {
+				xm, _ := x.(map[string]any)
+				r, ok := orig[strings.ToLower(toStr(xm["device"]))]
+				if !ok {
+					continue
+				}
+				xm["device"] = r.Name
+				seen[strings.ToLower(r.Name)] = true
+				answers[i] = append(answers[i], xm)
+			}
+			for _, r := range rs {
+				if !seen[strings.ToLower(r.Name)] {
+					answers[i] = append(answers[i], map[string]any{"device": r.Name, "platform": r.Platform, "ok": false, "error": name + " did not answer for it"})
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	for _, a := range answers {
+		results = append(results, a...)
+	}
+	failed := 0
+	for _, x := range results {
+		if xm, _ := x.(map[string]any); xm["ok"] != true {
+			failed++
+		}
+	}
+	if _, has := out["op"]; !has {
+		out["op"] = map[string]string{"device_change_raw": "raw", "device_change": "change", "device_capture": "capture"}[tool]
+	}
+	out["asked"], out["failed"], out["results"] = len(results), failed, results
+	return out, nil
+}
+
+func toStr(v any) string { s, _ := v.(string); return s }
 
 // askBelow runs a read on the devices of picked that are in rem, each group on the director it is reached through, and puts every answer
 // into got under the lower-case name asked here.

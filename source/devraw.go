@@ -34,6 +34,11 @@ type deviceRawArgs struct {
 }
 
 func (m *Mgmt) deviceRaw(raw json.RawMessage, actor string) (any, error) {
+	return m.withBelow("device_change_raw", raw, actor, m.deviceRawHere)
+}
+
+// deviceRawHere is deviceRaw for this director's own devices.
+func (m *Mgmt) deviceRawHere(raw json.RawMessage, actor string) (any, error) {
 	var a deviceRawArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
@@ -54,9 +59,6 @@ func (m *Mgmt) deviceRaw(raw json.RawMessage, actor string) (any, error) {
 	}
 	target, err := expandGatewayTargetsIn(dc, a.Target)
 	if err != nil {
-		return nil, err
-	}
-	if err := refuseRemote(target); err != nil {
 		return nil, err
 	}
 	picked, err := device.Select(devs, target)
