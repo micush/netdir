@@ -1015,6 +1015,9 @@ func init() {
 		mcpDeviceTool("device_show", "Device show command", "show",
 			"Run one read-only show command on each device picked and return its text. Only \"show ...\" with output filters (| include, exclude, section, ...) is accepted. "+
 				"Platforms whose API runs no CLI commands answer an error for each device. Observium: \"show device NAME\" returns everything Observium knows about one monitored device in one answer (its record, ports, addresses, neighbours, sensors, status, storage, memory pools, processors, inventory, counters, probes, alerts and alert log), with the target the Observium device; \"show NAME [device=NAME] [filter=value]\" reads one list (devices, ports, neighbours, sensors, status, storage, mempools, processors, inventory, alerts, alert_log, groups, ...)."),
+		mcpDeviceTool("device_config", "Device configuration", "config",
+			"The running configuration of each device picked, as the device gives it (ArubaOS-CX: JSON; others: text). Keys, passwords, SNMP communities, certificates and every other word on the secret list (Configure ▸ Privacy ▸ Secret words) are hidden. "+
+				"A secret kept under a name nobody listed is not recognised: ask the administrator to add that word to the list. Large: pick one device."),
 		mcpDeviceChangeTool(), mcpDeviceRawTool(), mcpDeviceCaptureTool(), mcpDeviceTroubleshootTool(),
 		{name: "list_api", title: "The GUI's API", noNode: true,
 			desc: "Every route of the GUI's API (method, path, query parameters), for api_get. Answers are {ok, data} or {ok:false, error}.",

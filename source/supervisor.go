@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"netdir/device"
 )
 
 type engineKey struct {
@@ -54,6 +56,7 @@ func NewSupervisor(ctx context.Context, dc *DaemonConfig) *Supervisor {
 	s := &Supervisor{ctx: ctx, dc: dc.effective(), engines: map[engineKey]*Engine{},
 		offnet: map[int]*offnetWait{}, anycast: map[int]*anycastSet{}}
 	s.notePausedAnycast(s.dc)
+	device.SetSecretWords(secretWordsOf(s.dc))
 	return s
 }
 
@@ -401,6 +404,7 @@ func (s *Supervisor) Reload(nu *DaemonConfig) {
 	}
 	s.dc = nu
 	s.mu.Unlock()
+	device.SetSecretWords(secretWordsOf(nu))
 
 	// Stop outside the lock; Stop tears down interfaces and can be slow.  Gateways that restart are stopped with the
 	// removed ones, all at once, and started again when every stop is done.

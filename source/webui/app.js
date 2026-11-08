@@ -2776,20 +2776,26 @@
         h("div", { class: "grid gap-top" },
           sel("ip_keep", "IP addresses", [[0, "hidden"], [1, "first 1 (203.)"], [2, "first 2 (203.0.)"], [3, "first 3 (203.0.114.)"], [-1, "last 1 (.7)"], [-2, "last 2 (.114.7)"], [-3, "last 3 (.0.114.7)"]]),
           sel("serials", "Serial numbers", [["show", "shown"], ["tail", "last four characters (****1234)"], ["hide", "hidden"]]),
-          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["nic", "network interface controller part shown (…:3c:4d:5e)"], ["hide", "hidden"]])),
+          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["nic", "NIC part shown (…:3c:4d:5e)"], ["hide", "hidden"]])),
         h("label", { class: "f wide gap-top" }, h("span", {}, "Words always hidden"), words));
       return { el, get: () => ({ ...r, words: r.words.slice() }) };
     };
     const std = card("Standard level hides", PRIV_STD, cur.standard), strict = card("Strict level hides", PRIV_STRICT, cur.strict);
     const same = (a, b) => JSON.stringify(Object.keys(b).sort().map((k) => [k, a[k]])) === JSON.stringify(Object.keys(b).sort().map((k) => [k, b[k]]));
+    // words that mark a secret, for every filter and every level (device/secretwords.go): a key name, a line or a path that holds one is hidden or refused
+    const secretBox = h("textarea", { rows: 4, spellcheck: "false", autocomplete: "off", "aria-label": "Secret words", placeholder: "one per line, e.g. passkey, vault, token-id" });
+    secretBox.value = (cur.secret_words || []).join("\n");
+    const secrets = section("Secret words", h("label", { class: "f wide" }, h("span", {}, "Words that mark a secret"), secretBox, h("span", { class: "hint" }, "On top of the built-in ones; at every level, none included.")));
     const intro = section("Default level", h("label", { class: "f" }, h("span", {}, "Level for a source or key that has none of its own"), defSel));
     return {
-      el: h("div", {}, intro, std.el, strict.el),
+      el: h("div", {}, intro, std.el, strict.el, secrets),
       get() {
         const o = {};
         if (defSel.value !== "standard") o.default = defSel.value;
         if (!same(std.get(), PRIV_STD)) o.standard = std.get();
         if (!same(strict.get(), PRIV_STRICT)) o.strict = strict.get();
+        const sw = secretBox.value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+        if (sw.length) o.secret_words = sw;
         return Object.keys(o).length ? o : undefined;
       },
     };

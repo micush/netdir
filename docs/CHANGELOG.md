@@ -1,5 +1,56 @@
 # Changelog
 
+## [v100] - 2026-11-08 — config filter checked against every platform's format; shorter MAC label
+
+### Changed
+- Privacy ▸ MAC addresses: the option reads "NIC part shown (…:3c:4d:5e)".
+- The configuration filter was run over a sample in each platform's own format (IOS-XE JSON, NX-OS, EOS, FortiOS, PAN-OS XML, Junos) and leaked in five places; all are fixed:
+  - SNMP community names in a JSON configuration (IOS-XE `snmp-server` ▸ `community`, `community-or-user` of a host): every key naming a community under an SNMP key is hidden (a BGP community elsewhere is not).
+  - `snmp-server host … version 2c COMMUNITY` (NX-OS, EOS, IOS): the community is hidden.
+  - `snmp-server user … auth sha KEY priv aes KEY` (EOS): both keys are hidden.
+  - FortiOS `config system snmp community`: the `set name` of each community is hidden.
+  - PAN-OS XML (one line or many): the text of every element, and the value of every attribute, with a secret's name (`phash`, `secret`, `key`, `snmp-community-string`, ...) is hidden and the rest of the XML kept. Before, the first secret word hid the rest of the line, so a one-line answer showed what came before it.
+
+### Verified
+- `TestConfigFilterEveryPlatform`: invented configurations in the six formats lose every listed secret, keep their readable parts and filter the same way twice.
+
+### Not verified
+- The samples are written from memory of each platform's syntax, not taken from real devices. Junos still hides a `community NAME {` line whole, so its brace is lost. A secret under a name on no list still passes.
+
+## [v99] - 2026-11-08 — a device's running configuration over MCP, secrets hidden
+
+### Added
+- **`device_config`** MCP tool: the running configuration of each device picked. Every answer goes through the shared secret filter (key names, text lines, certificates, the list under Configure ▸ Privacy ▸ Secret words); `device.RedactConfig` / `RedactConfigValue`. JSON configurations (ArubaOS-CX) stay valid JSON.
+
+### Changed
+- `GET /api/devices/query?op=config` is answered to MCP callers (read-only or read-write), filtered; it is still refused to a read-only GUI account. Answers relayed from a gateway below are filtered again here.
+- README, help and the MCP instructions no longer say the configuration is never offered. The generic `device_api_get` still refuses `fullconfigs`, `running-config` and `startup-config`.
+
+### Verified
+- Tests: stub IOS-XE switch answers `device_config` and `api_get op=config` with its secret hidden to read-only and read-write callers; JSON stays valid and filtering is idempotent.
+
+### Not verified
+- A secret kept under a name that is on no list (built in or yours) is not recognised: add such words under Privacy ▸ Secret words. Never run against a real ArubaOS-CX switch; the field names in the tests are my reading of the schema.
+- The GUI read-only refusal of `op=config` has no new test.
+
+## [v98] - 2026-11-08 — one list of secret words; more built-in ones; JSON no longer broken
+
+### Added
+- **Configure ▸ Privacy ▸ Secret words** (`settings.privacy.secret_words`): words of your own that mark a secret. One list for every filter: a key name that holds one has its value hidden, a line or a JSON member is hidden from that word on, and a path, XPath or command word that holds one is refused. Applies at every level, `none` included.
+- Built-in secret words: `passkey`, `auth_pass`, `priv_pass`, `authentication_key`, `keepalive_key`, `ciphertext`, `keystring`, `shared_key` (and their `-` forms). RADIUS and TACACS+ keys, SNMPv3 passwords, OSPF and MC-LAG keys of an ArubaOS-CX configuration were not hidden before.
+- A list of texts that is a public key (`ssh-rsa …`), or holds a secret word, is hidden whole.
+
+### Fixed
+- **The text filter broke JSON.** A line that opens an object (`"SNMP_Community": {`) was cut at the secret word, and a value already hidden (a certificate) was cut again (`"(hidden: key (hidden)"`). Both stay valid JSON now. An object or list named `snmp…community` is hidden whole, since its keys are the community names.
+
+### Verified
+- `TestConfigFilterHidesSecrets` (a representative AOS-CX running config: nothing secret left, still JSON, hostname and addresses kept), `TestSecretWordsOfYourOwn`, `TestNormPrivacySecretWords`; the full checklist.
+
+### Not verified
+- The AOS-CX field names in that test are my reading of its schema, not a real `fullconfigs` dump. A secret under a name nobody listed gets through: add the word.
+- A device's configuration is still not offered over MCP (`config` is refused, and so is the `fullconfigs` path). This release makes the filters safer; it does not open that.
+- The Privacy page's new box has not been looked at in a browser.
+
 ## [v97] - 2026-11-08 — the checkbox is called Enable
 
 ### Changed

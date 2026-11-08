@@ -23,7 +23,8 @@ import (
 //	GET /api/devices/query?target=&op=   ask the devices target picks (device.Select; gateway:N is the devices of gateway N) for op, all at once
 //
 // Every op reads.  "config" (a device's whole configuration, which holds its own secrets) is refused to a read-only
-// account and so to a read-only MCP caller, as the GUI's own configuration versions are.
+// GUI account, as the GUI's own configuration versions are.  An MCP caller gets it with the secrets hidden by the shared
+// filter (device.RedactConfig; Configure ▸ Privacy ▸ Secret words).
 
 const (
 	deviceParallel = 16               // devices asked at once
@@ -96,11 +97,7 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		jsonError(rw, http.StatusBadRequest, "op: facts, interfaces, ports, neighbors, neighbor_details, routes, routing, firewall, resources, vlans, api, api_catalog, show or config")
 		return
 	}
-	if op == "config" && s.mcp {
-		jsonError(rw, http.StatusForbidden, "a device's configuration holds its secrets: not over MCP (the GUI has it: Monitor ▸ Devices ▸ Configuration)")
-		return
-	}
-	if secret && s.readOnly {
+	if secret && s.readOnly && !s.mcp { // an MCP caller, read-only or not, gets the configuration with its secrets hidden (below)
 		jsonError(rw, http.StatusForbidden, "a device's configuration holds its secrets: not for a read-only account")
 		return
 	}
@@ -196,6 +193,11 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		}
 	}
 	failed := 0
+	if s.mcp && op == "config" { // every answer, also one relayed from a gateway below, goes through the shared secret filter
+		for i := range res {
+			res[i].Data = device.RedactConfigValue(res[i].Data)
+		}
+	}
 	for _, x := range res {
 		if !x.OK {
 			failed++
@@ -352,6 +354,9 @@ func runDeviceOp(ctx context.Context, d device.Driver, op, cmd string, readOnly,
 		}
 	case "config":
 		v, err = d.Config(ctx)
+		if err == nil && mcp {
+			v = device.RedactConfigValue(v)
+		}
 	case "show":
 		v, err = d.Show(ctx, cmd)
 		if txt, ok := v.(string); ok && err == nil && mcp {

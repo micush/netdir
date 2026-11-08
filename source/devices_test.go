@@ -61,14 +61,15 @@ func TestMCPDeviceTools(t *testing.T) {
 	if txt, isErr = toolResult(t, m); isErr || !strings.Contains(txt, "cat9300") || !strings.Contains(txt, `"ok": true`) && !strings.Contains(txt, `"ok":true`) {
 		t.Errorf("device_facts: %s", txt)
 	}
-	// no MCP caller gets a device's configuration (it holds the device's secrets): there is no such tool, and the
-	// API route refuses it however it is reached
-	if strings.Contains(names, "device_config") {
-		t.Error("device_config is an MCP tool")
+	// an MCP caller gets a device's configuration with its secrets hidden, by the tool or by the API route
+	if !strings.Contains(names, "device_config") {
+		t.Error("device_config is not an MCP tool")
 	}
-	_, m = post(mcpCall("api_get", `{"path":"/api/devices/query?target=sw1&op=config"}`))
-	if txt, isErr = toolResult(t, m); !isErr || strings.Contains(txt, "$9$xyz") || strings.Contains(txt, "enable") {
-		t.Errorf("config through api_get, read-only: %s", txt)
+	for _, c := range []string{mcpCall("device_config", `{"target":"sw1"}`), mcpCall("api_get", `{"path":"/api/devices/query?target=sw1&op=config"}`)} {
+		_, m = post(c)
+		if txt, isErr = toolResult(t, m); isErr || strings.Contains(txt, "$9$xyz") || !strings.Contains(txt, "(hidden)") || !strings.Contains(txt, "enable") {
+			t.Errorf("config, read-only: %s", txt)
+		}
 	}
 	// a write command is refused before any device is asked
 	_, m = post(mcpCall("device_show", `{"target":"sw1","command":"reload"}`))
@@ -87,10 +88,14 @@ func TestMCPDeviceTools(t *testing.T) {
 	}
 }
 
-// Not even a read-write MCP caller is handed a device's configuration, a text answer or a secret-bearing path.
+// Not even a read-write MCP caller is handed a device's secrets: the configuration comes filtered, a text answer or a secret-bearing path is refused.
 func TestMCPNeverGetsDeviceSecrets(t *testing.T) {
 	post := devEnv(t, "127.0.0.1 rw")
-	for _, path := range []string{"/api/devices/query?target=sw1&op=config",
+	_, m0 := post(mcpCall("device_config", `{"target":"sw1"}`))
+	if txt, isErr := toolResult(t, m0); isErr || strings.Contains(txt, "$9$xyz") {
+		t.Errorf("device_config, read-write: %s", txt)
+	}
+	for _, path := range []string{
 		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native",
 		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native/snmp-server",
 		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native/username"} {

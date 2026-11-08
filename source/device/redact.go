@@ -16,16 +16,21 @@ import (
 
 // secretTokens: a word of a line that holds one of these, or is one of secretWords, hides the rest of the line.
 var secretTokenParts = []string{"password", "passwd", "secret", "psk", "passphrase", "md5", "encrypted", "token", "key-string",
-	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass", "cryptopass", "snmp_community"}
+	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass", "cryptopass", "snmp_community",
+	"passkey", "pass_key", "auth_pass", "priv_pass", "authentication_key", "keepalive_key", "ciphertext", "keystring", "shared_key", "shared-key", "sharedkey"}
 var secretTokenExact = map[string]bool{"key": true, "community": true, "ro": false}
 
 var (
 	pemBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE|PGP)[A-Z ]*-----.*?(-----END [^\n]*-----|$)`)
-	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass|cryptopass|snmp_community)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s]+)`)
+	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass|cryptopass|snmp_community|passkey|pass_key|auth_pass|priv_pass|authentication_key|keepalive_key|ciphertext|keystring|shared_key|sharedkey)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s{\[][^,}\s]*)`)
 )
 
 // jsonMember is one line of indented JSON that holds a member with a plain value: "key": "value",
 var jsonMember = regexp.MustCompile(`^(\s*)("(?:[^"\\]|\\.)*")(\s*:\s*)("(?:[^"\\]|\\.)*"|-?[0-9][0-9.eE+-]*|true|false|null)(\s*,?\s*)$`)
+
+// jsonElem is one line of indented JSON that is a text in a list: "value",
+var jsonElem = regexp.MustCompile(`^(\s*)("(?:[^"\\]|\\.)*")(\s*,?\s*)$`)
+var sshKey = regexp.MustCompile(`^(ssh-[a-z0-9]+|ecdsa-sha2-[a-z0-9]+|sk-[a-z0-9@.-]+) `)
 
 // jsonQuote writes s as a JSON string, without escaping < > and &.
 func jsonQuote(s string) string {
@@ -38,7 +43,7 @@ func jsonQuote(s string) string {
 
 // secretWord says whether a word names a secret: one of secretTokenParts is in it, or it is one of secretTokenExact.
 func secretWord(lw string) bool {
-	hit := secretTokenExact[lw]
+	hit := secretTokenExact[lw] || holdsExtra(lw)
 	for _, p := range secretTokenParts {
 		hit = hit || strings.Contains(lw, p)
 	}
@@ -70,7 +75,7 @@ func redactJSONMember(m []string) string {
 		return m[0] // the value is not a string (a number, true, null): nothing to hide in it
 	}
 	switch {
-	case val == "" || val == "(hidden)":
+	case val == "" || val == "(hidden)" || strings.Contains(val, "(hidden"): // already hidden (a PEM block, a secret named by the line above)
 	case secretWord(strings.ToLower(key)):
 		val = "(hidden)"
 	default:
@@ -85,8 +90,22 @@ func redactJSONMember(m []string) string {
 func RedactText(s string) string {
 	s = pemBlock.ReplaceAllString(s, "(hidden: key or certificate)")
 	s = jsonSec.ReplaceAllString(s, `${1}"(hidden)"`)
+	if re := secretExtras().re; re != nil {
+		s = re.ReplaceAllString(s, `${1}"(hidden)"`)
+	}
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
+		// the line that opens an object or a list ("SNMP_Community": {) holds no value: its members are looked at one by one, and cutting it would break the JSON
+		if t := strings.TrimSpace(ln); strings.HasPrefix(t, `"`) && (strings.HasSuffix(t, "{") || strings.HasSuffix(t, "[")) {
+			continue
+		}
+		if m := jsonElem.FindStringSubmatch(ln); m != nil { // a text in a list: hidden whole when it holds a secret word or is a public key
+			var val string
+			if json.Unmarshal([]byte(m[2]), &val) == nil && (redactLine(val) != val || sshKey.MatchString(val)) {
+				lines[i] = m[1] + `"(hidden)"` + m[3]
+			}
+			continue
+		}
 		if m := jsonMember.FindStringSubmatch(ln); m != nil {
 			lines[i] = redactJSONMember(m)
 			continue
@@ -121,6 +140,9 @@ func secretSegment(sg string) error {
 	}
 	if deniedExact[sg] {
 		return fmt.Errorf("path: %q holds secrets (users, keys, certificates) and is not available over MCP", sg)
+	}
+	if holdsExtra(sg) {
+		return fmt.Errorf("path: %q holds a word you marked secret (Configure ▸ Privacy) and is not available over MCP", sg)
 	}
 	for _, d := range deniedAny {
 		w := sg
@@ -291,4 +313,101 @@ func eosDeniedWord(w string) error {
 		}
 	}
 	return nil
+}
+
+// RedactConfig hides the secrets in a device's whole configuration for a caller who is not to see them (an MCP caller).
+// A configuration that is JSON is filtered by the names of its keys (Redact) and written again indented, then every line
+// goes through RedactText, as the text of a show command does; any other text goes through RedactText alone.  It is safe to
+// apply twice, so an answer relayed from a gateway below is filtered again here.  The words are the shared ones (secretWords
+// and Configure ▸ Privacy ▸ Secret words).
+func RedactConfig(s string) string {
+	var v any
+	if json.Unmarshal([]byte(s), &v) == nil {
+		switch v.(type) {
+		case map[string]any, []any:
+			if b, err := json.MarshalIndent(Redact(v), "", "  "); err == nil {
+				s = string(b)
+			}
+		}
+	}
+	if t := strings.TrimSpace(s); strings.HasPrefix(t, "<") {
+		return redactXML(s)
+	}
+	return RedactText(redactCLI(s))
+}
+
+var (
+	xmlElem = regexp.MustCompile(`<([A-Za-z_][\w.:-]*)((?:\s[^<>]*)?)>([^<>]+)</([A-Za-z_][\w.:-]*)>`)
+	xmlAttr = regexp.MustCompile(`(?i)(\s[\w:.-]+=)"([^"]*)"`)
+)
+
+// redactXML hides the text of every element, and the value of every attribute, whose name is a secret's (PAN-OS: phash, key,
+// secret, snmp-community-string, private-key, ...), and PEM blocks, leaving the rest of the XML as it was, in one line or many.
+func redactXML(s string) string {
+	s = pemBlock.ReplaceAllString(s, "(hidden: key or certificate)")
+	hideName := func(n string) bool {
+		l := strings.ToLower(n)
+		return secretName(n) || (strings.Contains(l, "community") && !strings.Contains(l, "bgp"))
+	}
+	s = xmlElem.ReplaceAllStringFunc(s, func(m string) string {
+		g := xmlElem.FindStringSubmatch(m)
+		if g[1] != g[4] || !hideName(g[1]) || strings.TrimSpace(g[3]) == "" {
+			return m
+		}
+		return "<" + g[1] + g[2] + ">(hidden)</" + g[4] + ">"
+	})
+	return xmlAttr.ReplaceAllStringFunc(s, func(m string) string {
+		g := xmlAttr.FindStringSubmatch(m)
+		if secretName(strings.TrimSuffix(strings.TrimSpace(g[1]), "=")) && g[2] != "" {
+			return g[1] + `"(hidden)"`
+		}
+		return m
+	})
+}
+
+var (
+	cliHost = regexp.MustCompile(`(?i)^(\s*(?:no\s+)?snmp-server\s+host\s.*?(?:\bversion\s+(?:1|2c)\s+|\b(?:traps|informs)\s+(?:version\s+\S+\s+)?))(\S+)`)
+	cliUser = regexp.MustCompile(`(?i)(\b(?:auth|priv)\s+(?:md5|sha[0-9]*|aes[0-9]*|des[0-9]*|3des)\s+)(\S+)`)
+	cliSNMP = regexp.MustCompile(`(?i)^\s*config\s+.*snmp.*community\s*$`)
+	cliName = regexp.MustCompile(`^(\s*set\s+(?:name|community-name)\s+).*$`)
+)
+
+// redactCLI hides what the word lists cannot see in the text of a CLI configuration: the community that follows "snmp-server
+// host ... version 2c", the keys of "snmp-server user ... auth sha KEY priv aes KEY", and the names of the communities of a
+// FortiOS "config system snmp community" block.
+func redactCLI(s string) string {
+	lines := strings.Split(s, "\n")
+	blockIndent := -1
+	for i, ln := range lines {
+		ind := len(ln) - len(strings.TrimLeft(ln, " \t"))
+		t := strings.TrimSpace(ln)
+		switch {
+		case blockIndent >= 0 && t == "end" && ind <= blockIndent:
+			blockIndent = -1
+		case blockIndent < 0 && cliSNMP.MatchString(ln):
+			blockIndent = ind
+		case blockIndent >= 0:
+			ln = cliName.ReplaceAllString(ln, `${1}"(hidden)"`)
+		}
+		ln = cliHost.ReplaceAllString(ln, "${1}(hidden)")
+		ln = cliUser.ReplaceAllString(ln, "${1}(hidden)")
+		lines[i] = ln
+	}
+	return strings.Join(lines, "\n")
+}
+
+// RedactConfigValue is RedactConfig for a result of any type: a text is filtered as one, anything else as JSON.
+func RedactConfigValue(v any) any {
+	switch t := v.(type) {
+	case string:
+		return RedactConfig(t)
+	case nil:
+		return nil
+	default:
+		b, err := json.Marshal(t)
+		if err != nil {
+			return "(hidden: configuration could not be filtered)"
+		}
+		return RedactConfig(string(b))
+	}
 }

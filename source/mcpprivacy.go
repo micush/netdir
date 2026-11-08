@@ -36,6 +36,9 @@ type PrivacyConfig struct {
 	Default  string        `json:"default,omitempty"`  // the level of a caller that has none: none | standard (the default) | strict
 	Standard *PrivacyRules `json:"standard,omitempty"` // what "standard" hides; unset: the built-in rules
 	Strict   *PrivacyRules `json:"strict,omitempty"`
+	// SecretWords are words of your own that mark a secret in a key name, a line of text or a path, on top of the built-in ones
+	// (device/secretwords.go).  They apply at every level, "none" included.
+	SecretWords []string `json:"secret_words,omitempty"`
 }
 
 const (
@@ -104,7 +107,7 @@ func (c *PrivacyConfig) clone() *PrivacyConfig {
 	if c == nil {
 		return nil
 	}
-	return &PrivacyConfig{Default: c.Default, Standard: c.Standard.clone(), Strict: c.Strict.clone()}
+	return &PrivacyConfig{Default: c.Default, Standard: c.Standard.clone(), Strict: c.Strict.clone(), SecretWords: append([]string(nil), c.SecretWords...)}
 }
 
 func normRules(name string, r *PrivacyRules) (*PrivacyRules, error) {
@@ -175,10 +178,30 @@ func normPrivacy(c *PrivacyConfig) (*PrivacyConfig, error) {
 	if out.Strict, err = normRules("strict", c.Strict); err != nil {
 		return nil, err
 	}
+	if len(c.SecretWords) > privWordsMax {
+		return nil, fmt.Errorf("privacy: secret words: at most %d", privWordsMax)
+	}
+	seen := map[string]bool{}
+	for _, w := range c.SecretWords {
+		w = strings.ToLower(strings.TrimSpace(w))
+		if w == "" {
+			continue
+		}
+		if n := len([]rune(w)); n < privWordMin || n > privWordMax {
+			return nil, fmt.Errorf("privacy: secret words: %q must be %d to %d characters (a shorter one would hide parts of everything)", w, privWordMin, privWordMax)
+		}
+		if strings.IndexFunc(w, unicode.IsControl) >= 0 || strings.ContainsAny(w, "\"\\") {
+			return nil, fmt.Errorf("privacy: secret words: %q has a control character, a quote or a backslash", w)
+		}
+		if !seen[w] {
+			seen[w] = true
+			out.SecretWords = append(out.SecretWords, w)
+		}
+	}
 	if out.Default == "standard" {
 		out.Default = ""
 	}
-	if out.Default == "" && out.Standard == nil && out.Strict == nil {
+	if out.Default == "" && out.Standard == nil && out.Strict == nil && len(out.SecretWords) == 0 {
 		return nil, nil
 	}
 	return out, nil
@@ -244,4 +267,12 @@ func (s *Supervisor) mcpPrivacy(levels ...string) *maskRules {
 		l = c.level()
 	}
 	return c.rules(l)
+}
+
+// secretWordsOf are the words of your own that mark a secret (settings.privacy.secret_words).
+func secretWordsOf(dc *DaemonConfig) []string {
+	if dc == nil || dc.Settings.Privacy == nil {
+		return nil
+	}
+	return dc.Settings.Privacy.SecretWords
 }

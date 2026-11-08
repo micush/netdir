@@ -100,7 +100,10 @@ var secretWords = []string{"password", "passwd", "secret", "md5", "psk", "token"
 	// Observium (a device's SNMP community, and its SNMP authentication and privacy passwords and user name)
 	"snmp_community", "snmp-community", "authpass", "cryptopass", "snmp_authname",
 	// Infoblox WAPI (zone transfer and DDNS keys: tsig_key, tsig_key_name, ...)
-	"tsig_key", "tsig-key"}
+	"tsig_key", "tsig-key",
+	// RADIUS and TACACS+ shared keys, SNMPv3 passwords, routing protocol and MC-LAG keys (ArubaOS-CX and others), and the ciphertext of any of them
+	"passkey", "pass_key", "pass-key", "auth_pass", "auth-pass", "authpass", "priv_pass", "priv-pass", "privpass", "authentication_key", "keepalive_key", "keepalive-key",
+	"ciphertext", "keystring", "shared_key", "shared-key", "sharedkey"}
 
 func secretName(k string) bool {
 	k = strings.ToLower(k)
@@ -112,19 +115,29 @@ func secretName(k string) bool {
 			return true
 		}
 	}
-	return false
+	return holdsExtra(k)
 }
 
 // Redact returns v with the value of every key that names a secret replaced by "(hidden)".  Empty values stay empty.
-func Redact(v any) any {
+func Redact(v any) any { return redactIn(v, false) }
+
+// redactIn is Redact; snmp says the value lies under a key about SNMP, where every key that names a community holds a
+// secret (a BGP community elsewhere is not one).
+func redactIn(v any, snmp bool) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, x := range t {
+			lk := strings.ToLower(k)
+			if x != nil && x != "" && strings.Contains(lk, "community") && (snmp || strings.Contains(lk, "snmp")) {
+				out[k] = "(hidden)" // the names of the communities are the secrets, so a list or an object of them goes whole
+				continue
+			}
+			sub := snmp || strings.Contains(lk, "snmp")
 			if secretName(k) && x != nil && x != "" {
 				switch x.(type) {
 				case map[string]any, []any:
-					out[k] = Redact(x) // a container named like a secret: its leaves decide
+					out[k] = redactIn(x, sub) // a container named like a secret: its leaves decide
 					if secretLeafless(x) {
 						out[k] = "(hidden)"
 					}
@@ -133,13 +146,13 @@ func Redact(v any) any {
 				}
 				continue
 			}
-			out[k] = Redact(x)
+			out[k] = redactIn(x, sub)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, x := range t {
-			out[i] = Redact(x)
+			out[i] = redactIn(x, snmp)
 		}
 		return out
 	}
