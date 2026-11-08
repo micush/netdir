@@ -23,7 +23,7 @@ import (
 // is in the cluster and the configuration history too, is never shown to an MCP caller or a read-only account, and
 // can be shown again from Configure ▸ MCP ▸ Show key).  The hash is what a request is checked against.  A
 // key made before the key was kept has only a hash and cannot be shown: Replace key makes it a new one.  A new key may
-// be given in "key" (the GUI does this, as may edit_config or a hand-edited file); the check works out "hash" from it.
+// be given in "key" (the GUI does this, as may a hand-edited file); the check works out "hash" from it.
 
 const (
 	mcpKeysMax    = 32

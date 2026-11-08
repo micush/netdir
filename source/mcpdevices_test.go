@@ -162,7 +162,7 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	// the tools and routes that hold every device and every key are not for it
 	_, m := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, auth(k1)...)
 	have := strings.Join(toolNames(t, m), ",")
-	for _, gone := range []string{"get_config", "edit_config", "api_request", "set_gateway_device", "device_troubleshoot_user"} {
+	for _, gone := range []string{"get_config", "device_troubleshoot_user"} {
 		if strings.Contains(have, gone) {
 			t.Errorf("%s is offered to a limited key", gone)
 		}
@@ -177,7 +177,7 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	}
 	// the key with no limit has all of it
 	_, m = post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, auth(k4)...)
-	if have = strings.Join(toolNames(t, m), ","); !strings.Contains(have, "get_config") || !strings.Contains(have, "edit_config") {
+	if have = strings.Join(toolNames(t, m), ","); !strings.Contains(have, "get_config") || !strings.Contains(have, "device_troubleshoot_user") {
 		t.Errorf("an unlimited key lost tools: %s", have)
 	}
 	// a source with its own limit narrows a key that has none: the stricter wins
@@ -189,5 +189,79 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	}
 	if txt, isErr := call(k2, "list_devices", `{}`); isErr || names(txt) != "sw3" {
 		t.Errorf("key and source: %q %v", names(txt), isErr)
+	}
+}
+
+// A gateway entry gives the gateway and every device on it, now and later; a device-only caller sees no gateway.
+func TestGatewayScope(t *testing.T) {
+	for _, bad := range []string{"gateway:", "gateway:x", "gateway:0", "gateway:01", "gateway:-1"} {
+		if _, err := normDevices([]string{bad}); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if got, err := normDevices([]string{"gateway:3", "sw9"}); err != nil || strings.Join(got, ",") != "gateway:3,sw9" {
+		t.Fatalf("%v %v", got, err)
+	}
+	dc := &DaemonConfig{Groups: []GroupConfig{{GroupID: 3, Devices: []string{"sw1", "sw2"}}, {GroupID: 4, Devices: []string{"sw5"}}}}
+	sc := newDevScope([]string{"gateway:3"})
+	sc.bind(func() *DaemonConfig { return dc })
+	if !sc.allows("sw1", nil) || !sc.allows("SW2", nil) || sc.allows("sw5", nil) || sc.allows("sw9", nil) {
+		t.Error("devices of gateway 3")
+	}
+	if !sc.allowsGateway(3) || sc.allowsGateway(4) {
+		t.Error("which gateways")
+	}
+	dc.Groups[0].Devices = append(dc.Groups[0].Devices, "sw7") // added later
+	if !sc.allows("sw7", nil) {
+		t.Error("a device added to the gateway later")
+	}
+	dev := newDevScope([]string{"sw1"})
+	dev.bind(func() *DaemonConfig { return dc })
+	if dev.allowsGateway(3) || !dev.allows("sw1", nil) {
+		t.Error("a device-only caller")
+	}
+	// the key and the source both have to name the gateway
+	both := newDevScope([]string{"gateway:3"}, []string{"gateway:4"})
+	both.bind(func() *DaemonConfig { return dc })
+	if both.allowsGateway(3) || both.allowsGateway(4) || both.allows("sw1", nil) {
+		t.Error("the stricter list wins")
+	}
+	if !((*devScope)(nil)).allowsGateway(9) {
+		t.Error("no limit")
+	}
+	if n, ok := alertSubjectGateway("group 12 v4"); !ok || n != 12 {
+		t.Errorf("subject %d %v", n, ok)
+	}
+}
+
+func TestMCPGatewaysFollowTheScope(t *testing.T) {
+	e, post := mcpEnv(t, "127.0.0.1")
+	k1, k2 := testMCPKey(), testMCPKey()
+	keys, err := normMCPKeys([]MCPKey{{Name: "gw", Access: "ro", Key: k1, Devices: []string{"gateway:7"}}, {Name: "dev", Access: "ro", Key: k2, Devices: []string{"sw1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup := e.ws.status.sup
+	sup.mu.Lock()
+	sup.dc.Settings.MCPKeys = keys
+	sup.dc.Groups = []GroupConfig{{GroupID: 7, Name: "seven", Interface: "lo", VIP4: "127.0.0.7/8", Devices: []string{"sw1"}}, {GroupID: 8, Name: "eight", Interface: "lo", VIP4: "127.0.0.8/8"}}
+	sup.mu.Unlock()
+	for _, tc := range []struct {
+		key  string
+		tool string
+		want bool // gateway 7 is shown (get_gateways lists what the cluster reports, and a test cluster reports none)
+		not8 bool
+	}{{k1, "get_topology", true, true}, {k1, "get_gateways", false, true}, {k2, "get_topology", false, true}, {k2, "get_gateways", false, true}} {
+		_, m := post(mcpCall(tc.tool, `{}`), "Authorization", "Bearer "+tc.key)
+		txt, isErr := toolResult(t, m)
+		if isErr {
+			t.Fatalf("%s: %s", tc.tool, txt)
+		}
+		if strings.Contains(txt, `"group_id":8`) {
+			t.Errorf("%s shows gateway 8: %s", tc.tool, txt)
+		}
+		if got := strings.Contains(txt, `"group_id":7`); got != tc.want {
+			t.Errorf("%s with %s: gateway 7 shown=%v: %s", tc.tool, tc.key[:4], got, txt)
+		}
 	}
 }

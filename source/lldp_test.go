@@ -221,9 +221,7 @@ func TestLLDPOverTheAPIAndMCP(t *testing.T) {
 		t.Fatalf("api_get: %s", txt)
 	}
 	// the Settings page saves it with the rest of the ntp block
-	if txt, isErr := call("edit_config", `{"set":{"settings":{"lldp":false}}}`); isErr {
-		t.Fatalf("edit_config: %s", txt)
-	}
+	guiEditConfig(t, e, `{"settings":{"lldp":false}}`)
 	if dc, _ := loadConfig(e.conf); dc.Settings.LLDP {
 		t.Fatal("not switched off")
 	}

@@ -2329,21 +2329,22 @@
   const SMALL_TABLES = new Set(["ldapservers", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl", "devcreds"]);
   // The devices a key or an allowed source may use: a pill for each device name or tag:TAG, and the two special ones, all (no pills) and none.
   // The choices are the devices of the inventory and their tags; any other name can be typed (a device added later).
-  let devChoices = { names: [], tags: [] };
+  let devChoices = { names: [], tags: [], gateways: [] };   // gateways: [{id, name}]
+  const gwPillLabel = (x) => { const m = /^gateway:(\d+)$/.exec(x); if (!m) return x; const g = devChoices.gateways.find((y) => String(y.id) === m[1]); return "gateway:" + (g && g.name ? g.name : m[1]); };
   let devPickSeq = 0;
   function devicePicker(list, onChange) {
     let items = (list || []).filter(Boolean);
-    const ENTRY = /^(tag:[^\s,"]{1,80}|[A-Za-z0-9._-]{1,80})$/;
+    const ENTRY = /^(tag:[^\s,"]{1,80}|gateway:\d{1,9}|[A-Za-z0-9._-]{1,80})$/;
     const el = h("div", { class: "devpick", role: "group", "aria-label": "Devices" });
     const dl = h("datalist", { id: "devpick-" + (++devPickSeq) });
     const input = h("input", { type: "text", list: dl.id, autocomplete: "off", spellcheck: "false", placeholder: "add device or tag", "aria-label": "Add a device or tag",
       title: "A device name, tag:TAG (every device with the tag, now and later), all or none. Pick from the list or type, then Enter." });
     function draw() {
       const have = new Set(items.map((x) => x.toLowerCase()));
-      dl.replaceChildren(...["all", "none", ...devChoices.names, ...devChoices.tags.map((t) => "tag:" + t)].filter((o) => !have.has(o.toLowerCase())).map((o) => h("option", { value: o })));
+      dl.replaceChildren(...["all", "none", ...devChoices.names, ...devChoices.tags.map((t) => "tag:" + t), ...devChoices.gateways.map((g) => "gateway:" + g.id)].filter((o) => !have.has(o.toLowerCase())).map((o) => h("option", { value: o, label: gwPillLabel(o) })));
       clear(el).append(...(items.length ? items : ["all"]).map((x) => {
         const special = !items.length || x === "none";
-        const p = h("span", { class: "pill " + (special ? "special" : x.startsWith("tag:") ? "warn" : "info") }, x);
+        const p = h("span", { class: "pill " + (special ? "special" : x.startsWith("tag:") ? "warn" : x.startsWith("gateway:") ? "ok" : "info"), title: x.startsWith("gateway:") ? "The gateway and every device on it, now and later" : "" }, gwPillLabel(x));
         if (items.length) p.append(h("button", { type: "button", "aria-label": "Remove " + x, title: "Remove " + x, onclick: () => set(items.filter((y) => y !== x)) }, "\u00d7"));
         return p;
       }), input, dl);
@@ -2356,8 +2357,11 @@
       input.focus();
     }
     function add() {
-      const v = input.value.trim(), low = v.toLowerCase();
+      let v = input.value.trim(), low = v.toLowerCase();
       if (!v) return;
+      const gn = low.startsWith("gateway:") ? low.slice(8) : low;   // a gateway typed by its name (or by its number)
+      const gw = devChoices.gateways.find((g) => (g.name && g.name.toLowerCase() === gn) || String(g.id) === gn && low.startsWith("gateway:"));
+      if (gw && !devChoices.names.some((n) => n.toLowerCase() === low)) { v = "gateway:" + gw.id; low = v; }
       if (low === "all") { input.value = ""; return set([]); }
       if (low === "none") { input.value = ""; return set(["none"]); }
       if (!ENTRY.test(v)) { input.classList.add("bad"); return; }
@@ -3339,7 +3343,7 @@
       const web = fieldset(WEB_FIELDS, cfg.web);
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
-      devChoices = { names: (set.devices || []).map((d) => d.name).filter(Boolean).sort(), tags: [...new Set((set.devices || []).flatMap((d) => d.tags || []))].sort() };
+      devChoices = { names: (set.devices || []).map((d) => d.name).filter(Boolean).sort(), tags: [...new Set((set.devices || []).flatMap((d) => d.tags || []))].sort(), gateways: (cfg.groups || []).map((g) => ({ id: g.group_id, name: g.name || "" })) };
       devExtra = Object.fromEntries((set.devices || []).map((d) => { const { options, ca_pem, disabled } = d; return [d.name, { ...(options ? { options } : {}), ...(ca_pem ? { ca_pem } : {}), ...(disabled ? { disabled } : {}) }]; }));
       const devices = fieldset(DEVICE_FIELDS, { devices: set.devices });
       const devcreds = fieldset(DEVCRED_FIELDS, { device_credentials: set.device_credentials });

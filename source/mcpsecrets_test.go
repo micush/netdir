@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 )
@@ -87,33 +86,12 @@ func TestMCPNeverShowsSecretsEvenToRW(t *testing.T) {
 		b, _ := json.Marshal(map[string]any{"group_id": id, "name": name, "interface": "lo", "vip4": "127.0.0." + map[int]string{100: "50", 101: "51"}[id] + "/8", "key": key})
 		return string(b)
 	}
-	// a real secret sent in is saved, but neither the answer nor the log line shows it
-	var logged lockedBuf
-	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
-	t.Cleanup(func() { slog.SetDefault(old) })
-	if txt, isErr := call("edit_config", `{"set":{"groups":[`+gw(100, "a", "first-gateway-secret")+`,`+gw(101, "b", "second-gateway-secret")+`]}}`); isErr || strings.Contains(txt, "secret") {
-		t.Fatalf("set the keys: %s", txt)
+	// the GUI saves the secrets; MCP is not shown them in any way of reading the configuration
+	guiEditConfig(t, e, `{"groups":[`+gw(100, "a", "first-gateway-secret")+`,`+gw(101, "b", "second-gateway-secret")+`]}`)
+	dc, err := loadConfig(e.conf)
+	if err != nil || len(dc.Groups) != 2 {
+		t.Fatalf("not saved: %v", err)
 	}
-	keys := func() map[int]string {
-		dc, err := loadConfig(e.conf)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out := map[int]string{}
-		for _, g := range dc.Groups {
-			out[g.GroupID] = g.Key
-		}
-		return out
-	}
-	if k := keys(); k[100] != "first-gateway-secret" || k[101] != "second-gateway-secret" {
-		t.Fatalf("keys not saved: %v", k)
-	}
-	if l := logged.String(); strings.Contains(l, "gateway-secret") || !strings.Contains(l, "calls edit_config") {
-		t.Fatalf("the audit line shows the secret: %s", l)
-	}
-
-	// every way of reading the configuration hides them
 	cfgText, isErr := call("get_config", `{}`)
 	if isErr || strings.Contains(cfgText, "gateway-secret") || !strings.Contains(cfgText, `"key":"(hidden)"`) {
 		t.Fatalf("get_config: %s", cfgText)
@@ -121,63 +99,21 @@ func TestMCPNeverShowsSecretsEvenToRW(t *testing.T) {
 	if txt, isErr := call("api_get", `{"path":"/api/config"}`); isErr || strings.Contains(txt, "gateway-secret") {
 		t.Fatalf("api_get /api/config: %s", txt)
 	}
-	if txt, isErr := call("edit_config", `{"set":{"log_level":"debug"},"dry_run":true}`); isErr || strings.Contains(txt, "gateway-secret") {
-		t.Fatalf("dry run: %s", txt)
-	}
 	for _, p := range []string{"/api/versions/get?id=1", "/api/versions/diff?a=1&b=2", "/api/versions/download"} {
 		if txt, isErr := call("api_get", `{"path":"`+p+`"}`); !isErr || !strings.Contains(txt, "not available over MCP") {
 			t.Fatalf("%s: %s", p, txt)
 		}
 	}
-
-	// the groups list as read, sent back whole with one name changed and the order swapped: both keys kept
-	var got struct {
-		Config struct {
-			Groups []map[string]any `json:"groups"`
-		} `json:"config"`
-	}
-	if err := json.Unmarshal([]byte(cfgText), &got); err != nil || len(got.Config.Groups) != 2 {
-		t.Fatalf("%v %s", err, cfgText)
-	}
-	g := []map[string]any{got.Config.Groups[1], got.Config.Groups[0]}
-	g[1]["name"] = "renamed"
-	set, _ := json.Marshal(map[string]any{"groups": g})
-	if txt, isErr := call("edit_config", `{"set":`+string(set)+`}`); isErr {
-		t.Fatalf("send back hidden: %s", txt)
-	}
-	if k := keys(); k[100] != "first-gateway-secret" || k[101] != "second-gateway-secret" {
-		t.Fatalf("keys after a hidden round trip: %v", k)
-	}
-	dc, _ := loadConfig(e.conf)
-	for _, gr := range dc.Groups {
-		if gr.GroupID == 100 && gr.Name != "renamed" {
-			t.Fatalf("the rename was lost: %+v", dc.Groups)
+	// and nothing sent over MCP can change the configuration, the secrets included
+	for _, name := range []string{"edit_config", "api_request"} {
+		if _, m := post(mcpCall(name, `{"set":{"log_level":"debug"}}`)); m["error"] == nil {
+			t.Fatalf("%s still answers: %v", name, m)
 		}
 	}
-
-	// a hidden key for a gateway that has none yet is refused, and nothing is saved
-	if txt, isErr := call("edit_config", `{"set":{"groups":[`+gw(102, "c", mcpHidden)+`]}}`); !isErr || !strings.Contains(txt, "groups[0].key") {
-		t.Fatalf("unmatched hidden: %s", txt)
-	}
-	if k := keys(); len(k) != 2 {
-		t.Fatalf("saved anyway: %v", k)
-	}
-
-	// api_request: the whole configuration as get_config gave it, PUT back; the hidden keys are kept
-	var whole map[string]any
-	_ = json.Unmarshal([]byte(cfgText), &whole)
-	body, _ := json.Marshal(map[string]any{"config": whole["config"], "note": "round trip"})
-	if txt, isErr := call("api_request", `{"method":"PUT","path":"/api/config","body":`+string(body)+`}`); isErr || strings.Contains(txt, "gateway-secret") {
-		t.Fatalf("api_request PUT: %s", txt)
-	}
-	if k := keys(); k[100] != "first-gateway-secret" || k[101] != "second-gateway-secret" {
-		t.Fatalf("keys after api_request: %v", k)
-	}
-	// and a new value is still taken
-	if txt, isErr := call("edit_config", `{"set":{"groups":[`+gw(100, "a", "rotated-gateway-secret")+`,`+gw(101, "b", mcpHidden)+`]}}`); isErr {
-		t.Fatalf("rotate: %s", txt)
-	}
-	if k := keys(); k[100] != "rotated-gateway-secret" || k[101] != "second-gateway-secret" {
-		t.Fatalf("after rotating one: %v", k)
+	after, _ := loadConfig(e.conf)
+	for i := range dc.Groups {
+		if after.Groups[i].Key != dc.Groups[i].Key {
+			t.Fatalf("a key changed: %+v", after.Groups)
+		}
 	}
 }

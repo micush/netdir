@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"netdir/device"
@@ -24,6 +25,10 @@ import (
 const devScopeMax = 64 // entries in one list
 
 func devEntryOK(e string) bool {
+	if g, ok := strings.CutPrefix(e, "gateway:"); ok {
+		n, err := strconv.Atoi(g)
+		return err == nil && n > 0 && g == strconv.Itoa(n)
+	}
 	if t, ok := strings.CutPrefix(e, "tag:"); ok {
 		return t != "" && len(t) <= 80 && !strings.ContainsAny(t, " ,\t\r\n\"")
 	}
@@ -71,7 +76,67 @@ func normDevices(list []string) ([]string, error) {
 }
 
 // devScope is the lists of one caller (its key's and its source's); a nil scope allows every device.
-type devScope struct{ parts [][]string }
+type devScope struct {
+	parts [][]string
+	cfg   func() *DaemonConfig // the configuration now, to find the devices of a gateway:N entry (a device added to the gateway later is allowed too)
+}
+
+// bind gives the scope the way to read the gateways' devices.
+func (sc *devScope) bind(cfg func() *DaemonConfig) {
+	if sc != nil {
+		sc.cfg = cfg
+	}
+}
+
+// gatewayHas says whether device name is one of gateway id's devices.
+func (sc *devScope) gatewayHas(id int, name string) bool {
+	if sc.cfg == nil {
+		return false
+	}
+	dc := sc.cfg()
+	if dc == nil {
+		return false
+	}
+	for _, g := range dc.Groups {
+		if g.GroupID == id {
+			for _, d := range g.Devices {
+				if strings.EqualFold(d, name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// allowsGateway says whether the caller may see gateway id: every list it has must name it (gateway:ID).  A caller limited to
+// devices only sees no gateway.
+func (sc *devScope) allowsGateway(id int) bool {
+	if !sc.limited() {
+		return true
+	}
+	want := "gateway:" + strconv.Itoa(id)
+	for _, part := range sc.parts {
+		ok := false
+		for _, e := range part {
+			ok = ok || strings.EqualFold(e, want)
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// alertSubjectGateway returns the gateway number of an alert subject written "group N ..." .
+func alertSubjectGateway(subject string) (int, bool) {
+	f := strings.Fields(subject)
+	if len(f) >= 2 && f[0] == "group" {
+		n, err := strconv.Atoi(f[1])
+		return n, err == nil
+	}
+	return 0, false
+}
 
 // newDevScope makes the scope of lists, ignoring those that allow everything.
 func newDevScope(lists ...[]string) *devScope {
@@ -107,6 +172,9 @@ func (sc *devScope) allows(name string, tags []string) bool {
 		for _, e := range part {
 			if t, isTag := strings.CutPrefix(e, "tag:"); isTag {
 				ok = ok || hasTagEq(tags, t)
+			} else if g, isGW := strings.CutPrefix(e, "gateway:"); isGW {
+				n, _ := strconv.Atoi(g)
+				ok = ok || sc.gatewayHas(n, name)
 			} else if !strings.EqualFold(e, "none") {
 				ok = ok || strings.EqualFold(e, name)
 			}
@@ -153,7 +221,7 @@ func scopeOf(s *session) *devScope {
 }
 
 // scopedOffTools are the tools a caller limited to some devices is not offered: they read or change the whole configuration or any API route.
-var scopedOffTools = map[string]bool{"get_config": true, "edit_config": true, "api_request": true, "set_gateway_device": true, "device_troubleshoot_user": true}
+var scopedOffTools = map[string]bool{"get_config": true, "device_troubleshoot_user": true}
 
 // scopeRefusedPrefixes are the API routes a limited caller may not use: they hold the whole inventory or the keys.
 var scopeRefusedPrefixes = []string{"/api/config", "/api/versions", "/api/canvas/edit", "/api/devices/troubleshoot", "/api/devices/signin"}

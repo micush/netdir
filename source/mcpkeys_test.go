@@ -72,35 +72,22 @@ func TestMCPKeyOpensFromAnyAddress(t *testing.T) {
 	}
 	// read-only key: the read tools only, and a write is refused
 	code, m := post(list, "Authorization", "Bearer "+roKey)
-	if code != 200 || containsStr(toolNames(t, m), "edit_config") || !containsStr(toolNames(t, m), "get_config") {
+	if code != 200 || containsStr(toolNames(t, m), "device_change") || !containsStr(toolNames(t, m), "get_config") {
 		t.Fatalf("ro key: %d %v", code, m)
 	}
-	_, m = post(mcpCall("edit_config", `{"set":{"log_level":"debug"}}`), "Authorization", "Bearer "+roKey)
-	if txt, isErr := toolResult(t, m); !isErr || !strings.Contains(txt, "read-only") {
-		t.Fatalf("ro key wrote: %s", txt)
-	}
-	// read-write key: a change, saved under the key's name
-	_, m = post(mcpCall("edit_config", `{"set":{"log_level":"debug"}}`), "Authorization", "bearer "+rwKey)
-	if txt, isErr := toolResult(t, m); isErr {
-		t.Fatalf("rw key: %s", txt)
-	}
-	found := false
-	for _, v := range e.mg.VersionsList() {
-		if strings.Contains(v.Actor+" "+v.Note, "mcp:laptop@127.0.0.1") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("not saved as the key's name: %+v", e.mg.VersionsList())
+	// read-write key: the device tools that change, and still nothing that edits netdir
+	_, m = post(list, "Authorization", "bearer "+rwKey)
+	if !containsStr(toolNames(t, m), "device_change") || containsStr(toolNames(t, m), "edit_config") {
+		t.Fatalf("rw key tools: %v", toolNames(t, m))
 	}
 	// the address list still counts, and the higher access wins
 	sup.mu.Lock()
 	sup.dc.Settings.MCPACL = []string{"127.0.0.1"}
 	sup.mu.Unlock()
-	if code, m := post(list); code != 200 || containsStr(toolNames(t, m), "edit_config") {
+	if code, m := post(list); code != 200 || containsStr(toolNames(t, m), "device_change") {
 		t.Fatalf("address only: %d", code)
 	}
-	if _, m := post(list, "Authorization", "Bearer "+rwKey); !containsStr(toolNames(t, m), "edit_config") {
+	if _, m := post(list, "Authorization", "Bearer "+rwKey); !containsStr(toolNames(t, m), "device_change") {
 		t.Fatal("ro address + rw key is not rw")
 	}
 	if code, _ := post(list, "Authorization", "Bearer "+testMCPKey()); code != 401 {
@@ -113,10 +100,8 @@ func TestMCPKeyIsKeptAndHidden(t *testing.T) {
 	e, post := mcpEnv(t, "127.0.0.1 rw")
 	k := testMCPKey()
 	set, _ := json.Marshal(map[string]any{"settings": map[string]any{"mcp_keys": []any{map[string]any{"name": "laptop", "access": "rw", "key": k}}}})
-	_, m := post(mcpCall("edit_config", `{"set":`+string(set)+`}`))
-	if txt, isErr := toolResult(t, m); isErr || strings.Contains(txt, k) {
-		t.Fatalf("set: %s", txt)
-	}
+	guiEditConfig(t, e, string(set))
+	var m map[string]any
 	dc, err := loadConfig(e.conf)
 	if err != nil || len(dc.Settings.MCPKeys) != 1 || dc.Settings.MCPKeys[0].Hash != mcpKeyHash(k) || dc.Settings.MCPKeys[0].Key != k {
 		t.Fatalf("saved: %v %+v", err, dc.Settings.MCPKeys)

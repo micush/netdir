@@ -110,8 +110,11 @@ func TestMCPReadOnly(t *testing.T) {
 	}
 	// a write is refused, whatever the client sends
 	_, m = post(mcpCall("set_node_paused", `{"node":"this","paused":true}`))
-	if txt, isErr := toolResult(t, m); !isErr || !strings.Contains(txt, "read-only") {
-		t.Fatalf("write as read-only: %s", txt)
+	if m["error"] == nil {
+		t.Fatalf("a tool that changes netdir is gone, yet it answered: %v", m)
+	}
+	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("api_get", `{"path":"/api/config"}`)); return m }()); isErr && strings.Contains(txt, "cannot be changed") {
+		t.Fatalf("a read was refused: %s", txt)
 	}
 	_, m = post(mcpCall("no_such_tool", `{}`))
 	if m["error"] == nil {

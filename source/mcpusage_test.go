@@ -114,7 +114,7 @@ func TestMCPUsageHandler(t *testing.T) {
 func TestMCPUsageEndToEnd(t *testing.T) {
 	e, post := mcpEnv(t, "127.0.0.0/8")
 	post(mcpCall("list_nodes", `{}`))
-	post(mcpCall("set_node_paused", `{"node":"this","paused":true}`)) // refused: read-only
+	post(mcpCall("device_change", `{"target":"all","commands":["x"]}`)) // refused: read-only
 	r := e.ws.usage.Report(time.Hour)
 	tot := r["totals"].(mcpUseSum)
 	if tot.Calls != 2 || tot.Refused != 1 {
@@ -124,7 +124,7 @@ func TestMCPUsageEndToEnd(t *testing.T) {
 	for _, s := range r["by_tool"].([]mcpUseSum) {
 		tools[s.Name] = s.Calls
 	}
-	if tools["list_nodes"] != 1 || tools["set_node_paused"] != 1 {
+	if tools["list_nodes"] != 1 || tools["device_change"] != 1 {
 		t.Errorf("by tool %v", tools)
 	}
 	if k := r["by_key"].([]mcpUseSum); len(k) != 1 || k[0].Name != "(address list)" {

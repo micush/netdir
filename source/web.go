@@ -358,6 +358,15 @@ func (w *WebServer) Handler() http.Handler {
 			w.status.viaServing(r.Context(), groups)
 			w.status.addPeerClients(r.Context(), groups)
 		}
+		if sc := scopeOf(s); sc.limited() {
+			keep := groups[:0]
+			for _, g := range groups {
+				if sc.allowsGateway(g.GroupID) {
+					keep = append(keep, g)
+				}
+			}
+			groups = keep
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": groups, "dnsdir": dnsdirInfo()})
 	}))
 	mux.HandleFunc("POST /api/assert-agc", w.authed(w.handleAssertAGC))
@@ -861,6 +870,15 @@ func (w *WebServer) handleGateways(rw http.ResponseWriter, r *http.Request, s *s
 	gs := buildGateways(w.status.snapshot())
 	nameMembers(gs, w.status.ipNames())
 	nameGateways(gs, w.status.sup.config())
+	if sc := scopeOf(s); sc.limited() { // a key or address limited to some devices sees the gateways it was given (devscope.go)
+		keep := gs[:0]
+		for _, g := range gs {
+			if sc.allowsGateway(g.GroupID) {
+				keep = append(keep, g)
+			}
+		}
+		gs = keep
+	}
 	if r.URL.Query().Get("own") == "" { // ?own=1: only what this node runs, as asked by another node
 		gs = w.status.gatewaysVia(r.Context(), gs)
 	}

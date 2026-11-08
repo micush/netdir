@@ -1,5 +1,25 @@
 # Changelog
 
+## [v85] - 2026-11-08 — MCP cannot change netdir; gateways in the Devices field
+
+### Changed (breaking)
+- **MCP can no longer change netdir's own configuration.** `rw` used to mean "anything the GUI can do"; it now means "change devices". Removed: `edit_config`, `api_request`, `set_node_paused`, `set_paused`, `alert_action`, `schedule_set`, `schedule_delete`, `schedule_run`, `update_fetch`, `update_apply`, `update_push`, `update_cancel`, `rename_node`, `set_label`, `set_gateway_node`, `set_gateway_device` and `clear_left_nodes`. Settings, cluster, gateways, nodes, schedules, updates, alerts, users and certificates are changed in the GUI only, so a client cannot damage the gateway.
+- The rule is also in the request path (`mcpWriteGuard`): over MCP every request that is not a GET is refused except `POST /api/devices/change`, `/raw` and `/capture`, also through `api_get` and the node relay. A tool added later cannot slip through.
+- Still there, read only: `get_config` (secrets hidden), `list_api`, `api_get`, and every monitoring tool. `device_change`, `device_change_raw`, `device_capture` stay for `rw`.
+
+### Added
+- **Gateways in the Devices field (keys and allowed sources).** A `gateway:N` pill (shown by the gateway's name in the GUI; type the name or `gateway:3`) gives the gateway and every device on it, now and later. A caller with only device entries sees no gateway. With a key and a source, both must name it. The access (ro/rw) is whatever the key or source has.
+- A limited caller's `get_topology` and `get_gateways` show only its gateways; `get_alerts` drops the alerts about gateways and devices it may not see.
+
+### Verified
+- `TestMCPWriteGuard`, `TestGatewayScope`, `TestMCPGatewaysFollowTheScope`; the tests that used `edit_config` now change the configuration through the GUI path (`guiEditConfig`); the full checklist.
+
+### Not verified
+- The gateway pill and its name display have not been looked at in a browser.
+- The alert filter (`scopeAlerts`) has no test of its own; `get_gateways` is tested only for what it must not show (a test cluster reports no gateways).
+- Federation, and the log (`get_log`), are not filtered by gateway.
+- The helpers that put `(hidden)` secrets back (`mcpRestoreHidden` and friends) are no longer reached from MCP; they are left in place and tested.
+
 ## [v84] - 2026-11-08 — MCP: limit a key or an allowed source to some devices
 
 ### Added

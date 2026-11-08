@@ -147,8 +147,44 @@ func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *ht
 			jsonError(rw, code, err.Error())
 			return
 		}
+		if v, ok := data.(AlertView); ok && cmd == "alerts.list" {
+			data = w.scopeAlerts(scopeOf(s), v)
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": data})
 	}
+}
+
+// scopeAlerts drops the alerts about a gateway or a device the caller may not see (devscope.go); the other alerts stay.
+func (w *WebServer) scopeAlerts(sc *devScope, v AlertView) AlertView {
+	if !sc.limited() {
+		return v
+	}
+	tags := map[string][]string{}
+	if devs, err := w.status.sup.deviceInventory(); err == nil {
+		for _, d := range devs {
+			tags[d.Name] = d.Tags
+		}
+	}
+	keep := func(in []Alert) []Alert {
+		out := make([]Alert, 0, len(in))
+		for _, al := range in {
+			d, _ := alertDefByID(al.Rule)
+			switch d.Subject {
+			case "gateway":
+				if n, ok := alertSubjectGateway(al.Subject); ok && !sc.allowsGateway(n) {
+					continue
+				}
+			case "device":
+				if !sc.allows(al.Subject, tags[al.Subject]) {
+					continue
+				}
+			}
+			out = append(out, al)
+		}
+		return out
+	}
+	v.Alerts = keep(v.Alerts)
+	return v
 }
 
 func (w *WebServer) handleCSRCancel(rw http.ResponseWriter, r *http.Request, s *session) {
