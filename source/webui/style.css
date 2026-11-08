@@ -757,3 +757,7 @@ table.policy tr.off td:first-child { opacity: 1; }
 .devpick .pill button:hover, .devpick .pill button:focus-visible { outline: 2px solid var(--accent); }
 table.policy td .devpick input[type=text] { flex: 1 1 7rem; width: auto; min-width: 6rem; padding: .2rem .3rem; }
 .devpick input.bad { outline: 2px solid var(--bad); outline-offset: -2px; }
+
+/* a checkbox with its text beside it, in a form (Add device ▸ Enable them) */
+.f.check { display: flex; align-items: center; gap: .5rem; }
+.f.check input { width: auto; }

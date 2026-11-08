@@ -1,5 +1,32 @@
 # Changelog
 
+## [v97] - 2026-11-08 — the checkbox is called Enable
+
+### Changed
+- The checkbox under the list in *Add ▸ Devices of the inventory* is labelled **Enable**, not "Enable them …".
+
+## [v96] - 2026-11-08 — Add device: an Enable checkbox
+
+### Added
+- *Add ▸ Devices of the inventory* has a checkbox under the list, **Enable**: ticked, the devices picked are enabled as they are added (imported devices come in disabled). Unticked (the default) leaves each as it is. *＋ new device* is still what the dialog opens on.
+
+### Verified
+- `node --check` only; nothing in Go changed.
+
+### Not verified
+- Not looked at in the running app.
+
+## [v95] - 2026-11-08 — Add device: a plain choice, then the list
+
+### Changed
+- **Add device on a gateway is two steps again, not one tall list beside the new-device fields.** *Add* is a short choice: *＋ new device* (the form as before) or *Devices of the inventory*, which hides the new-device fields and shows one full-width list where Shift-click and Ctrl-click pick several. v92 put the list and the fields together, which looked wrong.
+
+### Verified
+- `node --check` only; nothing in Go changed.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v94] - 2026-11-08 — topology: remove or delete the picked devices
 
 ### Added

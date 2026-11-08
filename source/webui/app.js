@@ -1089,22 +1089,25 @@
     function form(title, fields, onOk, okLabel, noSave) {
       const els = {}, hints = {};
       const grid = h("div", { class: "grid" }, fields.map((f) => {
-        els[f.k] = f.multi
-          ? h("select", { multiple: true, size: String(Math.min(f.options.length, 8)) }, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))   // Shift-click and Ctrl-click pick several
+        els[f.k] = f.check
+          ? h("input", { type: "checkbox", checked: !!f.v })
+          : f.multi
+          ? h("select", { multiple: true, size: String(Math.min(Math.max(f.options.length, 3), 10)) }, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))   // Shift-click and Ctrl-click pick several
           : f.options
           ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, PLATFORM_LABEL[o] || o)))
           : h("input", { type: f.secret ? "password" : "text", autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
-        return h("label", { class: "f" + (fields.length === 1 ? " wide" : "") }, f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
+        if (f.check) return h("label", { class: "f check wide" }, els[f.k], f.l);
+        return h("label", { class: "f" + (fields.length === 1 || f.wide ? " wide" : "") }, f.l, els[f.k], f.hint || f.on ? hints[f.k] : null);
       }));
       for (const f of fields) if (f.on && f.initOn) f.on(els, () => {});
       const err = h("div", { "aria-live": "polite" });
       const submit = (e) => {
         e.preventDefault();
         const vals = {};
-        for (const f of fields) vals[f.k] = f.multi ? [...els[f.k].selectedOptions].map((o) => o.value).join("\n") : els[f.k].value.trim();
+        for (const f of fields) vals[f.k] = f.check ? (els[f.k].checked ? "1" : "") : f.multi ? [...els[f.k].selectedOptions].map((o) => o.value).join("\n") : els[f.k].value.trim();
         const m = onOk(vals);
         if (m) { errorBox(err, m); return; }
         closeEditor();
@@ -1316,18 +1319,21 @@
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes
     // the device everywhere it is drawn.
-    const NEW_DEV = "＋ new device", NEW_LOGIN = "＋ new login";
+    const NEW_DEV = "＋ new device", FROM_INV = "Devices of the inventory", NEW_LOGIN = "＋ new login";
     function deviceForm(g, edit) {
       const d = edit ? devByName(edit) : null;
       const others = inventory().map((x) => x.name).filter((n) => !(g.devices || []).includes(n));
       const ls = logins().map((c) => c.name);
       const show = (els) => {
-        const fresh = !els.pick || [...els.pick.selectedOptions].some((o) => o.value === NEW_DEV) || !els.pick.selectedOptions.length, newLogin = els.login.value === NEW_LOGIN;
+        const fresh = !els.pick || els.pick.value === NEW_DEV, newLogin = els.login.value === NEW_LOGIN;
+        for (const k of ["many", "enable"]) if (els[k]) els[k].closest("label").style.display = fresh ? "none" : "";
         for (const k of ["name", "platform", "address", "port", "opts", "tags", "cert", "login"]) els[k].closest("label").style.display = fresh ? "" : "none";
         for (const k of ["user", "pass", "token"]) els[k].closest("label").style.display = fresh && newLogin ? "" : "none";
       };
       form(edit ? "Edit device " + edit : "Add device", [
-        ...(edit || !others.length ? [] : [{ k: "pick", l: "Device", options: [NEW_DEV, ...others], v: NEW_DEV, on: show, multi: true, hint: "Shift-click or Ctrl-click to pick several." }]),
+        ...(edit || !others.length ? [] : [{ k: "pick", l: "Add", options: [NEW_DEV, FROM_INV], v: NEW_DEV, on: show, initOn: true },
+          { k: "many", l: "Devices", options: others, multi: true, wide: true, hint: "Shift-click or Ctrl-click to pick several." },
+          { k: "enable", l: "Enable", check: true, v: false }]),
         { k: "name", l: "Name", v: d ? d.name : "", ph: "core-sw1" },
         // a cloud service has one API address: choosing it fills the address in (an address typed by hand is left alone)
         { k: "platform", l: "Platform", options: PLATFORMS, v: d ? d.platform : PLATFORMS[0], initOn: true, on: (els) => {
@@ -1347,9 +1353,11 @@
         { k: "pass", l: "Password", v: "", secret: true },
         { k: "token", l: "Token", v: "", secret: true },
       ], (v) => {
-        const picked = (v.pick || "").split("\n").filter(Boolean);
-        if (picked.includes(NEW_DEV) && picked.length > 1) return "Pick " + NEW_DEV + " on its own, or pick devices of the inventory.";
-        if (picked.length && picked[0] !== NEW_DEV) { g.devices = (g.devices || []).concat(picked.filter((n) => !(g.devices || []).includes(n))); cv.sel = { kind: "dev", addr: picked[picked.length - 1] }; return null; }
+        if (v.pick === FROM_INV) {
+          const picked = (v.many || "").split("\n").filter(Boolean);
+          if (!picked.length) return "Pick one or more devices."; if (v.enable) for (const n of picked) { const x = devByName(n); if (x) delete x.disabled; }
+          g.devices = (g.devices || []).concat(picked.filter((n) => !(g.devices || []).includes(n))); cv.sel = { kind: "dev", addr: picked[picked.length - 1] }; return null;
+        }
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(v.name)) return "A name is up to 64 letters, digits, '.', '-' or '_'.";
         if (inventory().some((x) => x.name.toLowerCase() === v.name.toLowerCase() && x !== d)) return "There is a device called " + v.name + " already.";
         if (!v.address && v.platform === "meraki") v.address = "api.meraki.com";
