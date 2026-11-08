@@ -2208,7 +2208,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2628,8 +2628,8 @@
   const SERVICE_ADDR = { meraki: "api.meraki.com", entra: "graph.microsoft.com", nsone: "api.nsone.net", rcode0: "my.rcodezero.at" };
   // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
   const PLATFORM_LABEL = {
-    afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
-    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", iosxe: "Cisco IOS-XE",
+    aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
+    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",

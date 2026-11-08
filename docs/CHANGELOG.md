@@ -1,5 +1,23 @@
 # Changelog
 
+## [v104] - 2026-11-08 — Cisco IOS, Catalyst SD-WAN, NSX-T and ACI
+
+### Added
+- **`ios`** (classic Cisco IOS, SNMP v2c and v3, read only): facts, interfaces, ports, LLDP and CDP neighbors, routes, `show oid`, `/oid/…`. A minimal SNMP client in the standard library (`device/snmp.go`): BER, GET and GETBULK, USM with MD5 and SHA-1/2 authentication and AES-128 or DES privacy, time-window and engine-ID resynchronisation. No configuration (SNMP cannot hand it over) and no SSH (none exists in the standard library).
+- **`sdwan`** (Catalyst SD-WAN Manager), **`nsxt`** (NSX Manager) and **`aci`** (APIC): facts, `show`, `device_api_get` and `device_api_catalog`, changes with `device_change_raw` (guarded, no accounts, keys, certificates, upgrades or restarts); ACI also interfaces, LLDP and CDP neighbors and the tenants' configuration.
+- GUI: the four platforms in the device list (default port 161 for `ios`), help and README sections.
+
+### Changed
+- Observium's OS `ios` and IP Fabric's Cisco IOS (not IOS-XE) are imported as `ios`, no longer as `iosxe`.
+
+### Verified
+- Tests: the RFC 3414 key-localization examples; BER round trips; an SNMP agent in the tests serving v2c and v3 (authNoPriv SHA, authPriv SHA-256/AES, MD5/DES, SHA-512/AES); the three REST drivers against TLS stubs (login, expiry and renewal, logout, reads, refusals of accounts, keys and certificates, changes and refused changes).
+
+### Not verified
+- None of the four has run against a real device. The OIDs, paths, class names and fields are from the standards and the vendors' documentation. SNMPv3 against a real IOS agent (the stub is written from the same RFCs as the client) is the most likely to need a fix.
+- An unattended SNMP read of a large switch is many UDP requests (a walk of 25 rows at a time).
+- Not done: SNMP over IPv6 was not tried, SSH and telnet CLI, SD-WAN per-device interfaces and neighbors, NSX interfaces, import from these platforms.
+
 ## [v103] - 2026-11-08 — version bump only
 
 No code change since v102.

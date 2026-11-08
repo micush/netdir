@@ -64,7 +64,7 @@ A show command on one device:
 |---|---|
 | VIP election, anycast, BGP, OSPF, LLDP, cluster, users, backups, scheduler, updates | built in |
 | Device inventory, credentials, MCP device tools | built in |
-| Drivers | `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `pbs` (Proxmox Backup Server) and `pdm` (Proxmox Datacenter Manager) over their REST APIs, `observium` and `centreon` (monitoring systems over their REST APIs), `vcenter` (VMware vCenter over its REST API), `nsone` (NS1 hosted DNS over its REST API), `rcode0` (RcodeZero anycast DNS over its REST API), `ipfabric` (IP Fabric over its REST API), `aviatrix` (Aviatrix Controller), `dnsdir` (the DNS Director product, over its MCP endpoint), `netdir` (another MCP Network Director; see *Federation*) |
+| Drivers | `ios` (classic Cisco IOS over SNMP, read only), `sdwan` (Cisco Catalyst SD-WAN Manager), `nsxt` (VMware NSX-T), `aci` (Cisco ACI APIC), `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `pbs` (Proxmox Backup Server) and `pdm` (Proxmox Datacenter Manager) over their REST APIs, `observium` and `centreon` (monitoring systems over their REST APIs), `vcenter` (VMware vCenter over its REST API), `nsone` (NS1 hosted DNS over its REST API), `rcode0` (RcodeZero anycast DNS over its REST API), `ipfabric` (IP Fabric over its REST API), `aviatrix` (Aviatrix Controller), `dnsdir` (the DNS Director product, over its MCP endpoint), `netdir` (another MCP Network Director; see *Federation*) |
 | Writes to devices | typed port changes from plain English on Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches (`device_change`), and any configuration change on every platform (`device_change_raw`: REST request, PAN-OS action, or CLI lines); an `rw` key, ACL entry or GUI account may, `ro` may not; not yet run on real gear |
 | `show` commands, text running-configs | NX-OS, EOS and PAN-OS answer them over their APIs; IOS-XE, ArubaOS-CX and FortiOS need an SSH transport, not built yet; Infoblox and Technitium have none |
 | NX-OS, EOS, ArubaOS-CX, PAN-OS, Infoblox and Technitium drivers | built against vendor documentation and a test stub, not yet run on real gear (see the changelog) |
@@ -127,7 +127,7 @@ Devices and their logins go in the shared `settings` block:
 | Field | Meaning |
 |---|---|
 | `name` | unique; letters, digits, `.`, `-`, `_` |
-| `platform` | `iosxe`, `nxos`, `eos`, `aoscx`, `fortios`, `panos`, `panorama`, `nios`, `technitium`, `bigip`, `meraki`, `entra`, `afc`, `proxmox` (Proxmox VE), `pbs`, `pdm`, `dnsdir` or `netdir` |
+| `platform` | `iosxe`, `ios`, `sdwan`, `nsxt`, `aci`, `nxos`, `eos`, `aoscx`, `fortios`, `panos`, `panorama`, `nios`, `technitium`, `bigip`, `meraki`, `entra`, `afc`, `proxmox` (Proxmox VE), `pbs`, `pdm`, `dnsdir` or `netdir` |
 | `address` | IP address or host name, no port or scheme |
 | `port` | the API port; default 443 |
 | `credential` | the name of an entry of `device_credentials` |
@@ -292,6 +292,26 @@ The on-site controller for Aruba CX VXLAN/EVPN fabrics, over its REST API (`http
 - **Changes** (`device_change_raw`, rw key): `POST`, `PUT`, `PATCH` or `DELETE` with a path below `/api/v1/` and a JSON body. A `PUT` keeps the old record and puts it back when the request fails in a way that may have changed something. Not changed: users, roles, authentication, certificates, keys, licences, backups and restores, upgrades, reboots and resets. Not run against a real controller.
 
 NetEdit has no documented API, so it has no driver; the Aruba CX switches it manages can be added directly as `aoscx`.
+
+### Cisco IOS (`ios`)
+
+Classic Cisco IOS has no REST API, so the driver reads it over **SNMP** (UDP 161; Port empty). It reads facts (system group and ENTITY-MIB: model and serial of the chassis), interfaces and ports (IF-MIB with the 64-bit counters, IP-MIB addresses), LLDP and CDP neighbors, the routing table (IP-FORWARD-MIB) and any subtree by its numeric OID (`show oid 1.3.6.1.2.1.1`, `/oid/…` in `device_api_get`). It cannot read the running configuration, run `show` commands or change anything: SNMP has no way to, and an SSH transport does not exist in this program (netdir uses the standard library only). The subtrees that hold SNMP's own users and communities and the configuration-copy MIBs are never read.
+
+- **v2c:** a login with the community as its **token** (or password) and no user name.
+- **v3:** a login with the user name, the authentication passphrase as the password and the privacy passphrase as the token (passphrases are at least 8 characters). Options: `auth` = `md5`, `sha` (the default), `sha224`, `sha256`, `sha384`, `sha512`; `priv` = `aes` (the default when there is a privacy passphrase), `des` or `none`; `snmp_version` = `2c` or `3`. Not offered: AES-192/256 and 3DES.
+- Not tried against a real device: the OIDs are those of the standard and Cisco MIBs, and the SNMPv3 implementation is checked against the RFC 3414 key examples and an agent written for the tests.
+
+### Cisco Catalyst SD-WAN (`sdwan`)
+
+The device is the **SD-WAN Manager** (vManage), a user name and a password. The driver logs in (`/j_security_check`), takes the XSRF token, logs in again when the session expires and logs out at the end. Facts name the Manager's version and count the devices it manages; `show <resource> [key=value]` and `device_api_get` read any path below `/dataservice` (`device`, `alarms`, `device/monitor`, `template/device`, …). Accounts, certificates, settings and the session are not read. Changes (`device_change_raw`, rw key): POST, PUT, PATCH or DELETE below `/dataservice/` except accounts, certificates, settings, backups, upgrades and restarts. Not tried against a real Manager.
+
+### VMware NSX-T (`nsxt`)
+
+The device is the **NSX Manager** (give the cluster's address), a user name and a password sent as HTTP basic authentication. Facts: product version, uptime and host name. `show <path> [key=value]` and `device_api_get` read the Manager API (`/api/v1/…`) and the Policy API (`/policy/api/v1/…`; a `show` path that begins with `infra`, `global-infra` or `orgs` is a Policy path). Users, certificates, keys, directory logins, backups and licences are not read. Changes: POST, PUT, PATCH or DELETE below `/api/` and `/policy/api/` except those and upgrades, restarts and the Manager's services (NSX needs the current `_revision` in a PUT, so a PUT is not put back automatically when it fails). Not tried against a real Manager.
+
+### Cisco ACI (`aci`)
+
+The device is the **APIC** (the cluster's address), a user name and a password. Facts are the APIC's own (`topSystem`); interfaces and neighbors (LLDP and CDP) are those of every node of the fabric, named `node-101/eth1/1`; the configuration is the tenants' configuration as the APIC holds it (properties of configuration only, JSON). `show <class> [property=value]` (`show fvTenant`, `show faultInst severity=critical`), `show mo <dn>` and `device_api_get` (`/api/node/class/<class>.json`, `/api/node/mo/<dn>.json`) read the object model. Logins, keys, certificates and communities are not read. Changes: POST or DELETE of `/api/node/mo/<dn>.json` except logins, keys, firmware, restarts, exports and imports. Not tried against a real APIC.
 
 ### Cisco Meraki (`meraki`)
 

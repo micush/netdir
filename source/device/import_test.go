@@ -30,7 +30,7 @@ func TestObserviumImportRows(t *testing.T) {
 			t.Errorf("%s tags %v", d.Name, d.Tags)
 		}
 	}
-	want := "core-sw:iosxe:core-sw.example.com fw-9:fortios:10.0.0.9 viaip:junos:10.0.0.6 aptxipm02:nios:aptxipm02-m.net.axway.int lphxpve12:proxmox:lphxpve12.net.axway.int"
+	want := "core-sw:ios:core-sw.example.com fw-9:fortios:10.0.0.9 viaip:junos:10.0.0.6 aptxipm02:nios:aptxipm02-m.net.axway.int lphxpve12:proxmox:lphxpve12.net.axway.int"
 	if strings.Join(names, " ") != want {
 		t.Errorf("got  %s\nwant %s", strings.Join(names, " "), want)
 	}
@@ -60,7 +60,7 @@ func TestObserviumImportFromTheServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "core-sw" || got[0].Platform != "iosxe" || len(skipped) != 2 {
+	if len(got) != 1 || got[0].Name != "core-sw" || got[0].Platform != "ios" || len(skipped) != 2 {
 		t.Errorf("%+v %+v", got, skipped)
 	}
 	d.Options = map[string]string{"device": "ipam2"}

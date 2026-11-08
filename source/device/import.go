@@ -138,7 +138,7 @@ func impBuild(source string, rows []impRow, existing []Device) ([]Device, []Skip
 
 // obsPlatforms maps Observium's OS names (the "os" of a device) to platforms that have a driver here.
 var obsPlatforms = map[string]string{
-	"ios": "iosxe", "iosxe": "iosxe", "nxos": "nxos", "eos": "eos", "junos": "junos",
+	"ios": "ios", "iosxe": "iosxe", "cisco-ios": "ios", "nxos": "nxos", "eos": "eos", "junos": "junos",
 	"fortigate": "fortios", "fortios": "fortios", "panos": "panos",
 	"aoscx": "aoscx", "arubaos-cx": "aoscx", "bigip": "bigip", "f5": "bigip",
 	"infoblox": "nios", "pve": "proxmox", "proxmox": "proxmox",
@@ -188,8 +188,10 @@ func ipfPlatform(vendor, family, platform string) string {
 	switch {
 	case has("nx-os", "nxos"):
 		return "nxos"
-	case v == "cisco" && has("ios-xe", "iosxe", "ios xe", "ios"):
+	case v == "cisco" && has("ios-xe", "iosxe", "ios xe"):
 		return "iosxe"
+	case v == "cisco" && has("ios"):
+		return "ios"
 	case has("juniper", "junos"):
 		return "junos"
 	case has("fortinet", "fortigate", "fortios"):
