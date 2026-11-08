@@ -52,6 +52,7 @@ var mcpRoutes = []apiRoute{
 	{Method: "POST", Path: "/api/devices/capture"},
 	{Method: "POST", Path: "/api/devices/change"},
 	{Method: "GET", Path: "/api/devices/health"},
+	{Method: "POST", Path: "/api/devices/import"},
 	{Method: "GET", Path: "/api/devices/query"},
 	{Method: "POST", Path: "/api/devices/raw"},
 	{Method: "POST", Path: "/api/devices/signin"},

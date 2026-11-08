@@ -33,6 +33,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	if cmd == "device.signin_poll" {
 		return m.deviceSigninPoll(raw, actor)
 	}
+	if cmd == "device.import_observium" {
+		return m.deviceImportObservium(raw, actor)
+	}
 	if cmd == "device.change" {
 		return m.deviceChange(raw, actor)
 	}

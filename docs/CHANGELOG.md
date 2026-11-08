@@ -1,5 +1,22 @@
 # Changelog
 
+## [v86] - 2026-11-08 — import devices from Observium
+
+### Added
+- **Import the devices an Observium server monitors.** Right-click the Observium device ▸ **Import devices** (or **Preview import**), `netdir --device-import SERVER [--dry-run]`, `POST /api/devices/import`. Each device whose Observium OS has a driver here (ios, iosxe, nxos, eos, junos, fortigate, panos, aoscx, bigip) and that is not already in the inventory (same name or address) is added **disabled, with no login**, tagged `source=observium` and `site=LOCATION`. The name is the short sysName (made unique with `-2`, `-3`); the address is the host name, else the IP. Others are listed as skipped with the reason. Saved in the configuration history as the caller.
+- Not an MCP tool, and refused over MCP like every other change to netdir.
+
+### Changed
+- A disabled device may have no login (it is never contacted). Enabling one without a login is refused when saved: "give it a login before enabling it".
+
+### Verified
+- `TestObserviumImportRows` (mapping, names, duplicates, location tag, skips, validity), `TestObserviumImportFromTheServer` (against the Observium stub), `TestDeviceImportRefusals`; the full checklist.
+
+### Not verified
+- The OS names Observium uses (`os`) are from memory of its OS list, not checked against a running Observium: an OS I have wrong is skipped as "no driver", not mis-imported. Tell me what yours report.
+- Not run against a real Observium; the GUI menu items have not been looked at in a browser.
+- Imported devices are not placed on a gateway; they appear in Configure ▸ Devices.
+
 ## [v85] - 2026-11-08 — MCP cannot change netdir; gateways in the Devices field
 
 ### Changed (breaking)

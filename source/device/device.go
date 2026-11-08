@@ -208,7 +208,10 @@ func Validate(devs []Device, creds []Credential) error {
 		if d.Port < 0 || d.Port > 65535 {
 			return fmt.Errorf("device %s: port %d is not a TCP port", d.Name, d.Port)
 		}
-		if !cn[d.Credential] {
+		if !cn[d.Credential] && !(d.Disabled && d.Credential == "") { // a disabled device may have no login yet (an imported one); enabling it asks for one
+			if d.Credential == "" {
+				return fmt.Errorf("device %s: give it a login before enabling it", d.Name)
+			}
 			return fmt.Errorf("device %s: credential %q is not in the credentials list", d.Name, d.Credential)
 		}
 		tags := map[string]bool{}

@@ -1250,6 +1250,18 @@
         if (live()) put("The code expired. Run again.");
       }, link);
     }
+    // Observium: add the devices it monitors to the inventory, disabled and with no login (the daemon saves it, so the page loads the config again)
+    const importText = (r) => (r.dry_run ? "Would import " : "Imported ") + r.added.length + " devices (disabled, no login: give each a login, then enable it)\n\n" +
+      r.added.map((d) => "  " + d.name.padEnd(24) + d.platform.padEnd(9) + d.address).join("\n") +
+      (r.skipped.length ? "\n\nSkipped " + r.skipped.length + ":\n" + r.skipped.map((s) => "  " + s.name.padEnd(30) + s.reason).join("\n") : "");
+    function importPreview(name) {
+      textPopup("Import devices from " + name, async (put) => { put(importText((await api("POST", "/api/devices/import", { device: name, dry_run: true })).data)); });
+    }
+    function importDevices(name) {
+      confirmDialog("Import devices from " + name + "?", "Every device Observium monitors that has a driver here and is not in the inventory yet is added, disabled and with no login. Nothing is contacted until you give it a login and enable it. Use Preview to see the list first.", "Import", () => {
+        textPopup("Import devices from " + name, async (put) => { const r = (await api("POST", "/api/devices/import", { device: name })).data; put(importText(r)); await load(); refresh(); });
+      }, "btn");
+    }
     // Entra: a user's most recently used device, followed on the Meraki network for the last hours
     function troubleForm(name) {
       form("Troubleshoot user — " + name, [{ k: "user", l: "User", v: state.lastUser || "", ph: "joe.smith@contoso.com" }, { k: "hours", l: "Hours back", v: "6", ph: "6" }], (v) => {
@@ -1284,6 +1296,7 @@
         ["LLDP and CDP details", () => devAsk(name, "neighbor_details")], ["Routes", () => devAsk(name, "routes")], ["Routing protocols", () => devAsk(name, "routing")], ["Firewall", () => devAsk(name, "firewall")], ["CPU, memory and power", () => devAsk(name, "resources")], ["VLANs", () => devAsk(name, "vlans")], ["API catalog", () => devAsk(name, "api_catalog")],
         ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)]]],
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
+        ...(d.platform === "observium" && !(d.options && d.options.device) ? [["Import devices", () => importDevices(name)], ["Preview import", () => importPreview(name)]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user", () => troubleForm(name)], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = name; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
