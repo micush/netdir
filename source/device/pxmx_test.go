@@ -281,3 +281,42 @@ func TestPxmxDefaultPorts(t *testing.T) {
 		t.Fatal("ports")
 	}
 }
+
+// Backup Server's /admin tree and a datastore called "backup" are read over MCP and by the driver; the places of accounts, consoles and the
+// backup protocol are not.
+func TestPBSPathsAndDatastoreNames(t *testing.T) {
+	for _, plat := range []string{"pbs", "pdm", "proxmox"} {
+		if err := CheckAPIPathMCPFor(plat, "/admin/datastore/backup/snapshots"); err != nil {
+			t.Errorf("%s: the MCP check refuses a datastore tree: %v", plat, err)
+		}
+	}
+	for _, p := range []string{"/admin/datastore", "/admin/datastore/backup/status", "/admin/gc", "/config/key"} {
+		if err := CheckAPIPathMCP(p); err == nil {
+			t.Errorf("another platform's path %s is no longer refused over MCP", p)
+		}
+		if err := CheckAPIPathMCPFor("iosxe", p); err == nil {
+			t.Errorf("iosxe %s is no longer refused over MCP", p)
+		}
+	}
+	p := &pxmx{spec: pbsSpec}
+	for _, ok := range []string{"/admin/datastore", "/admin/datastore/backup/status", "/admin/datastore/backup/snapshots", "/config/datastore/backup",
+		"/admin/gc", "/admin/sync", "/status/datastore-usage", "/nodes/localhost/tasks?errors=1", "/config/remote/access"} {
+		if _, err := p.read(ok); err != nil {
+			t.Errorf("read %s: %v", ok, err)
+		}
+	}
+	for _, no := range []string{"/access/users", "/backup", "/admin/datastore/s1/download", "/nodes/localhost/termproxy", "/admin/datastore/s1/pxar-file-download", "/tfa"} {
+		if _, err := p.read(no); err == nil {
+			t.Errorf("read %s is allowed", no)
+		}
+	}
+	// a change: a datastore called backup is changed like any other, the backup protocol and downloads are not
+	if err := p.rawGuard("POST", "/admin/datastore/backup/gc"); err != nil {
+		t.Errorf("a datastore called backup: %v", err)
+	}
+	for _, no := range []string{"/access/users", "/backup", "/admin/datastore/s1/download"} {
+		if err := p.rawGuard("POST", no); err == nil {
+			t.Errorf("change %s is allowed", no)
+		}
+	}
+}

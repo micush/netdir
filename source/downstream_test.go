@@ -249,3 +249,113 @@ func TestBuildRemote(t *testing.T) {
 		t.Errorf("unnamed owner: %+v", again)
 	}
 }
+
+// device_api_get reads Backup Server's /admin tree over MCP (the generic words for secrets refuse it for other platforms)
+func TestMCPReadsPBSAdminTree(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "PBSAPIToken=u@pbs!t:sec" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api2/json/admin/datastore":
+			_, _ = w.Write([]byte(`{"data":[{"store":"backup","comment":"main"}]}`))
+		case "/api2/json/admin/datastore/backup/snapshots":
+			_, _ = w.Write([]byte(`{"data":[{"backup-id":"100","backup-type":"vm"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	host, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	pn, _ := strconv.Atoi(port)
+	e, post := mcpEnv(t, "127.0.0.1")
+	sup := e.ws.status.sup
+	sup.mu.Lock()
+	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
+	sup.dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
+	sup.mu.Unlock()
+	for path, want := range map[string]string{"/admin/datastore": `"store"`, "/admin/datastore/backup/snapshots": `"backup-id"`} {
+		_, m := post(mcpCall("device_api_get", `{"target":"pbs1","path":"`+path+`"}`))
+		txt, isErr := toolResult(t, m)
+		if isErr || !strings.Contains(txt, want) {
+			t.Errorf("%s: %v %s", path, isErr, txt)
+		}
+	}
+	_, m := post(mcpCall("device_api_get", `{"target":"pbs1","path":"/access/users"}`))
+	if txt, isErr := toolResult(t, m); !isErr && !strings.Contains(txt, `"ok": false`) && !strings.Contains(txt, `"ok":false`) {
+		t.Errorf("the users of Backup Server were read: %s", txt)
+	}
+}
+
+// a read-write caller changes Backup Server (a datastore called backup included), a read-only one has no such tool
+func TestMCPWritesPBSWithRW(t *testing.T) {
+	var mu sync.Mutex
+	var puts []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "PBSAPIToken=u@pbs!t:sec" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.URL.Path == "/api2/json/version":
+			_, _ = w.Write([]byte(`{"data":{"version":"3.2"}}`))
+		case r.URL.Path == "/api2/json/config/datastore/backup" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"data":{"name":"backup","comment":"old"}}`))
+		case r.URL.Path == "/api2/json/config/datastore/backup" && r.Method == http.MethodPut:
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			puts = append(puts, string(b))
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"data":null}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	host, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	pn, _ := strconv.Atoi(port)
+	for _, acl := range []string{"127.0.0.1", "127.0.0.1 rw"} {
+		e, post := mcpEnv(t, acl)
+		dc, _, err := e.mg.LiveConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
+		dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
+		if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
+			t.Fatal(err)
+		}
+		_, m := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+		offered := strings.Contains(strings.Join(toolNames(t, m), ","), "device_change_raw")
+		if acl == "127.0.0.1" {
+			if offered {
+				t.Error("a read-only caller is offered device_change_raw")
+			}
+			continue
+		}
+		if !offered {
+			t.Fatal("a read-write caller is not offered device_change_raw")
+		}
+		_, m = post(mcpCall("device_change_raw", `{"target":"pbs1","method":"PUT","path":"/config/datastore/backup","body":"{\"comment\":\"new\"}","dry_run":true}`))
+		if txt, isErr := toolResult(t, m); isErr || !strings.Contains(txt, "old") {
+			t.Errorf("dry run: %v %s", isErr, txt)
+		}
+		mu.Lock()
+		n := len(puts)
+		mu.Unlock()
+		if n != 0 {
+			t.Error("a dry run changed the datastore")
+		}
+		_, m = post(mcpCall("device_change_raw", `{"target":"pbs1","method":"PUT","path":"/config/datastore/backup","body":"{\"comment\":\"new\"}"}`))
+		if txt, isErr := toolResult(t, m); isErr || !strings.Contains(txt, `"applied": true`) && !strings.Contains(txt, `"applied":true`) {
+			t.Errorf("change: %v %s", isErr, txt)
+		}
+		mu.Lock()
+		n = len(puts)
+		mu.Unlock()
+		if n != 1 || !strings.Contains(puts[0], "new") {
+			t.Errorf("what Backup Server received: %v", puts)
+		}
+	}
+}

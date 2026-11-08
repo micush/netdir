@@ -99,12 +99,6 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 			jsonError(rw, http.StatusBadRequest, err.Error())
 			return
 		}
-		if s.mcp {
-			if err = device.CheckAPIPathMCP(cmd); err != nil {
-				jsonError(rw, http.StatusForbidden, err.Error())
-				return
-			}
-		}
 	}
 	if op == "show" {
 		var err error
@@ -133,6 +127,15 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 	if err != nil {
 		jsonError(rw, http.StatusBadRequest, err.Error())
 		return
+	}
+	if op == "api" && s.mcp {
+		// what over MCP may not be read is the platform's to say: another platform's words for secrets refuse what is none here
+		for _, d := range picked {
+			if err = device.CheckAPIPathMCPFor(d.Platform, cmd); err != nil {
+				jsonError(rw, http.StatusForbidden, err.Error())
+				return
+			}
+		}
 	}
 	to := deviceTimeout
 	if op == "config" || op == "routes" || op == "routing" || op == "firewall" || op == "api" || op == "api_catalog" || op == "resources" || op == "vlans" || op == "ports" {

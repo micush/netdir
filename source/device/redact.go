@@ -134,6 +134,20 @@ func secretSegment(sg string) error {
 	return nil
 }
 
+// ownPathGuard are the platforms whose driver checks a path to read itself (the Proxmox family: accounts, consoles, keys and files are
+// refused there, by the segment that names them, and the secrets of an answer are hidden).  The words of the list below are those of the
+// other platforms' APIs and refuse what is no secret there: Backup Server's whole /admin tree (datastores, snapshots, jobs), a storage or
+// a datastore that is called backup.
+var ownPathGuard = map[string]bool{"proxmox": true, "pbs": true, "pdm": true}
+
+// CheckAPIPathMCPFor is CheckAPIPathMCP for the platform of the device that is asked.
+func CheckAPIPathMCPFor(platform, p string) error {
+	if ownPathGuard[platform] {
+		return nil
+	}
+	return CheckAPIPathMCP(p)
+}
+
 // CheckAPIPathMCP is CheckAPIPath for a caller that must not see secrets: the whole configuration, and the parts of the
 // API that hold users, keys, certificates, SNMP and AAA, are refused.  The named tools (ports, routing, firewall, ...) read
 // what they need and hide what is secret.

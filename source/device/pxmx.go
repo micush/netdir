@@ -205,6 +205,13 @@ func firstKey(m map[string]string) string {
 	return n[0]
 }
 
+// pxNameParents are the segments after which the next one is a name or an id somebody chose (a datastore, a remote, a job, a node, a
+// task), not a part of the API: a datastore called "backup" is a datastore, and only the /backup of the API is the backup protocol.
+var pxNameParents = map[string]bool{"datastore": true, "remote": true, "remotes": true, "sync": true, "verify": true, "prune": true, "tasks": true,
+	"nodes": true, "namespace": true, "traffic-control": true, "qemu": true, "lxc": true, "storage": true, "pools": true}
+
+func pxIsName(segs []string, i int) bool { return i > 0 && pxNameParents[strings.ToLower(segs[i-1])] }
+
 // read checks a path a caller wants read: below /api2/json, plain segments, none of those that hold accounts, consoles, keys or files.
 func (p *pxmx) read(path string) (string, error) {
 	rp := strings.TrimPrefix(path, pxBase)
@@ -219,11 +226,11 @@ func (p *pxmx) read(path string) (string, error) {
 	if len(segs) > 10 || segs[0] == "" {
 		return "", errors.New("path: see device_api_catalog")
 	}
-	for _, s := range segs {
+	for i, s := range segs {
 		if !pxSegRE.MatchString(s) {
 			return "", fmt.Errorf("path: %q is not a path segment", s)
 		}
-		if p.spec.denyRead[strings.ToLower(s)] {
+		if p.spec.denyRead[strings.ToLower(s)] && !pxIsName(segs, i) {
 			return "", fmt.Errorf("path: %q holds accounts, consoles, keys or files and is not read here", s)
 		}
 	}
@@ -256,11 +263,11 @@ func (p *pxmx) rawGuard(method, path string) error {
 	if segs[0] == "" {
 		return errors.New("path: a path that starts with /")
 	}
-	for _, s := range segs {
+	for i, s := range segs {
 		if !pxSegRE.MatchString(s) {
 			return fmt.Errorf("path: %q is not a path segment", s)
 		}
-		if why, no := p.spec.denyWrite[strings.ToLower(s)]; no {
+		if why, no := p.spec.denyWrite[strings.ToLower(s)]; no && !pxIsName(segs, i) {
 			return fmt.Errorf("path: %q is not changed here (%s)", s, why)
 		}
 	}

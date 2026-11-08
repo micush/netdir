@@ -1,5 +1,28 @@
 # Changelog
 
+## [v79] - 2026-11-07 — Proxmox Backup Server is read over MCP with a read-only caller
+
+### Fixed
+- **`device_api_get` (and `api_get` on `/api/devices/query`) refused Proxmox Backup Server's whole `/admin` tree over MCP** ("path: admin holds secrets ... not available over MCP"): the datastores, groups, snapshots, namespaces, sync, verify and prune jobs and the garbage collection. The words that guard the other platforms' paths against secrets (`admin`, `backup`, `user`, `key`, ...) were applied to every platform. The check is now the platform's: the Proxmox family (`proxmox`, `pbs`, `pdm`) is checked by its own driver (accounts, consoles, keys, files and the backup protocol are refused by segment, secrets in answers hidden), and `CheckAPIPathMCPFor` leaves the generic list to the other platforms. Proxmox VE's `/cluster/backup` and a storage called `backup` were refused the same way.
+- **A datastore, remote, job or node called `backup`, `access`, `download` ... was refused** by the driver's own read and change guards, which compared every segment with the words of the API. A segment that comes after `datastore`, `remote`, `sync`, `verify`, `prune`, `tasks`, `nodes`, `namespace`, `qemu`, `lxc`, `storage` or `pools` is a name somebody chose and is not compared; `/backup`, `/access`, `/tfa`, `.../download` and the rest stay refused.
+
+### Verified
+- A Backup Server stub: `device_api_get` reads `/admin/datastore` and `/admin/datastore/backup/snapshots` for a read-only caller, `/access/users` is refused; a read-only caller is not offered `device_change_raw`, a read-write one plans (dry run changes nothing) and applies a PUT on `/config/datastore/backup`; the paths the driver reads and changes, and those it refuses (`TestPBSPathsAndDatastoreNames`); other platforms' paths are still refused over MCP. Full test suite, `node --check`, leak test.
+
+### Not verified
+- **Not run against a real Backup Server** (the paths are those of its API viewer). The API token's own permission on the Backup Server decides what it may read or change there, on top of this.
+
+## [v78] - 2026-11-07 — Meraki is shown as "Cisco Meraki"
+
+### Changed
+- The platform `meraki` is shown as **Cisco Meraki** in the platform list, the device table, the tiles and the tooltips, like the other Cisco platforms. The stored name is unchanged.
+
+### Verified
+- `TestGUIPlatformLabelsMatchTheDrivers`, the full test suite, `node --check`, the leak test.
+
+### Not verified
+- Not looked at in a browser.
+
 ## [v77] - 2026-11-07 — changes and captures go down the federation; the link's key decides
 
 ### Added
