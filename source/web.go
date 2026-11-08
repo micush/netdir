@@ -113,6 +113,7 @@ type session struct {
 	ldap     bool      // signed in with an LDAP directory account (ldap.go): rechecked against the directory, not PAM
 	ssoProv  string    // which provider it signed in with (google or entra)
 	mcp      bool      // an MCP caller (mcp.go): never handed a device's secrets
+	devs     *devScope // the devices an MCP caller may use (devscope.go); nil: all
 	sso      bool      // signed in with Google or Entra ID (sso.go): user is an e-mail address, checked against the list of users
 }
 

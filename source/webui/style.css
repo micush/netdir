@@ -739,10 +739,21 @@ table.policy.mcpkeytab th:nth-child(3) { width: 5.5rem; }
 table.policy.rows.mcpkeytab th:nth-child(2) { width: 11rem; }
 table.policy.rows.mcpkeytab th:nth-child(3) { width: 5.5rem; }
 table.policy.rows.mcpkeytab th:nth-child(4) { width: 8rem; }
-table.policy.rows.mcpkeytab th:nth-child(5) { width: auto; }
+table.policy.rows.mcpkeytab th:nth-child(5) { width: 17rem; }
+table.policy.rows.mcpkeytab th:nth-child(6) { width: 7rem; }
+table.policy.rows.mcpkeytab th:nth-child(7) { width: auto; }
 table.mcpkeytab td input[readonly] { text-overflow: ellipsis; font-family: var(--mono); font-size: .86rem; line-height: 1.5; padding: .45rem .6rem; height: 2.3rem; box-sizing: border-box; }   /* the same box hidden and shown */
 
 .ubar, .uerr { fill: var(--c); }
 .tight td.bad { color: var(--bad); }
 table.policy tr.off td { opacity: .5; }
 table.policy tr.off td:first-child { opacity: 1; }
+
+/* the devices a key or an allowed source may use: pills, and a box to add one */
+.devpick { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; padding: .2rem .4rem; min-height: 2.3rem; box-sizing: border-box; }
+.devpick .pill { display: inline-flex; align-items: center; gap: .2rem; margin: 0; }
+.devpick .pill.special { font-style: italic; opacity: .85; }
+.devpick .pill button { all: unset; cursor: pointer; padding: 0 .2rem; line-height: 1; border-radius: 3px; }
+.devpick .pill button:hover, .devpick .pill button:focus-visible { outline: 2px solid var(--accent); }
+table.policy td .devpick input[type=text] { flex: 1 1 7rem; width: auto; min-width: 6rem; padding: .2rem .3rem; }
+.devpick input.bad { outline: 2px solid var(--bad); outline-offset: -2px; }

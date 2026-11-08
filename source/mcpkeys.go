@@ -39,6 +39,8 @@ type MCPKey struct {
 	Hash    string `json:"hash,omitempty"`    // "sha256:" and the hex hash of the key (worked out from Key when there is one)
 	Key     string `json:"key,omitempty"`     // the key itself; empty for a key made before it was kept
 	Created int64  `json:"created,omitempty"` // unix time the key was added
+	// Devices is what the key may reach: device names and tag:TAG, or "none"; empty is all (devscope.go).
+	Devices []string `json:"devices,omitempty"`
 	// Disabled keeps the key in the list and lets it do nothing: the caller is refused like one with an unknown key (right-click ▸ Disable).
 	Disabled bool `json:"disabled,omitempty"`
 }
@@ -80,6 +82,10 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 		default:
 			return nil, fmt.Errorf("mcp: key %q: the access is ro or rw", k.Name)
 		}
+		var derr error
+		if k.Devices, derr = normDevices(k.Devices); derr != nil {
+			return nil, fmt.Errorf("mcp: key %q: %w", k.Name, derr)
+		}
 		var okLevel bool
 		if k.Privacy, okLevel = normLevel(k.Privacy); !okLevel {
 			return nil, fmt.Errorf("mcp: key %q: the privacy level is none, standard or strict", k.Name)
@@ -117,6 +123,16 @@ func mcpKeyAccess(keys []MCPKey, presented string) (name, access string) {
 		}
 	}
 	return name, access
+}
+
+// mcpKeyDevices is the devices of the key with this name (nil: all of them).
+func mcpKeyDevices(keys []MCPKey, name string) []string {
+	for _, k := range keys {
+		if k.Name == name {
+			return k.Devices
+		}
+	}
+	return nil
 }
 
 // mcpKeyPrivacy is the privacy level of the key with this name ("" when it has none of its own).

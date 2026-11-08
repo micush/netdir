@@ -60,11 +60,23 @@ func (s *Supervisor) deviceTuning() device.Tuning {
 func (w *WebServer) handleDevices(rw http.ResponseWriter, r *http.Request, s *session) {
 	health := deviceHealth(true) // someone is looking: the checks speed up
 	devs, _ := w.status.sup.deviceInventory()
+	sc := scopeOf(s)
+	devs = sc.filter(devs) // an MCP caller limited to some devices (devscope.go) sees only those
 	if devs == nil {
 		devs = []device.Device{}
 	}
+	if sc.limited() {
+		keep := map[string]device.Health{}
+		for _, d := range devs {
+			if h, ok := health[d.Name]; ok {
+				keep[d.Name] = h
+			}
+		}
+		health = keep
+	}
 	// remote: the devices below the Network Directors that are devices here (downstream.go), which a Network Director above lists in turn
 	remote, rerrs := w.status.sup.remoteDevices(1500*time.Millisecond, false)
+	remote = sc.filterRemote(remote)
 	if remote == nil {
 		remote = []RemoteDevice{}
 	}
@@ -108,7 +120,11 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		}
 	}
 	devs, creds := w.status.sup.deviceInventory()
+	sc := scopeOf(s)
+	allDevs := devs // the whole inventory: a Network Director below is asked with the logins of all of it
+	devs = sc.filter(devs)
 	rem, _ := w.status.sup.remoteDevices(2*time.Second, false)
+	rem = sc.filterRemote(rem)
 	if len(devs) == 0 && len(rem) == 0 {
 		jsonError(rw, http.StatusNotFound, "no devices are configured (settings.devices)")
 		return
@@ -119,9 +135,10 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		return
 	}
 	picked, err := device.Select(append(append([]device.Device(nil), devs...), remoteAsDevices(rem)...), target)
-	if err != nil && len(directorsHere(devs)) > 0 {
+	if err != nil && len(directorsHere(allDevs)) > 0 {
 		// a name below a Network Director that the index does not have yet: look again now, and wait for it
 		rem, _ = w.status.sup.remoteDevices(downTimeout, true)
+		rem = sc.filterRemote(rem)
 		picked, err = device.Select(append(append([]device.Device(nil), devs...), remoteAsDevices(rem)...), target)
 	}
 	if err != nil {
@@ -158,7 +175,7 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		gwg.Add(1)
 		go func() {
 			defer gwg.Done()
-			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(devs), op, cmd, to, got)
+			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(allDevs), op, cmd, to, got)
 		}()
 	}
 	local := device.Fanout(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (any, error) {

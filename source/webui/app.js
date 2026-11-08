@@ -2327,6 +2327,54 @@
   const rowClips = {};
   // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
   const SMALL_TABLES = new Set(["ldapservers", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl", "devcreds"]);
+  // The devices a key or an allowed source may use: a pill for each device name or tag:TAG, and the two special ones, all (no pills) and none.
+  // The choices are the devices of the inventory and their tags; any other name can be typed (a device added later).
+  let devChoices = { names: [], tags: [] };
+  let devPickSeq = 0;
+  function devicePicker(list, onChange) {
+    let items = (list || []).filter(Boolean);
+    const ENTRY = /^(tag:[^\s,"]{1,80}|[A-Za-z0-9._-]{1,80})$/;
+    const el = h("div", { class: "devpick", role: "group", "aria-label": "Devices" });
+    const dl = h("datalist", { id: "devpick-" + (++devPickSeq) });
+    const input = h("input", { type: "text", list: dl.id, autocomplete: "off", spellcheck: "false", placeholder: "add device or tag", "aria-label": "Add a device or tag",
+      title: "A device name, tag:TAG (every device with the tag, now and later), all or none. Pick from the list or type, then Enter." });
+    function draw() {
+      const have = new Set(items.map((x) => x.toLowerCase()));
+      dl.replaceChildren(...["all", "none", ...devChoices.names, ...devChoices.tags.map((t) => "tag:" + t)].filter((o) => !have.has(o.toLowerCase())).map((o) => h("option", { value: o })));
+      clear(el).append(...(items.length ? items : ["all"]).map((x) => {
+        const special = !items.length || x === "none";
+        const p = h("span", { class: "pill " + (special ? "special" : x.startsWith("tag:") ? "warn" : "info") }, x);
+        if (items.length) p.append(h("button", { type: "button", "aria-label": "Remove " + x, title: "Remove " + x, onclick: () => set(items.filter((y) => y !== x)) }, "\u00d7"));
+        return p;
+      }), input, dl);
+    }
+    function set(next) {
+      items = next;
+      draw();
+      onChange(items);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      input.focus();
+    }
+    function add() {
+      const v = input.value.trim(), low = v.toLowerCase();
+      if (!v) return;
+      if (low === "all") { input.value = ""; return set([]); }
+      if (low === "none") { input.value = ""; return set(["none"]); }
+      if (!ENTRY.test(v)) { input.classList.add("bad"); return; }
+      input.value = "";
+      if (items.some((x) => x.toLowerCase() === low)) return;
+      set([...items.filter((x) => x !== "none"), v]);
+    }
+    input.addEventListener("input", (e) => { input.classList.remove("bad"); if (!e.inputType || e.inputType === "insertReplacementText") add(); });   // a choice from the list
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === ",") { e.preventDefault(); e.stopPropagation(); add(); }
+      else if (e.key === "Backspace" && !input.value && items.length) set(items.slice(0, -1));
+    });
+    input.addEventListener("change", (e) => { e.stopPropagation(); add(); });
+    draw();
+    return el;
+  }
+
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
@@ -2397,6 +2445,8 @@
           if (!row.v[i]) row.v[i] = c.opts[0];
           inp.value = row.v[i];
           inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
+        } else if (c.pills) {
+          inp = devicePicker(row.v[i] ? row.v[i].split(",") : [], (l) => { row.v[i] = l.join(","); mark(tr, row); });
         } else {
           inp = h("input", { type: c.secret ? "password" : "text", autocomplete: c.secret ? "new-password" : "off", spellcheck: "false", "aria-label": c.name, placeholder: c.ph || "" });
           if (!row.v[i] && c.def) row.v[i] = c.def;   // the default shown as the value, not left empty
@@ -2530,13 +2580,14 @@
     // MCP access: "10.1.0.0/24" (read-only), "10.1.1.50 rw", "10.1.0.0/24 strict" (an address or network, ro or rw, a privacy level)
     mcpacl: {
       key: "mcpacl", wide: true, empty: "No sources allowed without a key.",
-      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }],
+      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }, { name: "Devices", pills: true }],
       parse: (line) => {
-        const f = String(line).trim().split(/\s+/).map((x) => x.toLowerCase());
+        const w = String(line).trim().split(/\s+/), f = w.map((x) => x.toLowerCase());
         const lv = f.slice(1).find((x) => ["none", "standard", "strict"].includes(x));
-        return [String(line).trim().split(/\s+/)[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default"];
+        const dv = w.slice(1).find((x) => x.toLowerCase().startsWith("devices="));
+        return [w[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default", dv ? dv.slice(8) : ""];
       },
-      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "")),
+      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "") + (c[3] ? " devices=" + c[3] : "")),
       mark: (c) => !c[0],
       isOff: (l) => /\sdisabled\s*$/i.test(String(l)),   // a row switched off with right-click ▸ Disable stays in the list but allows nothing
     },
@@ -2717,11 +2768,13 @@
         // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
         const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
           value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
+        const devs = devicePicker(k.devices, (l) => { if (l.length) k.devices = l; else delete k.devices; });
         const tr = h("tr", { class: k.disabled ? "off" : "" },
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
           h("td", {}, name),
           h("td", {}, acc),
           h("td", {}, priv),
+          h("td", {}, devs),
           h("td", { class: "ctext" }, day(k.created)),
           h("td", {}, keyIn));
         tr.addEventListener("contextmenu", rowMenu([
@@ -2734,7 +2787,7 @@
         return tr;
       }));
       const tbl = h("table", { class: "policy zones rows mcpkeytab" },
-        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Devices"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
       const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
       empty.hidden = keys.length > 0;
       const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2763,7 +2816,7 @@
       name.focus();
     }
     draw();
-    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
+    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.devices && k.devices.length ? { devices: k.devices } : {}), ...(k.disabled ? { disabled: true } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
   // the range under a number field, with its default, on one line: "10 to 600 s. Default 30."
@@ -3286,6 +3339,7 @@
       const web = fieldset(WEB_FIELDS, cfg.web);
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
+      devChoices = { names: (set.devices || []).map((d) => d.name).filter(Boolean).sort(), tags: [...new Set((set.devices || []).flatMap((d) => d.tags || []))].sort() };
       devExtra = Object.fromEntries((set.devices || []).map((d) => { const { options, ca_pem, disabled } = d; return [d.name, { ...(options ? { options } : {}), ...(ca_pem ? { ca_pem } : {}), ...(disabled ? { disabled } : {}) }]; }));
       const devices = fieldset(DEVICE_FIELDS, { devices: set.devices });
       const devcreds = fieldset(DEVCRED_FIELDS, { device_credentials: set.device_credentials });

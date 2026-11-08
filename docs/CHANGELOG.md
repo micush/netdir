@@ -1,5 +1,23 @@
 # Changelog
 
+## [v84] - 2026-11-08 — MCP: limit a key or an allowed source to some devices
+
+### Added
+- **A Devices field on every MCP key and allowed source (Configure ▸ MCP).** Pills for device names and `tag:TAG`, and two special ones: **all** (the default, so nothing changes for what you have) and **none**. In the file: `"devices": ["sw1","tag:site=dc1"]` on a key, `10.0.0.20 rw devices=sw1,tag:site=dc1` on a source.
+- A caller with both a key and a source may use only what both allow, as with the privacy level; a narrow key is not widened by its address.
+- Outside its list a device is not in `list_devices` and is refused as if it did not exist. `all` and tags reach the devices the caller may use. A change or a capture that picks even one device it may not use is refused whole. Devices below a Network Director are limited the same way.
+- A limited caller is not offered `get_config`, `edit_config`, `api_request`, `set_gateway_device` or `device_troubleshoot_user`, and the configuration, versions and sign-in routes are refused to it (also through `api_get` and the node relay): they hold every device and every key.
+
+### Fixed
+- **Right-click ▸ Disable on a key was lost when the page saved** (v81): the Keys table left the `disabled` flag out of what it saved. It is kept now.
+
+### Verified
+- `TestNormDevices`, `TestMCPACLDevices`, `TestSourceDevicesAndScope`, `TestMCPKeyLimitedToDevices` (list, targets, tags, names refused, changes refused whole, tools hidden, config routes refused, key and source together); the full checklist.
+
+### Not verified
+- The pill picker has not been looked at in a browser.
+- `get_topology`, `get_alerts` and the log are not filtered by device: a limited caller can still see device names there.
+
 ## [v83] - 2026-11-08 — privacy: an address written as one decimal number is hidden
 
 ### Fixed

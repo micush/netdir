@@ -57,6 +57,7 @@ func normMCPACL(list []string) ([]string, error) {
 		off bool
 	}
 	mode, level := map[string]string{}, map[string]string{}
+	devs, allDevs := map[string][]string{}, map[string]bool{} // the devices of an address (devscope.go); allDevs: one of its entries has no limit
 	var order []ent
 	seenOff := map[string]bool{}
 	for _, s := range list {
@@ -68,8 +69,16 @@ func normMCPACL(list []string) ([]string, error) {
 		if last := strings.ToLower(f[len(f)-1]); len(f) > 1 && last == "disabled" {
 			off, f = true, f[:len(f)-1]
 		}
+		var dl []string
+		if n := len(f); n > 1 && strings.HasPrefix(strings.ToLower(f[n-1]), "devices=") {
+			var err error
+			if dl, err = normDevices(strings.Split(f[n-1][len("devices="):], ",")); err != nil {
+				return nil, fmt.Errorf("mcp: access list: %q: %w", s, err)
+			}
+			f = f[:n-1]
+		}
 		if len(f) > 3 {
-			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level, then disabled to switch it off", s)
+			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level, then devices=a,b,tag:x or none, then disabled to switch it off", s)
 		}
 		rw, lvl := false, ""
 		for _, w := range f[1:] {
@@ -104,6 +113,9 @@ func normMCPACL(list []string) ([]string, error) {
 			if lvl != "" {
 				text += " " + lvl
 			}
+			if len(dl) > 0 {
+				text += " devices=" + strings.Join(dl, ",")
+			}
 			text += " disabled"
 			if !seenOff[text] {
 				seenOff[text] = true
@@ -118,6 +130,13 @@ func normMCPACL(list []string) ([]string, error) {
 			mode[t] = map[bool]string{true: "rw", false: "ro"}[rw || mode[t] == "rw"]
 		}
 		level[t] = strictestLevel(level[t], lvl)
+		if len(dl) == 0 {
+			allDevs[t] = true
+		} else if dl[0] != "none" {
+			devs[t] = append(devs[t], dl...)
+		} else if _, seen := devs[t]; !seen {
+			devs[t] = nil
+		}
 	}
 	out := make([]string, 0, len(order))
 	for _, e := range order {
@@ -131,6 +150,13 @@ func normMCPACL(list []string) ([]string, error) {
 		}
 		if level[t0(t)] != "" {
 			t += " " + level[t0(t)]
+		}
+		if !allDevs[t0(t)] {
+			d, _ := normDevices(devs[t0(t)])
+			if len(d) == 0 {
+				d = []string{"none"}
+			}
+			t += " devices=" + strings.Join(d, ",")
 		}
 		out = append(out, t)
 	}
@@ -152,6 +178,13 @@ var mcpACLCache struct {
 	at     time.Time
 	ro, rw []netip.Prefix
 	lvl    map[string][]netip.Prefix // the sources that have a privacy level of their own, by level
+	devs   []aclDevs                 // every enabled entry and the devices it allows
+}
+
+// aclDevs is the devices of one entry of the access list: nil is all of them.
+type aclDevs struct {
+	nets []netip.Prefix
+	devs []string
 }
 
 // mcpResultLimit is the most bytes one answer may be (Configure ▸ MCP ▸ Largest answer).
@@ -178,6 +211,37 @@ func (s *Supervisor) mcpKeys() []MCPKey {
 func (s *Supervisor) mcpAccess(from netip.Addr) string {
 	a, _ := s.mcpAccessLevel(from)
 	return a
+}
+
+// mcpSourceDevices is the devices the entries of the access list that match this address allow (nil: all of them, also when no entry
+// matches, as then the address does not limit anything).  Entries that match are added up: one with no limit allows all.
+func (s *Supervisor) mcpSourceDevices(from netip.Addr) []string {
+	s.mcpAccessLevel(from) // brings the cache up to date
+	c := &mcpACLCache
+	c.Lock()
+	ents := c.devs
+	c.Unlock()
+	from = from.Unmap()
+	var out []string
+	hit := false
+	for _, e := range ents {
+		if !inNets(e.nets, from) {
+			continue
+		}
+		if len(e.devs) == 0 {
+			return nil
+		}
+		hit = true
+		for _, d := range e.devs {
+			if d != "none" {
+				out = append(out, d)
+			}
+		}
+	}
+	if hit && len(out) == 0 {
+		return []string{"none"}
+	}
+	return out
 }
 
 // mcpAccessLevel says what a caller from this address may do ("rw", "ro" or "") and the privacy level the list gives it
@@ -209,9 +273,24 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 			} else {
 				ro = append(ro, f[0])
 			}
-			if l := f[len(f)-1]; len(f) > 1 && l != "rw" {
-				lv[l] = append(lv[l], f[0])
+			for _, l := range f[1:] {
+				if l == "none" || l == "standard" || l == "strict" {
+					lv[l] = append(lv[l], f[0])
+				}
 			}
+		}
+		c.devs = nil
+		for _, e := range acl {
+			if aclOff(e) {
+				continue
+			}
+			var dl []string
+			for _, w := range strings.Fields(e)[1:] {
+				if v, ok := strings.CutPrefix(w, "devices="); ok {
+					dl = strings.Split(v, ",")
+				}
+			}
+			c.devs = append(c.devs, aclDevs{nets: expandACL([]string{strings.Fields(e)[0]}), devs: dl})
 		}
 		c.lvl = map[string][]netip.Prefix{}
 		for l, nets := range lv {
@@ -266,6 +345,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 	from := ap.Addr().Unmap().String()
 	access, alevel := w.status.sup.mcpAccessLevel(ap.Addr())
 	who, level := from, alevel
+	var keyDevs []string // the devices the key may use (nil: all)
 	// a key (Authorization: Bearer KEY) opens it from any address; a wrong one is refused, whatever the address list says
 	key, ok := mcpBearer(r)
 	if !ok {
@@ -283,7 +363,9 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		}
 		access, who = maxAccess(access, kacc), name+"@"+from
 		level = strictestLevel(level, mcpKeyPrivacy(w.status.sup.mcpKeys(), name))
+		keyDevs = mcpKeyDevices(w.status.sup.mcpKeys(), name)
 	}
+	devs := newDevScope(w.status.sup.mcpSourceDevices(ap.Addr()), keyDevs) // the devices this caller may use (devscope.go)
 	if access == "" {
 		http.Error(rw, "forbidden: this address is not in the MCP access list, and no key was sent (Authorization: Bearer KEY)", http.StatusForbidden)
 		return
@@ -317,7 +399,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		}
 		var out []mcpResp
 		for _, q := range reqs {
-			if res := w.mcpOne(r.Context(), q, access, from, who, level); res != nil {
+			if res := w.mcpOne(r.Context(), q, access, from, who, level, devs); res != nil {
 				out = append(out, *res)
 			}
 		}
@@ -333,7 +415,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		writeJSON(rw, http.StatusOK, mcpResp{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &mcpErr{-32700, "parse error"}})
 		return
 	}
-	res := w.mcpOne(r.Context(), q, access, from, who, level)
+	res := w.mcpOne(r.Context(), q, access, from, who, level, devs)
 	if res == nil { // a notification
 		rw.WriteHeader(http.StatusAccepted)
 		return
@@ -343,7 +425,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 
 // mcpOne answers one message; nil for a notification (no id).
 // from is the caller's address, who the name it is logged under: the address, or KEYNAME@ADDRESS for a caller with a key.
-func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, level string) *mcpResp {
+func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, level string, devs *devScope) *mcpResp {
 	if len(q.ID) == 0 || string(q.ID) == "null" {
 		return nil
 	}
@@ -379,7 +461,7 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 	case "tools/list":
 		var list []map[string]any
 		for _, t := range mcpTools {
-			if t.write && access != "rw" {
+			if t.write && access != "rw" || devs.limited() && scopedOffTools[t.name] {
 				continue
 			}
 			ann := map[string]any{"readOnlyHint": !t.write, "openWorldHint": false}
@@ -400,7 +482,7 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		}
 		var tool *mcpTool
 		for i := range mcpTools {
-			if mcpTools[i].name == p.Name {
+			if mcpTools[i].name == p.Name && !(devs.limited() && scopedOffTools[p.Name]) {
 				tool = &mcpTools[i]
 			}
 		}
@@ -427,7 +509,7 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		if who != from {
 			user = "mcp:" + who // mcp:KEYNAME@ADDRESS
 		}
-		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, created: time.Now()}, args: args}
+		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, created: time.Now(), devs: devs}, args: args}
 		began := time.Now()
 		v, err := tool.run(c)
 		mask := w.status.sup.mcpPrivacy(level)
@@ -595,6 +677,9 @@ func (c *mcpCtx) call(method, path string, body any, node string) (json.RawMessa
 
 // raw makes one API request as the MCP caller, on node ("" for this one), and returns the whole answer.
 func (c *mcpCtx) raw(method, path string, body []byte, isJSON bool, node string) (*httptest.ResponseRecorder, error) {
+	if err := c.scopeGuard(method, path, body); err != nil { // a caller limited to some devices (devscope.go)
+		return nil, err
+	}
 	if node != "" {
 		path = "/api/proxy?node=" + url.QueryEscape(node) + "&path=" + url.QueryEscape(path)
 	}
