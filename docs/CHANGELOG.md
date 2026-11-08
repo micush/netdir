@@ -1,5 +1,13 @@
 # Changelog
 
+## [v91] - 2026-11-08 — version bump
+
+### Changed
+- No code change from v90. The version moves so a tree updated over v86–v89 can be told apart from one that still holds the old `device/obsimport.go` and `device/obsimport_test.go`: those two files were replaced by `device/import.go` and `device/import_test.go` in v87, and unpacking a tarball over an old tree does not delete them. If a build fails with `obsPlatforms redeclared`, delete the two old files.
+
+### Verified
+- The full checklist, unchanged.
+
 ## [v90] - 2026-11-08 — import from Proxmox Datacenter Manager and Aruba Fabric Composer
 
 ### Added
