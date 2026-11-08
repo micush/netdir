@@ -152,55 +152,129 @@ func (m *maskRules) asn(digits string) (string, bool) {
 		return "", false
 	}
 	switch {
-	case publicASN(n) && m.r.PublicASNs:
-		return maskTag("PUBLIC-AS", digits), true
-	case privateASN(n) && m.r.PrivateASNs:
-		return maskTag("PRIVATE-AS", digits), true
+	case publicASN(n) && m.r.PublicASNs, privateASN(n) && m.r.PrivateASNs:
+		return xDigits(digits), true
 	}
 	return "", false
 }
 
-func maskASNText(digits string) (string, bool) { return stdMask.asn(digits) }
-
-// ip4Keep is an address with the first keep octets left readable: 203.0.PUBLIC-IP-3fa91c; with a negative keep, the last ones:
-// PUBLIC-IP-3fa91c.114.7.
-func ip4Keep(a netip.Addr, tag string, keep int) string {
-	o := a.As4()
-	var b strings.Builder
-	switch {
-	case keep > 0:
-		for i := 0; i < keep && i < 3; i++ {
-			b.WriteString(strconv.Itoa(int(o[i])))
-			b.WriteByte('.')
-		}
-		return b.String() + tag
-	case keep < 0:
-		for i := 4 + max(keep, -3); i < 4; i++ {
-			b.WriteByte('.')
-			b.WriteString(strconv.Itoa(int(o[i])))
-		}
+// xDigits is a number with all but its last three digits (a short one: its last digit or two) written as x: 15169 reads xx169.
+// A route distinguisher's parts and a number of an AS are written so.
+func xDigits(d string) string {
+	n := len(d)
+	if n <= 1 {
+		return "x"
 	}
-	return tag + b.String()
+	keep := min(3, n-1)
+	return strings.Repeat("x", n-keep) + d[n-keep:]
 }
 
-func ip6Keep(a netip.Addr, tag string, keep int) string {
-	o := a.As16()
-	grp := func(i int) string { return strconv.FormatUint(uint64(o[2*i])<<8|uint64(o[2*i+1]), 16) }
-	var b strings.Builder
+func maskASNText(digits string) (string, bool) { return stdMask.asn(digits) }
+
+// ip4Keep is an address with the octets that are hidden written as x: x.x.x.x, or with the first keep octets readable
+// 203.0.x.x, or with a negative keep the last ones x.x.114.7.  The same address always reads the same, but two addresses
+// that differ only in the hidden octets read alike, which is what the owner chose to see in place of a long token.  The
+// tag a caller made for the address is not used.
+func ip4Keep(a netip.Addr, _ string, keep int) string {
+	o := a.As4()
+	show := [4]bool{}
 	switch {
 	case keep > 0:
 		for i := 0; i < keep && i < 3; i++ {
-			b.WriteString(grp(i))
-			b.WriteByte(':')
+			show[i] = true
 		}
-		return b.String() + tag
 	case keep < 0:
-		for i := 8 + max(keep, -3); i < 8; i++ {
-			b.WriteByte(':')
-			b.WriteString(grp(i))
+		for i := 4 + max(keep, -3); i < 4; i++ {
+			show[i] = true
 		}
 	}
-	return tag + b.String()
+	parts := make([]string, 4)
+	for i := range parts {
+		parts[i] = "x"
+		if show[i] {
+			parts[i] = strconv.Itoa(int(o[i]))
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+// ip6Keep is ip4Keep for the eight groups of an IPv6 address: x:x:123::456.  The groups that are shown are written as they
+// are and the longest run of shown groups that are zero is written ::, as the address itself would be.
+func ip6Keep(a netip.Addr, _ string, keep int) string {
+	o := a.As16()
+	show := [8]bool{}
+	switch {
+	case keep > 0:
+		for i := 0; i < keep && i < 3; i++ {
+			show[i] = true
+		}
+	case keep < 0:
+		for i := 8 + max(keep, -3); i < 8; i++ {
+			show[i] = true
+		}
+	}
+	var g [8]string
+	zero := [8]bool{}
+	for i := range g {
+		v := uint64(o[2*i])<<8 | uint64(o[2*i+1])
+		g[i] = "x"
+		if show[i] {
+			g[i] = strconv.FormatUint(v, 16)
+			zero[i] = v == 0
+		}
+	}
+	best, bestLen := -1, 1 // a lone zero group is not shortened
+	for i := 0; i < 8; {
+		if !zero[i] {
+			i++
+			continue
+		}
+		j := i
+		for j < 8 && zero[j] {
+			j++
+		}
+		if j-i > bestLen {
+			best, bestLen = i, j-i
+		}
+		i = j
+	}
+	if best < 0 {
+		return strings.Join(g[:], ":")
+	}
+	return strings.Join(g[:best], ":") + "::" + strings.Join(g[best+bestLen:], ":")
+}
+
+// xMAC writes a MAC address as it was written (aa:bb:cc:dd:ee:ff, aa-bb-..., aabb.ccdd.eeff, aabbccddeeff) with the digits of
+// the bytes the rules hide as x: nic shows the last three bytes (xx:xx:xx:dd:ee:ff), oui the first three, anything else none.
+func xMAC(x, mode string) string {
+	var digits []byte
+	for i := 0; i < len(x); i++ {
+		if c := x[i]; c != ':' && c != '-' && c != '.' {
+			digits = append(digits, c)
+		}
+	}
+	out := make([]byte, 0, len(x))
+	n := 0
+	for i := 0; i < len(x); i++ {
+		c := x[i]
+		if c == ':' || c == '-' || c == '.' {
+			out = append(out, c)
+			continue
+		}
+		hide := true
+		switch mode {
+		case "nic":
+			hide = n < 6
+		case "oui":
+			hide = n >= 6
+		}
+		if hide {
+			c = 'x'
+		}
+		out = append(out, c)
+		n++
+	}
+	return string(out)
 }
 
 // text hides what a piece of text says, as the rules ask.
@@ -245,33 +319,17 @@ func (m *maskRules) text(s string) string {
 	if r.Emails {
 		s = reMail.ReplaceAllStringFunc(s, func(x string) string { return maskTag("MASKED-EMAIL", strings.ToLower(x)) })
 	}
-	if r.MACs != "" && r.MACs != "show" {
-		s = replaceMAC(s, func(x string) string {
-			low := strings.ToLower(x)
-			tag := maskTag("MASKED-MAC", strings.NewReplacer("-", ":", ".", "").Replace(low))
-			if len(x) == 12 || len(x) == 13 && x[6] == '.' { // aabbccddeeff and aabbcc.ddeeff
-				if r.MACs == "nic" {
-					return tag + x[6:]
-				}
-				if r.MACs == "oui" {
-					return x[:6] + tag
-				}
-				return tag
+	if r.PublicASNs || r.PrivateASNs || r.PublicIPs || r.PrivateIPs {
+		s = reRDText.ReplaceAllStringFunc(s, func(x string) string {
+			g := reRDText.FindStringSubmatch(x)
+			if t, ok := m.rd(g[2], g[3]); ok {
+				return g[1] + t
 			}
-			if r.MACs == "nic" { // the last three bytes, the part that is the card's own
-				if strings.Contains(x, ".") {
-					return tag + "." + x[len(x)-7:]
-				}
-				return tag + x[8:9] + x[9:]
-			}
-			if r.MACs == "oui" {
-				if strings.Contains(x, ".") {
-					return x[:4] + "." + tag // the first two bytes of the vendor part
-				}
-				return x[:8] + x[2:3] + tag
-			}
-			return tag
+			return x
 		})
+	}
+	if r.MACs != "" && r.MACs != "show" {
+		s = replaceMAC(s, func(x string) string { return xMAC(x, r.MACs) })
 	}
 	if r.PublicIPs || r.PrivateIPs {
 		hide := func(a netip.Addr) bool { return r.PublicIPs && publicAddr(a) || r.PrivateIPs && privateAddr(a) }
@@ -368,8 +426,9 @@ func (m *maskRules) text(s string) string {
 	}
 	if r.PublicASNs || r.PrivateASNs {
 		s = reAS.ReplaceAllStringFunc(s, func(x string) string {
-			if t, ok := m.asn(reNum.FindString(x)); ok {
-				return t
+			d := reNum.FindString(x)
+			if t, ok := m.asn(d); ok {
+				return x[:len(x)-len(d)] + t // "AS" stays
 			}
 			return x
 		})
@@ -541,6 +600,32 @@ func asnKey(k string) bool {
 	return strings.HasSuffix(k, "-as") || strings.HasSuffix(k, "-asn") || strings.HasSuffix(k, "-as-number")
 }
 
+// rdKey says whether a key holds a route distinguisher (ASN:number or address:number).
+func rdKey(k string) bool {
+	k = normKey(k)
+	return k == "rd" || strings.HasSuffix(k, "-rd") || strings.Contains(k, "route-distinguisher") || strings.Contains(k, "routedistinguisher")
+}
+
+var (
+	reRDText = regexp.MustCompile(`(?i)(\b(?:rd|route-distinguisher)(?:\s+|\s*=\s*"?))((?:\d{1,3}\.){3}\d{1,3}|\d{1,10}(?:\.\d{1,5})?):(\d{1,10})\b`)
+	reRDVal  = regexp.MustCompile(`^\s*((?:\d{1,3}\.){3}\d{1,3}|\d{1,10}(?:\.\d{1,5})?):(\d{1,10})\s*$`)
+)
+
+// rd hides a route distinguisher as far as the rules hide its first part: the AS number (or the address) as they would
+// anywhere, and then the number after it, which shows its last digits like an AS number does.  Nothing hidden: unchanged.
+func (m *maskRules) rd(admin, num string) (string, bool) {
+	if a, err := netip.ParseAddr(admin); err == nil {
+		if m.r.PublicIPs && publicAddr(a) || m.r.PrivateIPs && privateAddr(a) {
+			return ip4Keep(a, "", m.r.IPKeep) + ":" + xDigits(num), true
+		}
+		return "", false
+	}
+	if n, err := strconv.ParseUint(strings.SplitN(admin, ".", 2)[0], 10, 64); err == nil && !strings.Contains(admin, ".") && (publicASN(n) && m.r.PublicASNs || privateASN(n) && m.r.PrivateASNs) {
+		return xDigits(admin) + ":" + xDigits(num), true
+	}
+	return "", false
+}
+
 func asPathKey(k string) bool {
 	k = normKey(k)
 	return k == "as-path" || k == "aspath" || k == "as-paths" || strings.HasSuffix(k, "-as-path")
@@ -574,6 +659,21 @@ func serialTail(s string) string {
 }
 
 // reSerialTail is what serialTail makes; sent back in a change it keeps the real value, like a token.
+// reMaskedIP is an address as ip4Keep and ip6Keep write it: at least one x among the parts, the others numbers.
+var reMaskedIP = regexp.MustCompile(`^(?:(?:x|\d{1,3})(?:\.(?:x|\d{1,3})){3}|(?:x|[0-9a-f]{1,4})(?::(?:x|[0-9a-f]{1,4})){7})$`)
+
+// reMaskedMAC and reMaskedNum are a MAC address, an AS number or a route distinguisher with digits written as x.
+var (
+	reMaskedMAC = regexp.MustCompile(`(?i)^(?:(?:[0-9a-fx]{2}[:-]){5}[0-9a-fx]{2}|[0-9a-fx]{4}(?:\.[0-9a-fx]{4}){2}|[0-9a-fx]{12})$`)
+	reMaskedNum = regexp.MustCompile(`^(?:x+\d{1,3}|(?:x\.x\.x\.x|[\dx.]+):x+\d{0,3}|x+\d{1,3}:x+\d{0,3})$`)
+)
+
+// maskedWithX says whether a text is an address, MAC address, AS number or route distinguisher with digits written as x.
+// One without an x is a real value.
+func maskedWithX(t string) bool {
+	return strings.Contains(strings.ToLower(t), "x") && (reMaskedIP.MatchString(t) || reMaskedMAC.MatchString(t) || reMaskedNum.MatchString(t))
+}
+
 var reSerialTail = regexp.MustCompile(`^\*{4}[A-Za-z0-9 ._/-]{0,4}$`)
 
 // maskValue walks a decoded JSON value (numbers kept as json.Number).
@@ -584,8 +684,20 @@ func (m *maskRules) value(v any, key string) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
-		for k, x := range t {
-			out[m.text(k)] = m.value(x, k)
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			nk := m.text(k)
+			for i := 2; ; i++ { // two addresses that read alike (x.x.x.x) as keys must not swallow each other
+				if _, dup := out[nk]; !dup {
+					break
+				}
+				nk = m.text(k) + "#" + strconv.Itoa(i)
+			}
+			out[nk] = m.value(t[k], k)
 		}
 		return out
 	case []any:
@@ -627,6 +739,11 @@ func (m *maskRules) value(v any, key string) any {
 			return maskTag("MASKED-SERIAL", strings.TrimSpace(t))
 		case idKeys[normKey(key)] && t != "" && m.r.Contacts:
 			return maskTag("MASKED-ID", t)
+		case rdKey(key) && reRDVal.MatchString(t):
+			g := reRDVal.FindStringSubmatch(t)
+			if v, ok := m.rd(g[1], g[2]); ok {
+				return v
+			}
 		case asnKey(key):
 			if tag, ok := m.asn(strings.TrimSpace(t)); ok {
 				return tag
@@ -678,7 +795,7 @@ func mcpUnmask(v any) any {
 			t[i] = mcpUnmask(x)
 		}
 	case string:
-		if reToken.MatchString(t) || reSerialTail.MatchString(t) {
+		if reToken.MatchString(t) || reSerialTail.MatchString(t) || maskedWithX(t) {
 			return mcpHidden
 		}
 	}

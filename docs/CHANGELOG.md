@@ -1,5 +1,31 @@
 # Changelog
 
+## [v102] - 2026-11-08 — hidden values are written with x
+
+### Changed
+- **IP addresses** hidden from an MCP caller are written with an `x` for each hidden part instead of a token: `x.x.x.x`, `203.0.x.x`, `x.x.114.7`; IPv6 the same, with the longest run of shown zero groups as `::` (`x:x:x:x:x:x:0:8888`).
+- **MAC addresses**: `xx:xx:xx:3c:4d:5e` (NIC part shown), `00:1a:2b:xx:xx:xx` (OUI part shown), `xx:xx:xx:xx:xx:xx` (hidden), in the notation the address was written in.
+- **AS numbers** show their last three digits (`xx169`, `AS` kept: `ASxx169`); **route distinguishers** (a key named rd or route-distinguisher, or `rd A:B` in a command) hide their AS number or address as the rules say and show the last three digits of the number after it (`xx000:x00`).
+- E-mail addresses, serial numbers, ids and your own words are still hashed tokens (`MASKED-EMAIL-3fa91c`).
+- A value written with x, sent back in a change, is restored from the configuration like the old tokens (a real value without an x is never taken for one).
+- The privacy form's labels show the new forms. README, help and the MCP instructions are updated.
+- The refusals of whole-configuration paths and `show config` name `device_config` (v101).
+
+### Fixed
+- Two addresses used as keys of one JSON object that now read alike (`x.x.x.x`) stay two keys (the second is `x.x.x.x#2`).
+
+### Not verified
+- Two addresses that differ only in hidden parts can no longer be told apart by the assistant; that is the price of the shorter form.
+- Route distinguishers are found by key name and by `rd` in text, not wherever an `A:B` stands.
+
+## [v101] - 2026-11-08 — refusals name device_config
+
+### Changed
+- The refusals of `fullconfigs`, `running-config`, `startup-config`, `show config` and a whole-configuration path, and the "this platform runs no CLI commands" error, now say to use `device_config` (secrets hidden), so a client that is refused knows where to go.
+
+### Not verified
+- An MCP client that still reports no such tool is talking to an older build or holds a cached tool list: check Monitor ▸ About for the version on every node it can reach, and reconnect the client.
+
 ## [v100] - 2026-11-08 — config filter checked against every platform's format; shorter MAC label
 
 ### Changed

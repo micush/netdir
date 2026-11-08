@@ -366,7 +366,7 @@ func runDeviceOp(ctx context.Context, d device.Driver, op, cmd string, readOnly,
 		return nil, errors.New("unknown op")
 	}
 	if errors.Is(err, device.ErrUnsupported) && op == "show" {
-		return nil, errors.New("this platform's API runs no CLI commands; use facts, interfaces, ports, neighbors, routes or config")
+		return nil, errors.New("this platform's API runs no CLI commands; use facts, interfaces, ports, neighbors, routes or config (over MCP: device_config)")
 	}
 	return v, err
 }

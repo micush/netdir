@@ -150,6 +150,9 @@ func secretSegment(sg string) error {
 			w = strings.ReplaceAll(sg, "aaaa", "") // AAAA is the DNS record type (Infoblox record:aaaa, sharedrecord:aaaa), not AAA
 		}
 		if strings.Contains(w, d) {
+			if d == "fullconfigs" || d == "running-config" || d == "startup-config" {
+				return fmt.Errorf("path: %q is the whole configuration: use the device_config tool, which hides its secrets", sg)
+			}
 			return fmt.Errorf("path: %q holds secrets (users, keys, certificates, SNMP, AAA) and is not available over MCP", sg)
 		}
 	}
@@ -187,7 +190,7 @@ func CheckAPIPathMCP(p string) error {
 		base := strings.TrimSuffix(strings.TrimSuffix(sg, ".json"), ".xml")
 		if sg == "native" && i == len(segs)-1 || sg == "cmdb" && i == len(segs)-1 ||
 			base == "sys" && i == len(segs)-1 && strings.HasPrefix(path, "/api/") { // NX-OS: sys is the root of the object model
-			return errors.New("path: a whole configuration holds the device's secrets and is not available over MCP; ask for a part (the device_* tools, or a path below it)")
+			return errors.New("path: a whole configuration holds the device's secrets and is not available over MCP; use the device_config tool (secrets hidden), or ask for a part (the other device_* tools, or a path below it)")
 		}
 		if err := secretSegment(sg); err != nil {
 			return err
@@ -267,7 +270,7 @@ func checkPanosQueryMCP(query string) error {
 		for _, n := range names {
 			n = strings.ToLower(n)
 			if n == "config" {
-				return errors.New(`path: "show config" prints the configuration, which holds secrets, and is not available over MCP`)
+				return errors.New(`path: "show config" prints the configuration, which holds secrets: use the device_config tool, which hides them`)
 			}
 			if err := secretSegment(n); err != nil {
 				return err

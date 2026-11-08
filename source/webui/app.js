@@ -2774,9 +2774,9 @@
           box("public_asns", "Public AS numbers"), box("private_asns", "Private AS numbers"),
           box("emails", "E-mail addresses"), box("contacts", "SNMP contact and location")),
         h("div", { class: "grid gap-top" },
-          sel("ip_keep", "IP addresses", [[0, "hidden"], [1, "first 1 (203.)"], [2, "first 2 (203.0.)"], [3, "first 3 (203.0.114.)"], [-1, "last 1 (.7)"], [-2, "last 2 (.114.7)"], [-3, "last 3 (.0.114.7)"]]),
+          sel("ip_keep", "IP addresses", [[0, "hidden (x.x.x.x)"], [1, "first 1 (203.x.x.x)"], [2, "first 2 (203.0.x.x)"], [3, "first 3 (203.0.114.x)"], [-1, "last 1 (x.x.x.7)"], [-2, "last 2 (x.x.114.7)"], [-3, "last 3 (x.0.114.7)"]]),
           sel("serials", "Serial numbers", [["show", "shown"], ["tail", "last four characters (****1234)"], ["hide", "hidden"]]),
-          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "vendor part shown (00:1a:2b:…)"], ["nic", "NIC part shown (…:3c:4d:5e)"], ["hide", "hidden"]])),
+          sel("macs", "MAC addresses", [["show", "shown"], ["oui", "OUI part shown (00:1a:2b:xx:xx:xx)"], ["nic", "NIC part shown (xx:xx:xx:3c:4d:5e)"], ["hide", "hidden"]])),
         h("label", { class: "f wide gap-top" }, h("span", {}, "Words always hidden"), words));
       return { el, get: () => ({ ...r, words: r.words.slice() }) };
     };

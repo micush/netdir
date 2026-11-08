@@ -17,7 +17,7 @@ func TestPrivacyStrictText(t *testing.T) {
 			t.Errorf("%q leaked: %s", gone, out)
 		}
 	}
-	for _, keep := range []string{"127.0.0.1", "255.255.255.0", "2001:db8::1", "PRIVATE-IP-", "PUBLIC-IP-", "MASKED-MAC-", "PRIVATE-AS-", "PUBLIC-AS-", "PRIVATE-IP6-"} {
+	for _, keep := range []string{"127.0.0.1", "255.255.255.0", "2001:db8::1", "gw x.x.x.x and x.x.x.x", "mac xx:xx:xx:xx:xx:xx or xxxx.xxxx.xxxx", "v6 x:x:x:x:x:x:x:x", "ASxx001 ASxx169"} {
 		if !strings.Contains(out, keep) {
 			t.Errorf("%q missing: %s", keep, out)
 		}
@@ -43,7 +43,7 @@ func TestPrivacyKeepDigits(t *testing.T) {
 	r.PrivateIPs = true
 	m := newMaskRules(r)
 	out := m.text("a 203.0.114.7 b 10.20.30.40 c 2001:4860:4860::8888")
-	for _, want := range []string{"203.0.PUBLIC-IP-", "10.20.PRIVATE-IP-", "2001:4860:PUBLIC-IP6-"} {
+	for _, want := range []string{"203.0.x.x", "10.20.x.x", "2001:4860:x:x:x:x:x:x"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%q missing: %s", want, out)
 		}
@@ -63,14 +63,14 @@ func TestPrivacyMACModes(t *testing.T) {
 	r := standardRules()
 	r.MACs = "oui"
 	out := newMaskRules(r).text("mac 00:1a:2b:3c:4d:5e and 001a.2b3c.4d5e and ipv6 2001:db8:1:2:3:4:5:6")
-	if !strings.Contains(out, "00:1a:2b:MASKED-MAC-") || !strings.Contains(out, "001a.MASKED-MAC-") || strings.Contains(out, "3c:4d:5e") {
+	if !strings.Contains(out, "00:1a:2b:xx:xx:xx") || !strings.Contains(out, "001a.2bxx.xxxx") || strings.Contains(out, "3c:4d:5e") {
 		t.Errorf("oui: %s", out)
 	}
 	if !strings.Contains(out, "2001:db8:1:2:3:4:5:6") {
 		t.Errorf("an IPv6 address was taken for a MAC: %s", out)
 	}
 	r.MACs = "hide"
-	if out = newMaskRules(r).text("00-1a-2b-3c-4d-5e"); strings.Contains(out, "00-1a") || !strings.HasPrefix(out, "MASKED-MAC-") {
+	if out = newMaskRules(r).text("00-1a-2b-3c-4d-5e"); strings.Contains(out, "00-1a") || out != "xx-xx-xx-xx-xx-xx" {
 		t.Errorf("hide: %s", out)
 	}
 }
@@ -84,8 +84,8 @@ func TestPrivacyWordsAndSerials(t *testing.T) {
 	if strings.Contains(strings.ToLower(out), "contoso") || strings.Contains(out, "corp-edge") {
 		t.Errorf("words leaked: %s", out)
 	}
-	if !strings.Contains(out, "PUBLIC-IP-") {
-		t.Errorf("the address token was broken by the word \"public\": %s", out)
+	if !strings.Contains(out, "x.x.x.x") {
+		t.Errorf("the address was broken by the word \"public\": %s", out)
 	}
 	f := strings.Fields(out)
 	if f[0] != f[1] {
@@ -166,7 +166,7 @@ func TestMCPPrivacyLevels(t *testing.T) {
 	// strict on the source
 	e, post = mcpEnv(t, "127.0.0.1 strict")
 	setDev(e, "10.9.8.7")
-	if txt := list(post); strings.Contains(txt, "10.9.8.7") || !strings.Contains(txt, "PRIVATE-IP-") {
+	if txt := list(post); strings.Contains(txt, "10.9.8.7") || !strings.Contains(txt, "x.x.x.x") {
 		t.Errorf("strict source: %s", txt)
 	}
 	// strict as the default, none on the source: the source's own level wins
@@ -223,7 +223,7 @@ func TestPrivacyKeepLastAndNIC(t *testing.T) {
 	r.PrivateIPs = true
 	r.IPKeep = -2
 	out := newMaskRules(r).text("a 203.0.114.7 b 10.20.30.40 c 2001:4860:4860::8888")
-	for _, want := range []string{"PUBLIC-IP-", ".114.7", "PRIVATE-IP-", ".30.40", "PUBLIC-IP6-", ":0:8888"} {
+	for _, want := range []string{"x.x.114.7", "x.x.30.40", "x:x:x:x:x:x:0:8888"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%q missing: %s", want, out)
 		}
@@ -240,7 +240,7 @@ func TestPrivacyKeepLastAndNIC(t *testing.T) {
 	}
 	r.MACs = "nic"
 	out = newMaskRules(r).text("00:1a:2b:3c:4d:5e / 001a.2b3c.4d5e")
-	if !strings.Contains(out, "MASKED-MAC-") || !strings.Contains(out, ":3c:4d:5e") || !strings.Contains(out, ".3c.4d5e") && !strings.Contains(out, ".3c.4d5e") || strings.Contains(out, "00:1a") || strings.Contains(out, "001a") {
+	if !strings.Contains(out, "xx:xx:xx:3c:4d:5e") || !strings.Contains(out, "xxxx.xx3c.4d5e") || strings.Contains(out, "00:1a") || strings.Contains(out, "001a") {
 		t.Errorf("nic: %s", out)
 	}
 }

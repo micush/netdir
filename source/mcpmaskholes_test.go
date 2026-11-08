@@ -27,7 +27,7 @@ func TestMaskOddForms(t *testing.T) {
 			t.Errorf("%q came out as %q", c.in, out)
 		}
 	}
-	if got := r.text("ip=192.168.005.005/24"); !strings.Contains(got, "PRIVATE-IP-") || !strings.HasSuffix(got, ".5.5/24") {
+	if got := r.text("ip=192.168.005.005/24"); !strings.Contains(got, "x.x.") || strings.Contains(got, "192.168") {
 		t.Errorf("padded: %q", got)
 	}
 	// what is not an address stays
