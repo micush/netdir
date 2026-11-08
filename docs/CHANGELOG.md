@@ -1,5 +1,16 @@
 # Changelog
 
+## [v105] - 2026-11-08 — Copy ▸ To all gateways
+
+### Added
+- **Right-click a gateway ▸ Copy ▸ To all gateways:** adds the devices of this gateway that another gateway lacks to every other gateway, after a confirmation that lists how many each gateway gets. Nothing is removed; run it again after changing the source. It is greyed out, with the reason, when the gateway has no devices, there is no other gateway, or every other gateway has them all.
+
+### Changed
+- **Copy all devices** moved into the same menu as **Copy ▸ All devices** (it fills the clipboard that **Paste N devices** uses, as before).
+
+### Not verified
+- The menu was not looked at in a browser; only the script syntax and the tests were run.
+
 ## [v104] - 2026-11-08 — Cisco IOS, Catalyst SD-WAN, NSX-T and ACI
 
 ### Added

@@ -1304,7 +1304,7 @@
     // Copy a device (right-click it), or every device of a gateway (right-click the gateway), and paste them on another gateway (right-click the circle, or the empty drawing)
     let devClip = [];
     const clipNew = (g) => devClip.filter((n) => devByName(n) && !(g.devices || []).includes(n));
-    const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy device, or a gateway ▸ Copy all devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
+    const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy device, or a gateway ▸ Copy ▸ All devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
     const pasteDevice = (g) => quick(() => { const add = clipNew(g); g.devices = (g.devices || []).concat(add); cv.sel = { kind: "dev", addr: add[add.length - 1] }; });
     const pasteItem = (g) => [devClip.length > 1 ? "Paste " + devClip.length + " devices" : "Paste device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), "", null, pasteWhy(g)];
     const devItems = (g, name) => {
@@ -1416,8 +1416,15 @@
         cv.sel = null; cv.multi = null; commit();
       });
     }
+    // Copy ▸ To all gateways: add the devices of this gateway that another gateway lacks to every other gateway (nothing is removed)
+    const copyPlan = (g) => groups().filter((o) => o !== g).map((o) => [o, (g.devices || []).filter((n) => devByName(n) && !(o.devices || []).includes(n))]).filter(([, add]) => add.length);
+    const copyWhy = (g) => (!(g.devices || []).length ? "This gateway has no devices" : groups().length < 2 ? "There is no other gateway" : !copyPlan(g).length ? "Every other gateway has these devices already" : "");
+    const copyToAll = (g) => {
+      const plan = copyPlan(g);
+      confirmDialog("Copy the devices to every other gateway?", "Adds the devices of " + gwLabel(g) + " that are missing there: " + plan.map(([o, add]) => gwLabel(o) + " " + add.length).join(", ") + ". Nothing is removed from any gateway.", "Copy to " + plan.length + " gateway" + (plan.length > 1 ? "s" : ""), () => quick(() => { for (const [o, add] of plan) o.devices = (o.devices || []).concat(add); }));
+    };
     const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["Add device", () => deviceForm(g)], pasteItem(g),
-      ["Copy all devices", () => { devClip = [...(g.devices || [])]; }, "", null, (g.devices || []).length ? "" : "This gateway has no devices"],
+      ["Copy", null, "", [["All devices", () => { devClip = [...(g.devices || [])]; }, "", null, (g.devices || []).length ? "" : "This gateway has no devices"], ["To all gateways", () => copyToAll(g), "", null, copyWhy(g)]]],
       ...((g.devices || []).length ? [["Ask its devices", null, "", [["Facts", () => askGateway(g, "facts")], ["Interfaces", () => askGateway(g, "interfaces")], ["Neighbors", () => askGateway(g, "neighbors")]]]] : []),
       "-", ["Add anycast address", () => anycastForm(g)],
       ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
