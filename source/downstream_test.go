@@ -359,3 +359,21 @@ func TestMCPWritesPBSWithRW(t *testing.T) {
 		}
 	}
 }
+
+// a list of a neighbor that is not up to date must not bring a device back through the installation that published it: netdir1 and netdir2
+// have each other as devices, netdir3 (below netdir1) goes down, and netdir2 still lists its devices through netdir1
+func TestStaleEntryDoesNotComeBack(t *testing.T) {
+	dir2 := device.Device{Name: "netdir2", Platform: "netdir"}
+	out := buildRemote([]device.Device{dir2}, []downPart{{dir: dir2, below: []device.Below{
+		{Name: "technitium", Platform: "technitium", Address: "10.2.0.5", Inst: "i2", Path: []string{"i2"}},
+		{Name: "observium", Platform: "observium", Address: "10.3.0.5", Inst: "i3", Via: []string{"netdir1"}, Path: []string{"i2", "i1", "i3"}}, // i2 got it from i1, which has lost it
+	}}}, "i1")
+	if len(out) != 1 || out[0].Name != "technitium" {
+		t.Errorf("what netdir1 lists through netdir2: %+v", out)
+	}
+	// the same list for an installation that is not in the path keeps it
+	if got := buildRemote([]device.Device{dir2}, []downPart{{dir: dir2, below: []device.Below{
+		{Name: "observium", Platform: "observium", Address: "10.3.0.5", Inst: "i3", Via: []string{"netdir1"}, Path: []string{"i2", "i1", "i3"}}}}}, "i9"); len(got) != 1 {
+		t.Errorf("an installation outside the path: %+v", got)
+	}
+}

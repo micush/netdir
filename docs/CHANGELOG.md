@@ -1,5 +1,17 @@
 # Changelog
 
+## [v80] - 2026-11-07 — federation: a device cannot come back through the director that published it
+
+### Fixed
+- **A stale list could send a request round and round between two directors that have each other as devices.** If a device's owner went down, a director could still list it through a neighbor that had it from this one a moment before; this one then took it back as reachable through the neighbor, and a request for it went to the neighbor, which sent it back, until the lists aged out. Every device now carries `path`, the installations a request for it goes through (the next hop first, the owner last; `list_devices` has it under `remote`), and a director drops a device whose path has its own installation in it (as it already dropped one that it owns). Index only; no request is changed.
+
+### Verified
+- **A mesh of four directors, round by round** (`TestFederationMeshConverges`): netdir1 ▸ netdir2, netdir3; netdir2 ▸ netdir1, netdir3, netdir4; netdir3 ▸ netdir4, with each director building its index from the lists its neighbors published a round before. The lists settle and stay put; every director reaches exactly the devices below it, by a route that never visits a director twice and has at most three; no device is listed twice and none goes through or belongs to the director that lists it; when netdir4 goes down, vcenter is gone from every director within four rounds. Without the path rule the same test and `TestStaleEntryDoesNotComeBack` fail.
+- `TestStaleEntryDoesNotComeBack` (a path through this installation is dropped, the same list for another installation is kept), the driver test for `Below` (the path starts with the installation that answered), the earlier index tests, full test suite, `node --check`, leak test.
+
+### Not verified
+- **Two real Network Directors with links both ways were not run**; the test uses lists as the directors would give them. The directors must be at v80 for the path to be there: an older one gives none, and a loop through it is only stopped by the owner and depth checks.
+
 ## [v79] - 2026-11-07 — Proxmox Backup Server is read over MCP with a read-only caller
 
 ### Fixed

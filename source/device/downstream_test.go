@@ -36,6 +36,9 @@ func TestNetdirBelowAndAsk(t *testing.T) {
 	if below[0].Name != "obs" || below[0].Inst != "aaa111" || below[0].Status != "ok" || below[0].Detail != "answers" || len(below[0].Via) != 0 {
 		t.Errorf("a device of the director itself: %+v", below[0])
 	}
+	if strings.Join(below[0].Path, ">") != "aaa111" || strings.Join(below[2].Path, ">") != "aaa111" {
+		t.Errorf("paths: %v %v", below[0].Path, below[2].Path) // a device below carries the instances after this one's too (none in this stub's)
+	}
 	if v := below[2]; v.Name != "vcenter" || v.Inst != "bbb222" || strings.Join(v.Via, ",") != "nd4" || v.Status != "bad" {
 		t.Errorf("a device below it: %+v", v)
 	}

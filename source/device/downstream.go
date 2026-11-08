@@ -27,6 +27,10 @@ type Below struct {
 	Disabled bool     `json:"disabled,omitempty"`
 	Via      []string `json:"via,omitempty"`
 	Inst     string   `json:"inst,omitempty"`
+	// Path is the installations a request for the device goes through, the director that was asked first and the owner last.  A
+	// director drops a device whose path has itself in it, so what it published itself cannot come back to it, not even from a list
+	// that is a few seconds old.
+	Path []string `json:"path,omitempty"`
 	// Status and Detail are the health as the owning director sees it: ok, warn, bad or "" when it has not looked yet.
 	Status string `json:"status,omitempty"`
 	Detail string `json:"detail,omitempty"`
@@ -64,6 +68,15 @@ func (m *director) Pass(ctx context.Context, tool string, args map[string]any) (
 	return m.callPlain(ctx, tool, args)
 }
 
+// pathOf puts the installation of the director that answered in front of the path it gave (an installation that does not say who it is
+// is left out, and a loop cannot be seen through it).
+func pathOf(inst string, rest []string) []string {
+	if inst == "" {
+		return rest
+	}
+	return append([]string{inst}, rest...)
+}
+
 func (m *director) Below(ctx context.Context) (string, []Below, error) {
 	if m.kind != "net" {
 		return "", nil, ErrUnsupported
@@ -93,9 +106,12 @@ func (m *director) Below(ctx context.Context) (string, []Below, error) {
 	for _, d := range in.Devices {
 		h := in.Health[d.Name]
 		out = append(out, Below{Name: d.Name, Platform: d.Platform, Address: d.Address, Port: d.Port, Tags: d.Tags, Disabled: d.Disabled,
-			Inst: in.Instance, Status: h.Status, Detail: h.Detail})
+			Inst: in.Instance, Status: h.Status, Detail: h.Detail, Path: pathOf(in.Instance, nil)})
 	}
-	out = append(out, in.Remote...)
+	for _, r := range in.Remote {
+		r.Path = pathOf(in.Instance, r.Path)
+		out = append(out, r)
+	}
 	return in.Instance, out, nil
 }
 

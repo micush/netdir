@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ type RemoteDevice struct {
 	Disabled bool     `json:"disabled,omitempty"`
 	Via      []string `json:"via"`            // Via[0] is the device here that is the Network Director; the rest are as each director names the next
 	Inst     string   `json:"inst,omitempty"` // the installation that has the device's login
+	Path     []string `json:"path,omitempty"` // the installations a request goes through, the next hop first and the owner last (this one's own is never in it: see buildRemote)
 	Status   string   `json:"status,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 }
@@ -103,8 +105,8 @@ func buildRemote(local []device.Device, parts []downPart, self string) []RemoteD
 	var cands []cand
 	for _, p := range parts {
 		for _, b := range p.below {
-			if (self != "" && b.Inst == self) || len(b.Via)+2 > downMaxDepth {
-				continue
+			if (self != "" && b.Inst == self) || len(b.Via)+2 > downMaxDepth || (self != "" && slices.Contains(b.Path, self)) {
+				continue // its own, a chain that is too long, or one that goes through this installation (a list of a neighbor that is not up to date)
 			}
 			via := append([]string{p.dir.Name}, b.Via...)
 			key := fmt.Sprintf("%s|%s|%s|%d", b.Inst, b.Platform, strings.ToLower(b.Address), b.Port)
@@ -112,7 +114,7 @@ func buildRemote(local []device.Device, parts []downPart, self string) []RemoteD
 				key += "|" + via[len(via)-1] + "|" + b.Name // an owner that does not say who it is: only the same name on the same director is the same device
 			}
 			cands = append(cands, cand{RemoteDevice{Name: b.Name, Orig: b.Name, Platform: b.Platform, Address: b.Address, Port: b.Port, Tags: b.Tags,
-				Disabled: b.Disabled, Via: via, Inst: b.Inst, Status: b.Status, Detail: b.Detail}, key})
+				Disabled: b.Disabled, Via: via, Inst: b.Inst, Path: b.Path, Status: b.Status, Detail: b.Detail}, key})
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
