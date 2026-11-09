@@ -1,5 +1,13 @@
 # Changelog
 
+## [v114] - 2026-11-09 — MCP keys table fits
+
+### Fixed
+- Configure ▸ MCP ▸ Keys: with the new Expires column the fixed column widths were wider than the box, which pushed the Key column out and made the table scroll sideways. The columns are narrower (name, access, privacy, devices, added, expires) and the key takes what is left.
+
+### Not verified
+- Looked at in no browser: the widths were worked out from the stylesheet and the screenshot, not rendered here.
+
 ## [v113] - 2026-11-09 — Expiry for MCP keys and allowed sources
 
 ### Added
