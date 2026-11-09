@@ -1,5 +1,11 @@
 # Changelog
 
+## [v109] - 2026-11-09 — Unimus v2: backup list form, catalog
+
+### Fixed
+- `device_api_catalog` listed the v3 path `/devices/backups?deviceUuids=…` on a server speaking v2, where Unimus read `backups` as a device ID (HTTP 400 "Argument deviceId type mismatch"). The catalog now lists the paths of the version the server speaks.
+- On v2, a 4xx from `/devices/<id>/backups/latest` falls back to `/devices/<id>/backups?latest=true` (the form seen working on Unimus 2.9.1).
+
 ## [v108] - 2026-11-09 — Unimus: read a backup by name
 
 ### Added

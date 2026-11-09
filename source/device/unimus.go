@@ -299,6 +299,16 @@ func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, er
 	var b map[string]any
 	if u.ver == "v2" {
 		v, err := u.get(ctx, "/devices/"+id+"/backups/latest")
+		var se *statusError
+		if err != nil && errors.As(err, &se) && se.Code >= 400 && se.Code < 500 { // this build wants the list form
+			rs, err2 := u.list(ctx, "/devices/"+id+"/backups?latest=true", "backups", 1)
+			if err2 != nil {
+				return "", err
+			}
+			if len(rs) > 0 {
+				v, err = rs[0], nil
+			}
+		}
 		if err != nil {
 			return "", err
 		}
@@ -497,9 +507,17 @@ func (u *unimus) APIGet(ctx context.Context, path string) (any, bool, error) {
 	return Redact(uniStrip(v)), false, nil
 }
 
-func (u *unimus) APICatalog(context.Context) (any, error) {
+func (u *unimus) APICatalog(ctx context.Context) (any, error) {
+	_ = u.probe(ctx)
+	if u.ver == "v2" {
+		return map[string]any{
+			"how": "GET paths of the Unimus API v2 this server speaks, below /api/v2: /devices, /devices/<id>, /devices/<id>/backups?latest=true, /devices/<id>/backups/latest, /health. " +
+				"List paths take page and size. Only GET is sent. The text of a backup is not part of these answers: read it with the Show command `show backup <name|address|id>` or as the configuration of a device with the option device. Credentials and connections are not read.",
+			"examples": []string{"/health", "/devices", "/devices/<id>", "/devices/<id>/backups?latest=true", "/devices/<id>/backups/latest"},
+		}, nil
+	}
 	return map[string]any{
-		"how": "GET paths of the Unimus API below /api/v3 (/api/v2 with the option api_version=v2): /devices, /devices/<uuid>, /devices/backups?deviceUuids=<uuid>&latest=true, /zones, /tags, /jobs/tasks/status, /health. " +
+		"how": "GET paths of the Unimus API v3 below /api/v3: /devices, /devices/<uuid>, /devices/backups?deviceUuids=<uuid>&latest=true, /zones, /tags, /jobs/tasks/status, /health. " +
 			"List paths take page and size. Only GET is sent. The text of a backup is not part of these answers: read it with the Show command `show backup <name|address|id>` or as the configuration of a device with the option device. Credentials and connections are not read.",
 		"examples": []string{"/health", "/devices", "/devices?vendors=Cisco", "/devices/<uuid>", "/devices/backups?deviceUuids=<uuid>&latest=true", "/zones", "/tags", "/jobs/tasks/status"},
 	}, nil
