@@ -119,7 +119,12 @@ func secretName(k string) bool {
 }
 
 // Redact returns v with the value of every key that names a secret replaced by "(hidden)".  Empty values stay empty.
-func Redact(v any) any { return redactIn(v, false) }
+func Redact(v any) any {
+	if Unfiltered() {
+		return v
+	}
+	return redactIn(v, false)
+}
 
 // redactIn is Redact; snmp says the value lies under a key about SNMP, where every key that names a community holds a
 // secret (a BGP community elsewhere is not one).

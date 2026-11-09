@@ -1,5 +1,22 @@
 # Changelog
 
+## [v112] - 2026-11-09 — Privacy none means none
+
+### Changed
+- A caller whose privacy level is **none** (its key's, its source's, or the default) now gets what a **device** answers as the device has it: `device_config`, `device_show` (including `show backup` on Unimus), `device_api_get` and the other device tools no longer have secrets removed (passwords, hashes, SNMP communities, keys). Before, **none** hid addresses no more but the secret filter still ran.
+- Not changed at none: netdir's own settings (`get_config`, `api_get`, `list_devices`): device logins, MCP keys and tokens stay hidden. The login netdir uses to reach a device is still kept out of answers by leak capture.
+- Every such answer is logged (`mcp: KEY was given device_config unfiltered (privacy none)`).
+- Standard and strict are as before.
+
+### Implementation
+- `device.RunRaw` marks the goroutine that runs the request, and `Redact`, `RedactText`, `RedactConfig`, `RedactConfigValue` and the DNS filter leave the answer alone while it runs (`device/rawsecrets.go`). A goroutine a driver starts itself is not marked, so what it reads is still filtered: on the safe side.
+
+### Verified
+- Tests: the filters under and outside the mark, another goroutine, `show backup` raw, and through MCP: `device_config` at none shows the hash, at standard not, `get_config` and `list_devices` never show a device login.
+
+### Not verified
+- Not every driver was run raw against a real device; drivers that read in goroutines of their own may still filter part of an answer.
+
 ## [v111] - 2026-11-09 — Unimus: names that are a host name's first label
 
 ### Fixed

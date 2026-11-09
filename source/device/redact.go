@@ -88,6 +88,9 @@ func redactJSONMember(m []string) string {
 // md5 the rest of the line reads "(hidden)", and PEM blocks are removed.  A line of JSON ("key": "value",) is hidden inside its
 // quotes, so an answer that is JSON stays JSON.  It hides more than it has to.
 func RedactText(s string) string {
+	if Unfiltered() {
+		return s
+	}
 	s = pemBlock.ReplaceAllString(s, "(hidden: key or certificate)")
 	s = jsonSec.ReplaceAllString(s, `${1}"(hidden)"`)
 	if re := secretExtras().re; re != nil {
@@ -324,6 +327,9 @@ func eosDeniedWord(w string) error {
 // apply twice, so an answer relayed from a gateway below is filtered again here.  The words are the shared ones (secretWords
 // and Configure ▸ Privacy ▸ Secret words).
 func RedactConfig(s string) string {
+	if Unfiltered() {
+		return s
+	}
 	var v any
 	if json.Unmarshal([]byte(s), &v) == nil {
 		switch v.(type) {
@@ -401,6 +407,9 @@ func redactCLI(s string) string {
 
 // RedactConfigValue is RedactConfig for a result of any type: a text is filtered as one, anything else as JSON.
 func RedactConfigValue(v any) any {
+	if Unfiltered() {
+		return v
+	}
 	switch t := v.(type) {
 	case string:
 		return RedactConfig(t)

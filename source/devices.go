@@ -142,7 +142,7 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		jsonError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	if op == "api" && s.mcp {
+	if op == "api" && s.mcp && !s.raw {
 		// what over MCP may not be read is the platform's to say: another platform's words for secrets refuse what is none here
 		for _, d := range picked {
 			if err = device.CheckAPIPathMCPFor(d.Platform, cmd); err != nil {
@@ -175,8 +175,9 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(allDevs), op, cmd, to, got)
 		}()
 	}
-	local := device.Fanout(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (any, error) {
-		return runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp)
+	local := device.Fanout(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (v any, err error) {
+		device.RunRaw(s.raw, func() { v, err = runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp && !s.raw) })
+		return v, err
 	})
 	gwg.Wait()
 	byLocal := map[string]device.Result{}
@@ -193,7 +194,7 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		}
 	}
 	failed := 0
-	if s.mcp && op == "config" { // every answer, also one relayed from a gateway below, goes through the shared secret filter
+	if s.mcp && !s.raw && op == "config" { // every answer, also one relayed from a gateway below, goes through the shared secret filter
 		for i := range res {
 			res[i].Data = device.RedactConfigValue(res[i].Data)
 		}

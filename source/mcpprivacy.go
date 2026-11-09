@@ -37,7 +37,7 @@ type PrivacyConfig struct {
 	Standard *PrivacyRules `json:"standard,omitempty"` // what "standard" hides; unset: the built-in rules
 	Strict   *PrivacyRules `json:"strict,omitempty"`
 	// SecretWords are words of your own that mark a secret in a key name, a line of text or a path, on top of the built-in ones
-	// (device/secretwords.go).  They apply at every level, "none" included.
+	// (device/secretwords.go).  They apply at every level except "none": at that level a configuration is given as the device has it.
 	SecretWords []string `json:"secret_words,omitempty"`
 }
 

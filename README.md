@@ -7,7 +7,7 @@ What you get:
 - **One address that survives a node failure.** Several nodes share a virtual IP (the gateway's **VIP**). The nodes elect a controller among themselves and spread clients across every node. A node can fail or restart without the assistant losing the gateway.
 - **Anycast over BGP or OSPF.** A gateway can also announce extra addresses to your routers through FRR, so every site reaches its nearest gateway. A node withdraws them when it cannot answer.
 - **One inventory for every vendor.** Devices and their logins live in the cluster's shared settings, so any node can answer for any device. Each platform is a small driver that speaks the device's own API.
-- **Read-only first, with guard rails.** Access is by address list or bearer key, and read-only is the default. Device passwords and tokens are never shown to an MCP caller. A device's running configuration is offered (`device_config`) with its secrets hidden by one list of secret words, and `show` takes nothing that writes. Every call is logged.
+- **Read-only first, with guard rails.** Access is by address list or bearer key, and read-only is the default. Device logins and netdir's own keys are never shown to an MCP caller; a device's own secrets (in its configuration) are hidden unless the caller's privacy level is `none`. A device's running configuration is offered (`device_config`) with its secrets hidden by one list of secret words, and `show` takes nothing that writes. Every call is logged.
 - **A cluster you manage from any node.** Shared settings, config history, certificates and software updates stay in step across the nodes, through a web GUI or the command line.
 
 ## Screenshots
@@ -524,7 +524,7 @@ The same queries are on the API: `GET /api/devices` and `GET /api/devices/query?
 
 - **MCP changes devices, never netdir.** An `rw` caller can run `device_change`, `device_change_raw` and `device_capture`; settings, the cluster, gateways, schedules, updates, alerts, users and certificates cannot be changed over MCP and are changed in the GUI. The rule is in the request path, so no route is missed.
 - **Read-only by default.** A caller is read-only unless its address entry or key says `rw`. A read-only GUI account is refused a device's configuration, as it is refused the GUI's own config versions; an MCP caller gets it filtered.
-- **One list of secret words.** What marks a secret is decided in one place for every filter: the built-in words (password, secret, passkey, auth_pass, priv_pass, authentication_key, keepalive_key, ciphertext, SNMP communities, keys, tokens …) and **Configure ▸ Privacy ▸ Secret words** (`settings.privacy.secret_words`) of your own. A key whose name holds one has its value hidden, a line of text that holds one is hidden from that word on, and a path or XPath that holds one is refused. It applies at every privacy level, `none` included. The filter works on names, so it hides less than it should rather than more only when a secret has a name nobody listed: add it there.
+- **One list of secret words.** What marks a secret is decided in one place for every filter: the built-in words (password, secret, passkey, auth_pass, priv_pass, authentication_key, keepalive_key, ciphertext, SNMP communities, keys, tokens …) and **Configure ▸ Privacy ▸ Secret words** (`settings.privacy.secret_words`) of your own. A key whose name holds one has its value hidden, a line of text that holds one is hidden from that word on, and a path or XPath that holds one is refused. It applies at every privacy level except `none`, where what a device answers is given as it is. The filter works on names, so it hides less than it should rather than more only when a secret has a name nobody listed: add it there.
 - **Secrets never reach a caller.** Device passwords and tokens, SNMP communities, keys and join codes read `(hidden)` to every MCP caller, read-write included. A read-only GUI account sees `(hidden)` too. Secrets are also scrubbed from device error messages.
 - **Commands are gated.** `show` accepts one line starting with `show`, optionally with output filters (`| include`, `exclude`, `begin`, `section`, `count`, `json`). It refuses `;`, redirection, `| tee`, `| redirect` and anything else.
 - **TLS to devices** checks the certificate against the system's roots, or `ca_pem`, unless the device is marked `insecure`. Redirects are never followed with credentials, and answers are capped at 32 MB.
@@ -542,7 +542,7 @@ What an assistant is told can be limited, because the assistant is usually a pub
 
 | Level | Hides |
 |---|---|
-| `none` | nothing (passwords, keys and tokens are always hidden, at every level) |
+| `none` | nothing: what a device answers (configuration, `show` output, API reads) is given as the device has it, secrets included. netdir's own logins, keys and tokens (`get_config`, `list_devices`) stay hidden. Every such answer is logged. |
 | `standard` (default) | public IP addresses and AS numbers, e-mail addresses, SNMP contact and location, serial numbers except the last four characters |
 | `strict` | all of that, private IP addresses and AS numbers, MAC addresses, serial numbers completely |
 

@@ -510,7 +510,8 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		if who != from {
 			user = "mcp:" + who // mcp:KEYNAME@ADDRESS
 		}
-		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, created: time.Now(), devs: devs}, args: args}
+		raw := w.status.sup.mcpPrivacy(level) == maskNone // privacy none: a configuration is not filtered either
+		c := &mcpCtx{w: w, ctx: ctx, from: from, s: &session{user: user, ip: from, readOnly: access != "rw", mcp: true, raw: raw, created: time.Now(), devs: devs}, args: args}
 		began := time.Now()
 		v, err := tool.run(c)
 		mask := w.status.sup.mcpPrivacy(level)
@@ -520,8 +521,14 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 			w.usage.Record(rec)
 			return ok(mcpText(mask.text(err.Error()), true))
 		}
-		b, _ := json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
-		text := string(mask.json(b))       // nor what the caller's privacy level hides: public addresses and AS numbers, e-mail addresses, serial numbers ... (mcpmask.go)
+		var b []byte
+		if raw && strings.HasPrefix(tool.name, "device_") { // what a device says; netdir's own settings (get_config, api_get) stay hidden
+			infof("mcp: %s was given %s unfiltered (privacy none)", who, tool.name)
+			b, _ = json.Marshal(v)
+		} else {
+			b, _ = json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
+		}
+		text := string(mask.json(b)) // nor what the caller's privacy level hides: public addresses and AS numbers, e-mail addresses, serial numbers ... (mcpmask.go)
 		if limit := w.status.sup.mcpResultLimit(); len(text) > limit {
 			cut := limit
 			for cut > 0 && !utf8.RuneStart(text[cut]) { // not in the middle of a character
@@ -1016,7 +1023,7 @@ func init() {
 			"Run one read-only show command on each device picked and return its text. Only \"show ...\" with output filters (| include, exclude, section, ...) is accepted. "+
 				"Platforms whose API runs no CLI commands answer an error for each device. Observium: \"show device NAME\" returns everything Observium knows about one monitored device in one answer (its record, ports, addresses, neighbours, sensors, status, storage, memory pools, processors, inventory, counters, probes, alerts and alert log), with the target the Observium device; \"show NAME [device=NAME] [filter=value]\" reads one list (devices, ports, neighbours, sensors, status, storage, mempools, processors, inventory, alerts, alert_log, groups, ...)."),
 		mcpDeviceTool("device_config", "Device configuration", "config",
-			"The running configuration of each device picked, as the device gives it (ArubaOS-CX: JSON; others: text). Keys, passwords, SNMP communities, certificates and every other word on the secret list (Configure ▸ Privacy ▸ Secret words) are hidden. "+
+			"The running configuration of each device picked, as the device gives it (ArubaOS-CX: JSON; others: text). Keys, passwords, SNMP communities, certificates and every other word on the secret list (Configure ▸ Privacy ▸ Secret words) are hidden, unless this caller's privacy level is none. "+
 				"A secret kept under a name nobody listed is not recognised: ask the administrator to add that word to the list. Large: pick one device."),
 		mcpDeviceChangeTool(), mcpDeviceRawTool(), mcpDeviceCaptureTool(), mcpDeviceTroubleshootTool(),
 		{name: "list_api", title: "The GUI's API", noNode: true,

@@ -74,6 +74,9 @@ var dnsSecretKey = regexp.MustCompile(`(?i)auth|credential|header|api_?key|secre
 // dnsHide hides the value of every field named like a credential, whatever it holds (a list or an object too), and then the usual
 // hiding by name and by text is done by Redact and obsScrub.
 func dnsHide(v any) any {
+	if Unfiltered() {
+		return v
+	}
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {

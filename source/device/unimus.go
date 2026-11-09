@@ -478,6 +478,9 @@ func (u *unimus) Show(ctx context.Context, cmd string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if Unfiltered() {
+			return txt, nil
+		}
 		return RedactConfig(txt), nil
 	}
 	q := url.Values{}

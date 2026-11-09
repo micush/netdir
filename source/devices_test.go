@@ -237,3 +237,26 @@ func TestAPITextNotForReadOnly(t *testing.T) {
 		t.Error("a read-only account got a text answer")
 	}
 }
+
+// Privacy none means none for what a device says: the configuration comes as the device has it.  netdir's own logins stay hidden.
+func TestMCPPrivacyNoneGivesDeviceAnswersAsTheyAre(t *testing.T) {
+	post := devEnv(t, "127.0.0.1 rw none")
+	_, m := post(mcpCall("device_config", `{"target":"sw1"}`))
+	if txt, isErr := toolResult(t, m); isErr || !strings.Contains(txt, "$9$xyz") {
+		t.Errorf("device_config at none: %s", txt)
+	}
+	_, m = post(mcpCall("get_config", `{}`))
+	if txt, _ := toolResult(t, m); strings.Contains(txt, "sw-secret-pw") {
+		t.Error("get_config showed a device login at none")
+	}
+	_, m = post(mcpCall("list_devices", `{}`))
+	if txt, _ := toolResult(t, m); strings.Contains(txt, "sw-secret-pw") {
+		t.Error("list_devices showed a device login at none")
+	}
+	// the same key at standard still gets it filtered
+	post2 := devEnv(t, "127.0.0.1 rw standard")
+	_, m = post2(mcpCall("device_config", `{"target":"sw1"}`))
+	if txt, _ := toolResult(t, m); strings.Contains(txt, "$9$xyz") {
+		t.Errorf("device_config at standard: %s", txt)
+	}
+}
