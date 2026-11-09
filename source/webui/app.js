@@ -353,6 +353,7 @@
         "aria-current": here && g.id === state.topo.gid ? "page" : null,
         onclick: () => { state.topo.gid = g.id; selectTab("topology"); },
         oncontextmenu: rowMenu([["Rename", () => { state.topo.gid = g.id; state.topo.action = "rename"; selectTab("topology"); }],
+          ["MCP", () => selectTab("cfg_mcp")],
           ["Delete", () => { state.topo.gid = g.id; state.topo.action = "delete"; selectTab("topology"); }, "danger"]]) },
       h("span", { class: "dot st-" + g.status }), g.label)),
       h("button", { type: "button", class: "nav-item add", onclick: () => { state.topo.action = "new"; selectTab("topology"); } }, "＋ New gateway"));
@@ -1423,7 +1424,7 @@
       const plan = copyPlan(g);
       confirmDialog("Copy the devices to every other gateway?", "Adds the devices of " + gwLabel(g) + " that are missing there: " + plan.map(([o, add]) => gwLabel(o) + " " + add.length).join(", ") + ". Nothing is removed from any gateway.", "Copy to " + plan.length + " gateway" + (plan.length > 1 ? "s" : ""), () => quick(() => { for (const [o, add] of plan) o.devices = (o.devices || []).concat(add); }));
     };
-    const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["Add device", () => deviceForm(g)], pasteItem(g),
+    const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")], ["Add device", () => deviceForm(g)], pasteItem(g),
       ["Copy", null, "", [["All devices", () => { devClip = [...(g.devices || [])]; }, "", null, (g.devices || []).length ? "" : "This gateway has no devices"], ["To all gateways", () => copyToAll(g), "", null, copyWhy(g)]]],
       ...((g.devices || []).length ? [["Ask its devices", null, "", [["Facts", () => askGateway(g, "facts")], ["Interfaces", () => askGateway(g, "interfaces")], ["Neighbors", () => askGateway(g, "neighbors")]]]] : []),
       "-", ["Add anycast address", () => anycastForm(g)],

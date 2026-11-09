@@ -1,5 +1,18 @@
 # Changelog
 
+## [v115] - 2026-11-09 — MCP on a gateway's right-click menu
+
+### Added
+- Topology: right-click a gateway ▸ **MCP** opens Configure ▸ MCP. The item is on the circle's menu (after Edit) and on the gateway's entry in the sidebar (between Rename and Delete).
+- Help (Topology ▸ The sidebar) mentions it.
+
+### Verified
+- `node --check` on `app.js` and `help.js`; `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), and `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`.
+- Headless Chromium against the real `webui/` with the API mocked (scratchpad, not in the tree), one gateway: right-clicked the gateway in the sidebar (menu: Rename, MCP, Delete) and the circle on the drawing (Edit, MCP, Add device, …), chose MCP each time, and the page changed to Configure ▸ MCP (`#cfg_mcp`, MCP marked in the sidebar). No script errors.
+
+### Not verified
+- Against a running daemon: the API answers were mocked. Light theme only.
+
 ## [v114] - 2026-11-09 — MCP keys table fits
 
 ### Fixed
