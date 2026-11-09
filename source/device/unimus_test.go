@@ -299,3 +299,17 @@ func TestUnimusV2BackupListForm(t *testing.T) {
 	defer func() { uniV2ListOnly = false }()
 	TestUnimusFallsBackToV2(t)
 }
+
+func TestUnimusShowBackupByAddressPrefix(t *testing.T) {
+	st := &uniState{}
+	d := uniStub(t, st, nil)
+	drv, _ := Open(d, Credential{Token: uniTok})
+	defer drv.Close(context.Background())
+	// the stub has 10.0.0.x addresses; a name that is a prefix of nothing fails, and the error names what was asked
+	if _, err := drv.Show(context.Background(), "show backup nphxdcswi101"); err == nil || !strings.Contains(err.Error(), "nphxdcswi101") {
+		t.Errorf("unknown name: %v", err)
+	}
+	if uniContent(map[string]any{"bytes": base64.StdEncoding.EncodeToString([]byte("abc def"))}) != "abc def" || uniContent(map[string]any{"id": 1}) != "" {
+		t.Error("uniContent")
+	}
+}

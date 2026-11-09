@@ -1,5 +1,12 @@
 # Changelog
 
+## [v111] - 2026-11-09 — Unimus: names that are a host name's first label
+
+### Fixed
+- `show backup nphxdcswi101` finds a device whose Unimus address is `nphxdcswi101-m.net.axway.int` (the first label of the address or name, with or without `-m` or `-new`), as the import names devices.
+- On v2, when the backup record holds no text, the single backup (`/devices/<id>/backups/<backup id>`) is read; the text is looked for under `bytes`, `content`, `text` and `config`.
+- When there is still no text the error lists the field names of the record (not their values), so the right one can be added.
+
 ## [v110] - 2026-11-09 — Unimus v2: the numeric ID
 
 ### Fixed

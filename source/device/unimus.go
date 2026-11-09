@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -263,7 +264,8 @@ func (u *unimus) resolve(ctx context.Context, ref string) (map[string]any, error
 		if d == want || ad == want {
 			return r, nil
 		}
-		if d != "" && (strings.HasPrefix(d, want) || strings.HasPrefix(d, want+".")) {
+		if d != "" && (strings.HasPrefix(d, want+".") || d == want+"-m" || d == want+"-new") ||
+			ad != "" && (strings.HasPrefix(ad, want+".") || ad == want+"-m" || strings.HasPrefix(ad, want+"-m.") || strings.HasPrefix(ad, want+"-new")) {
 			part = append(part, r)
 		}
 	}
@@ -353,23 +355,40 @@ func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, er
 	if t := strings.ToUpper(str(b["type"])); t == "BINARY" {
 		return "", errors.New("the latest backup is binary and is not shown")
 	}
+	if uniContent(b) == "" && u.id(b) != "" && u.ver == "v2" { // the list form may hold the record without its text
+		if v, err := u.get(ctx, "/devices/"+id+"/backups/"+u.id(b)); err == nil {
+			if m, ok := v.(map[string]any); ok && uniContent(m) != "" {
+				b = m
+			}
+		}
+	}
 	txt := uniContent(b)
 	if txt == "" {
-		return "", errors.New("the backup has no text")
+		keys := make([]string, 0, len(b))
+		for k := range b {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return "", fmt.Errorf("the backup record has no text (its fields: %s)", strings.Join(keys, ", "))
 	}
 	return txt, nil
 }
 
 // uniContent is the text of a backup: Unimus sends it Base64 encoded in "bytes".
 func uniContent(b map[string]any) string {
-	s, ok := b["bytes"].(string)
-	if !ok || s == "" {
-		return ""
+	for _, k := range []string{"bytes", "content", "text", "config", "backup"} {
+		s, ok := b[k].(string)
+		if !ok || s == "" {
+			continue
+		}
+		if raw, err := base64.StdEncoding.DecodeString(s); err == nil && len(raw) > 0 {
+			return string(raw)
+		}
+		if len(s) > 20 || k != "backup" {
+			return s
+		}
 	}
-	if raw, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return string(raw)
-	}
-	return s
+	return ""
 }
 
 // uniStrip takes the text out of backups in an answer (it is read with Config, which filters it), keeping the rest.
@@ -378,7 +397,7 @@ func uniStrip(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, x := range t {
-			if s, ok := x.(string); ok && k == "bytes" && len(s) > 40 {
+			if s, ok := x.(string); ok && (k == "bytes" || k == "content" || k == "text" || k == "config") && len(s) > 40 {
 				out[k] = "(the backup text: read it with the configuration of a device that has the option device)"
 				continue
 			}
