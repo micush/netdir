@@ -222,10 +222,10 @@ func TestUnimusFallsBackToV2(t *testing.T) {
 		case "/api/v2/health":
 			jout(w, 200, map[string]any{"data": map[string]any{"status": "OK"}})
 		case "/api/v2/devices":
-			jout(w, 200, map[string]any{"data": []any{map[string]any{"id": 7, "address": "10.0.0.5", "description": "old1", "vendor": "Cisco", "type": "IOS"}},
+			jout(w, 200, map[string]any{"data": []any{map[string]any{"id": 7, "uuid": uniDevUUID, "address": "10.0.0.5", "description": "old1", "vendor": "Cisco", "type": "IOS"}},
 				"paging": map[string]any{"page": 0, "size": 100, "totalPages": 1}})
 		case "/api/v2/devices/findByAddress/10.0.0.5":
-			jout(w, 200, map[string]any{"data": map[string]any{"id": 7, "address": "10.0.0.5", "vendor": "Cisco"}})
+			jout(w, 200, map[string]any{"data": map[string]any{"id": 7, "uuid": uniDevUUID, "address": "10.0.0.5", "vendor": "Cisco"}})
 		case "/api/v2/devices/7/backups/latest":
 			if r.URL.Query().Get("x") == "" && uniV2ListOnly {
 				jout(w, 400, map[string]any{"code": 400, "message": "Argument deviceId type mismatch"})
@@ -234,6 +234,8 @@ func TestUnimusFallsBackToV2(t *testing.T) {
 			jout(w, 200, map[string]any{"data": map[string]any{"id": 9, "type": "TEXT", "bytes": base64.StdEncoding.EncodeToString([]byte(cfg))}})
 		case "/api/v2/devices/7/backups":
 			jout(w, 200, map[string]any{"data": []any{map[string]any{"id": 9, "type": "TEXT", "bytes": base64.StdEncoding.EncodeToString([]byte(cfg))}}, "paging": map[string]any{"totalPages": 1}})
+		case "/api/v2/devices/" + uniDevUUID + "/backups/latest", "/api/v2/devices/" + uniDevUUID + "/backups":
+			jout(w, 400, map[string]any{"code": 400, "message": "Argument deviceId type mismatch"})
 		default:
 			jout(w, 404, map[string]any{"timestamp": 1, "code": 404, "error": "Not Found", "message": "URL is not supported by the API"})
 		}
@@ -262,7 +264,7 @@ func TestUnimusFallsBackToV2(t *testing.T) {
 		t.Errorf("v2 show backup by name: %v %q", err, out)
 	}
 	rows, _ := drv.(*unimus).list(context.Background(), "/devices", "devices", 0)
-	if rows := uniImportRows(rows); len(rows) != 1 || rows[0].Platform != "ios" || rows[0].ID != "7" {
+	if rows := uniImportRows(rows); len(rows) != 1 || rows[0].Platform != "ios" || rows[0].ID != uniDevUUID {
 		t.Errorf("import rows %+v", rows)
 	}
 }

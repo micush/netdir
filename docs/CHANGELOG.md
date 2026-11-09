@@ -1,5 +1,11 @@
 # Changelog
 
+## [v110] - 2026-11-09 — Unimus v2: the numeric ID
+
+### Fixed
+- On API v2 a device row can hold both `id` (776) and `uuid`; the driver put the `uuid` in the path and Unimus answered 400 "Argument deviceId type mismatch" for every backup read, whatever the device was called. v2 paths now use the numeric `id`, v3 the `uuid`.
+- When both backup paths on v2 fail, the error names both requests and what each answered (the fallback hid its own error before) and the fallback no longer sends paging parameters.
+
 ## [v109] - 2026-11-09 — Unimus v2: backup list form, catalog
 
 ### Fixed

@@ -278,6 +278,15 @@ func (u *unimus) resolve(ctx context.Context, ref string) (map[string]any, error
 
 func uniID(m map[string]any) string { return firstOf(str(m["uuid"]), str(m["id"])) }
 
+// id is the key a device or backup is addressed by in paths: the numeric "id" in API v2 (a row may hold a "uuid" too, which v2 refuses
+// in a path), the "uuid" in v3.
+func (u *unimus) id(m map[string]any) string {
+	if u.ver == "v2" {
+		return firstOf(str(m["id"]), str(m["uuid"]))
+	}
+	return uniID(m)
+}
+
 // Config is the latest backup of the device named by the option "device".
 func (u *unimus) Config(ctx context.Context) (string, error) {
 	if u.dev == "" {
@@ -292,7 +301,7 @@ func (u *unimus) Config(ctx context.Context) (string, error) {
 
 // backupText reads the latest backup of a device (a row of the device list).
 func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, error) {
-	id := uniID(row)
+	id := u.id(row)
 	if id == "" {
 		return "", errors.New("Unimus gave the device no ID")
 	}
@@ -301,12 +310,21 @@ func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, er
 		v, err := u.get(ctx, "/devices/"+id+"/backups/latest")
 		var se *statusError
 		if err != nil && errors.As(err, &se) && se.Code >= 400 && se.Code < 500 { // this build wants the list form
-			rs, err2 := u.list(ctx, "/devices/"+id+"/backups?latest=true", "backups", 1)
+			v2, err2 := u.get(ctx, "/devices/"+id+"/backups?latest=true")
 			if err2 != nil {
-				return "", err
+				return "", fmt.Errorf("/devices/%s/backups/latest: %v; /devices/%s/backups?latest=true: %v", id, err, id, err2)
 			}
-			if len(rs) > 0 {
-				v, err = rs[0], nil
+			switch t := v2.(type) {
+			case []any:
+				if len(t) > 0 {
+					v, err = t[0], nil
+				}
+			case map[string]any:
+				if l, ok := t["data"].([]any); ok && len(l) > 0 {
+					v, err = l[0], nil
+				} else if l, ok := t["backups"].([]any); ok && len(l) > 0 {
+					v, err = l[0], nil
+				}
 			}
 		}
 		if err != nil {
@@ -322,7 +340,7 @@ func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, er
 			b = rs[0]
 		}
 		if len(rs) > 0 && uniContent(b) == "" {
-			v, err := u.get(ctx, "/devices/"+id+"/backups/"+uniID(b))
+			v, err := u.get(ctx, "/devices/"+id+"/backups/"+u.id(b))
 			if err != nil {
 				return "", err
 			}
@@ -473,9 +491,9 @@ func (u *unimus) Show(ctx context.Context, cmd string) (string, error) {
 				return "", err
 			}
 			if u.ver == "v2" {
-				p = "/devices/" + uniID(row) + "/backups"
+				p = "/devices/" + u.id(row) + "/backups"
 			} else {
-				q.Set("deviceUuids", uniID(row))
+				q.Set("deviceUuids", u.id(row))
 			}
 		}
 	default:
