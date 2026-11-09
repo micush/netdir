@@ -1,5 +1,16 @@
 # Changelog
 
+## [v107] - 2026-11-09 — Unimus: older releases
+
+### Fixed
+- **`unimus`** answered HTTP 404 ("URL is not supported by the API") on a Unimus before 2.2, which has no `/api/v3`. Without the option `api_version` the driver now tries `/api/v3/health`, and on a 404 uses `/api/v2` (the choice is kept for the connection). `api_version=v2` or `v3` still forces one.
+
+### Verified
+- A stub server that answers only `/api/v2` (data wrapper, `paging`, numeric IDs, `findByAddress`, `backups/latest`): facts, show, config and import rows.
+
+### Not verified
+- Not run against a real Unimus; the v2 field names (`vendor`, `type`, `bytes`) are from its documentation.
+
 ## [v106] - 2026-11-09 — Unimus
 
 ### Added

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Unimus (network configuration backup and change tracking), through its REST API: https://<host>/api/v3 (Unimus 2.2.0 and later; option
@@ -34,8 +35,9 @@ type unimus struct {
 	d    Device
 	api  *apiClient
 	dev  string
-	ver  string // "v3" or "v2"
+	ver  string // "v3" or "v2"; "auto" until the first answer says which one the server has
 	base string // "/api/v3"
+	mu   sync.Mutex
 }
 
 var (
@@ -53,15 +55,15 @@ func newUnimus(d Device, c Credential) (Driver, error) {
 	}
 	u := &unimus{d: d, dev: strings.TrimSpace(d.Options["device"]), ver: strings.ToLower(strings.TrimSpace(d.Options["api_version"]))}
 	if u.ver == "" {
-		u.ver = "v3"
+		u.ver = "auto"
 	}
-	if u.ver != "v2" && u.ver != "v3" {
+	if u.ver != "v2" && u.ver != "v3" && u.ver != "auto" {
 		return nil, fmt.Errorf("device %s: option api_version is v3 or v2", d.Name)
 	}
 	if u.dev != "" && !uniDevRE.MatchString(u.dev) {
 		return nil, fmt.Errorf("device %s: option device is a device's address or its UUID", d.Name)
 	}
-	u.base = "/api/" + u.ver
+	u.base = "/api/" + strings.Replace(u.ver, "auto", "v3", 1)
 	api, err := newAPIClient(d, 443)
 	if err != nil {
 		return nil, err
@@ -73,8 +75,34 @@ func newUnimus(d Device, c Credential) (Driver, error) {
 	return u, nil
 }
 
+// probe finds out which API version the server has when the option api_version is not set: v3 (Unimus 2.2 and later), else v2.
+func (u *unimus) probe(ctx context.Context) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.ver != "auto" {
+		return nil
+	}
+	_, err := u.api.do(ctx, http.MethodGet, "/api/v3/health", nil, nil)
+	var se *statusError
+	switch {
+	case err == nil:
+		u.ver, u.base = "v3", "/api/v3"
+	case errors.As(err, &se) && se.Code == http.StatusNotFound:
+		if _, err2 := u.api.do(ctx, http.MethodGet, "/api/v2/health", nil, nil); err2 != nil {
+			return fmt.Errorf("neither /api/v3 nor /api/v2 answers (is this the Unimus API port, and is the token right?): %w", err2)
+		}
+		u.ver, u.base = "v2", "/api/v2"
+	default:
+		return err
+	}
+	return nil
+}
+
 // get reads one path below the API base (p starts with "/") and returns the JSON; Unimus API v2 wraps answers in {"data": …}.
 func (u *unimus) get(ctx context.Context, p string) (any, error) {
+	if err := u.probe(ctx); err != nil {
+		return nil, err
+	}
 	b, err := u.api.do(ctx, http.MethodGet, u.base+p, nil, nil)
 	if err != nil {
 		return nil, err
@@ -145,7 +173,7 @@ func (u *unimus) list(ctx context.Context, path, key string, max int) ([]map[str
 
 func (u *unimus) Facts(ctx context.Context) (Facts, error) {
 	f := Facts{Hostname: u.d.Name, Vendor: "Unimus", Model: "Unimus"}
-	h, err := u.get(ctx, "/health")
+	h, err := u.get(ctx, "/health") // also finds the API version
 	if err != nil {
 		return f, err
 	}
@@ -167,7 +195,11 @@ func (u *unimus) Facts(ctx context.Context) (Facts, error) {
 	if status != "" {
 		f.Model += ", " + strings.ToLower(status)
 	}
-	if v, err := u.get(ctx, "/devices?page=0&size=1"); err == nil {
+	if u.ver == "v2" {
+		if rs, err := u.list(ctx, "/devices", "devices", 0); err == nil {
+			f.Model += fmt.Sprintf(", %d device(s)", len(rs))
+		}
+	} else if v, err := u.get(ctx, "/devices?page=0&size=1"); err == nil {
 		if m, ok := v.(map[string]any); ok {
 			for _, k := range []string{"paginator", "paging"} {
 				if p, ok := m[k].(map[string]any); ok {
@@ -188,6 +220,9 @@ func (u *unimus) Neighbors(context.Context) ([]Neighbor, error)   { return nil, 
 
 // findDevice gives the device the option "device" names.
 func (u *unimus) findDevice(ctx context.Context) (map[string]any, error) {
+	if err := u.probe(ctx); err != nil {
+		return nil, err
+	}
 	if entraGUIDRE.MatchString(u.dev) {
 		v, err := u.get(ctx, "/devices/"+u.dev)
 		if err != nil {
@@ -378,6 +413,7 @@ func (u *unimus) Show(ctx context.Context, cmd string) (string, error) {
 		if d := q.Get("device"); d != "" {
 			q.Del("device")
 			if !entraGUIDRE.MatchString(d) {
+				_ = u.probe(ctx)
 				tmp := &unimus{d: u.d, api: u.api, ver: u.ver, base: u.base, dev: d}
 				row, err := tmp.findDevice(ctx)
 				if err != nil {
@@ -460,6 +496,9 @@ func uniRawGuard(method, p string) error {
 func (u *unimus) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {
 	if len(r.Lines) > 0 {
 		return RawResult{DryRun: dry}, errors.New("lines: Unimus is changed with method, path and body")
+	}
+	if err := u.probe(ctx); err != nil {
+		return RawResult{DryRun: dry}, err
 	}
 	if !strings.HasPrefix(r.Path, "/api/") {
 		r.Path = u.base + "/" + strings.TrimPrefix(r.Path, "/")

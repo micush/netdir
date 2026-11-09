@@ -206,3 +206,51 @@ func TestUnimusPlatform(t *testing.T) {
 		}
 	}
 }
+
+// An older Unimus (before 2.2) has no /api/v3: the driver finds /api/v2 by itself.
+func TestUnimusFallsBackToV2(t *testing.T) {
+	cfg := "hostname old1\nenable secret 5 $1$V2SECRET\n"
+	d := tlsDevice(t, "uni", "unimus", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+uniTok {
+			jout(w, 401, map[string]any{"error": "no"})
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v2/health":
+			jout(w, 200, map[string]any{"data": map[string]any{"status": "OK"}})
+		case "/api/v2/devices":
+			jout(w, 200, map[string]any{"data": []any{map[string]any{"id": 7, "address": "10.0.0.5", "description": "old1", "vendor": "Cisco", "type": "IOS"}},
+				"paging": map[string]any{"page": 0, "size": 100, "totalPages": 1}})
+		case "/api/v2/devices/findByAddress/10.0.0.5":
+			jout(w, 200, map[string]any{"data": map[string]any{"id": 7, "address": "10.0.0.5", "vendor": "Cisco"}})
+		case "/api/v2/devices/7/backups/latest":
+			jout(w, 200, map[string]any{"data": map[string]any{"id": 9, "type": "TEXT", "bytes": base64.StdEncoding.EncodeToString([]byte(cfg))}})
+		default:
+			jout(w, 404, map[string]any{"timestamp": 1, "code": 404, "error": "Not Found", "message": "URL is not supported by the API"})
+		}
+	}))
+	drv, err := Open(d, Credential{Token: uniTok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drv.Close(context.Background())
+	f, err := drv.Facts(context.Background())
+	if err != nil || !strings.Contains(f.Model, "1 device") {
+		t.Fatalf("facts %+v %v", f, err)
+	}
+	out, err := drv.Show(context.Background(), "show devices")
+	if err != nil || !strings.Contains(out, "old1") {
+		t.Fatalf("show %v %s", err, out)
+	}
+	d.Options = map[string]string{"device": "10.0.0.5"}
+	drv2, _ := Open(d, Credential{Token: uniTok})
+	defer drv2.Close(context.Background())
+	c, err := drv2.Config(context.Background())
+	if err != nil || !strings.Contains(c, "hostname old1") {
+		t.Fatalf("config %v %q", err, c)
+	}
+	rows, _ := drv.(*unimus).list(context.Background(), "/devices", "devices", 0)
+	if rows := uniImportRows(rows); len(rows) != 1 || rows[0].Platform != "ios" || rows[0].ID != "7" {
+		t.Errorf("import rows %+v", rows)
+	}
+}

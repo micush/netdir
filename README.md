@@ -295,7 +295,7 @@ NetEdit has no documented API, so it has no driver; the Aruba CX switches it man
 
 ### Unimus (`unimus`)
 
-Unimus keeps the configuration backups of a network's devices. The driver uses its REST API (`https://<host>/api/v3`, Unimus 2.2.0 and later; option `api_version=v2` for 1.9 to 2.1) with an **API token** (Settings ▸ User management) as the login's token. Unimus listens on 8085 in plain HTTP by default; this driver only speaks HTTPS, so put Unimus behind a TLS proxy and set the Port when it is not 443.
+Unimus keeps the configuration backups of a network's devices. The driver uses its REST API (`https://<host>/api/v3`, Unimus 2.2.0 and later; the driver tries v3 and falls back to v2 by itself; option `api_version` forces one) with an **API token** (Settings ▸ User management) as the login's token. Unimus listens on 8085 in plain HTTP by default; this driver only speaks HTTPS, so put Unimus behind a TLS proxy and set the Port when it is not 443.
 
 - **Server** (no options): **Facts** are its health and the number of devices. **Show** `show health|devices|zones|tags|jobs|backups [name=value …]` (`show devices vendors=Cisco`, `show backups device=10.0.0.5`); the API request reads `/devices`, `/devices/backups`, `/zones`, `/tags`, `/jobs/tasks/status`. The text of a backup is never part of these answers.
 - **One device** (option `device`: its address as Unimus has it, or its UUID): **Facts** are that device's; **Configuration** is its latest backup, filtered like any configuration over MCP.
