@@ -70,15 +70,30 @@ func normMCPACL(list []string) ([]string, error) {
 			off, f = true, f[:len(f)-1]
 		}
 		var dl []string
-		if n := len(f); n > 1 && strings.HasPrefix(strings.ToLower(f[n-1]), "devices=") {
-			var err error
-			if dl, err = normDevices(strings.Split(f[n-1][len("devices="):], ",")); err != nil {
-				return nil, fmt.Errorf("mcp: access list: %q: %w", s, err)
+		until := ""
+		for i := 0; i < 2; i++ { // devices=… and until=…, in either order, after the address, ro or rw and the level
+			n := len(f)
+			if n < 2 {
+				break
 			}
-			f = f[:n-1]
+			lw := strings.ToLower(f[n-1])
+			if strings.HasPrefix(lw, "devices=") && dl == nil {
+				var err error
+				if dl, err = normDevices(strings.Split(f[n-1][len("devices="):], ",")); err != nil {
+					return nil, fmt.Errorf("mcp: access list: %q: %w", s, err)
+				}
+				f = f[:n-1]
+			} else if strings.HasPrefix(lw, "until=") && until == "" {
+				t, err := parseUntil(f[n-1][len("until="):])
+				if err != nil {
+					return nil, fmt.Errorf("mcp: access list: %q: %w", s, err)
+				}
+				until = "until=" + t.UTC().Format(untilLayout)
+				f = f[:n-1]
+			}
 		}
 		if len(f) > 3 {
-			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level, then devices=a,b,tag:x or none, then disabled to switch it off", s)
+			return nil, fmt.Errorf("mcp: access list: %q: an address or network, then ro or rw, then a privacy level, then devices=a,b,tag:x or none, then until=2026-12-31T17:00Z for an expiry (UTC), then disabled to switch it off", s)
 		}
 		rw, lvl := false, ""
 		for _, w := range f[1:] {
@@ -105,7 +120,7 @@ func normMCPACL(list []string) ([]string, error) {
 				return nil, fmt.Errorf("mcp: access list: %q: read-write is for a single address, not a network or a host name", s)
 			}
 		}
-		if off {
+		if off || until != "" { // an entry that is switched off or ends is kept as it is, not merged with the others of its address
 			text := t
 			if rw {
 				text += " rw"
@@ -116,7 +131,12 @@ func normMCPACL(list []string) ([]string, error) {
 			if len(dl) > 0 {
 				text += " devices=" + strings.Join(dl, ",")
 			}
-			text += " disabled"
+			if until != "" {
+				text += " " + until
+			}
+			if off {
+				text += " disabled"
+			}
 			if !seenOff[text] {
 				seenOff[text] = true
 				order = append(order, ent{t: text, off: true})
@@ -167,6 +187,33 @@ func normMCPACL(list []string) ([]string, error) {
 func aclOff(e string) bool {
 	f := strings.Fields(e)
 	return len(f) > 1 && strings.EqualFold(f[len(f)-1], "disabled")
+}
+
+const untilLayout = "2006-01-02T15:04Z"
+
+// parseUntil reads an expiry in UTC: 2026-12-31 (the end of that day), 2026-12-31T17:00 or 2026-12-31T17:00Z (a space for the T is taken).
+func parseUntil(s string) (time.Time, error) {
+	s = strings.TrimSpace(strings.Replace(s, " ", "T", 1))
+	for _, l := range []string{"2006-01-02T15:04Z", "2006-01-02T15:04", "2006-01-02T15:04:05Z"} {
+		if t, err := time.ParseInLocation(l, s, time.UTC); err == nil {
+			return t, nil
+		}
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, time.UTC); err == nil {
+		return t.Add(24*time.Hour - time.Minute), nil
+	}
+	return time.Time{}, fmt.Errorf("until=%s: write the time in UTC as 2026-12-31 or 2026-12-31T17:00Z", s)
+}
+
+// aclExpired says that an entry of the access list has an until= time that has passed.
+func aclExpired(e string) bool {
+	for _, w := range strings.Fields(e)[1:] {
+		if v, ok := strings.CutPrefix(strings.ToLower(w), "until="); ok {
+			t, err := parseUntil(v)
+			return err != nil || !mcpNow().Before(t)
+		}
+	}
+	return false
 }
 
 // t0 is the address of an entry written "ADDRESS [rw]".
@@ -260,11 +307,16 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 	c := &mcpACLCache
 	c.Lock()
 	key := strings.Join(acl, ",")
+	for _, e := range acl { // an entry that has just expired changes the list at once, not after the minute
+		if aclExpired(e) {
+			key += "|x"
+		}
+	}
 	if c.key != key || time.Since(c.at) >= time.Minute {
 		var ro, rw []string
 		lv := map[string][]string{}
 		for _, e := range acl {
-			if aclOff(e) {
+			if aclOff(e) || aclExpired(e) {
 				continue
 			}
 			f := strings.Fields(e)
@@ -281,7 +333,7 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 		}
 		c.devs = nil
 		for _, e := range acl {
-			if aclOff(e) {
+			if aclOff(e) || aclExpired(e) {
 				continue
 			}
 			var dl []string
@@ -355,6 +407,11 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 	}
 	if key != "" {
 		name, kacc := mcpKeyAccess(w.status.sup.mcpKeys(), key)
+		if name == "" && mcpKeyExpired(w.status.sup.mcpKeys(), key) {
+			rw.Header().Set("WWW-Authenticate", `Bearer realm="mcp", error="invalid_token"`)
+			http.Error(rw, "this key has expired (Configure ▸ MCP ▸ Keys)", http.StatusUnauthorized)
+			return
+		}
 		if name == "" {
 			mcpWarnBadKey(from)
 			rw.Header().Set("WWW-Authenticate", `Bearer realm="mcp", error="invalid_token"`)

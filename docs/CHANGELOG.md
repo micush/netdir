@@ -1,5 +1,18 @@
 # Changelog
 
+## [v113] - 2026-11-09 — Expiry for MCP keys and allowed sources
+
+### Added
+- **Expires (UTC)** on every MCP key (Configure ▸ MCP ▸ Keys, a column; empty is never) and on every allowed source (Configure ▸ MCP ▸ Allowed sources). From that time a key is refused with "this key has expired" and a source allows nothing; the row stays in the list, greyed, until it is deleted or given a new time.
+- Written `2026-12-31` (the end of that day), `2026-12-31 17:00` or `2026-12-31T17:00Z`, always UTC. In the configuration file: `"expires": <unix time>` on a key; `until=2026-12-31T17:00Z` in an access-list entry (`10.1.1.50 rw until=2026-12-31T17:00Z`).
+- An entry with an expiry is not merged with the others of its address (like a disabled one).
+
+### Verified
+- Tests: a key before and after its time (200, then 401, still listed), a source before and after its end, normalising and bad times, an access-list entry that has just ended changes the answer at once (not after the minute the host-name cache lasts).
+
+### Not verified
+- The GUI columns were not looked at in a browser; only the script syntax and the tests were run.
+
 ## [v112] - 2026-11-09 — Privacy none means none
 
 ### Changed

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testMCPKey() string {
@@ -121,5 +122,70 @@ func TestMCPKeyIsKeptAndHidden(t *testing.T) {
 	sup.mu.Unlock()
 	if code, _ := post(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, "Authorization", "Bearer "+k); code != 200 {
 		t.Fatalf("the saved key: %d", code)
+	}
+}
+
+// A key with an expiry stops working at that time; the entry stays in the list.
+func TestMCPKeyExpires(t *testing.T) {
+	key := testMCPKey()
+	e, post := mcpEnv(t)
+	now := time.Now()
+	keys, err := normMCPKeys([]MCPKey{{Name: "temp", Key: key, Expires: now.Add(time.Hour).Unix()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sup := e.ws.status.sup
+	sup.mu.Lock()
+	sup.dc.Settings.MCPKeys = keys
+	sup.mu.Unlock()
+	defer func() { mcpNow = time.Now }()
+	list := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	if code, _ := post(list, "Authorization", "Bearer "+key); code != 200 {
+		t.Fatalf("before the expiry: %d", code)
+	}
+	mcpNow = func() time.Time { return now.Add(2 * time.Hour) }
+	if code, _ := post(list, "Authorization", "Bearer "+key); code != 401 {
+		t.Fatalf("after the expiry: %d", code)
+	}
+	if len(sup.mcpKeys()) != 1 || !sup.mcpKeys()[0].Expired() {
+		t.Error("the key must stay in the list, expired")
+	}
+	if _, err := normMCPKeys([]MCPKey{{Name: "bad", Key: testMCPKey(), Expires: -5}}); err == nil {
+		t.Error("a negative expiry must be refused")
+	}
+}
+
+// An address-list entry with until= allows its address until then; the list keeps it.
+func TestMCPACLExpires(t *testing.T) {
+	got, err := normMCPACL([]string{"127.0.0.1 rw until=2026-12-31", "10.0.0.0/24 until=2030-01-02T03:04", "10.0.0.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"127.0.0.1 rw until=2026-12-31T23:59Z", "10.0.0.0/24 until=2030-01-02T03:04Z", "10.0.0.0/24"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if again, err := normMCPACL(got); err != nil || strings.Join(again, "|") != strings.Join(got, "|") {
+		t.Errorf("not stable: %q %v", again, err)
+	}
+	for _, bad := range []string{"127.0.0.1 until=tomorrow", "127.0.0.1 until=2026-13-01"} {
+		if _, err := normMCPACL([]string{bad}); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	e, post := mcpEnv(t, "127.0.0.1 until=2026-12-31")
+	_ = e
+	defer func() { mcpNow = time.Now }()
+	list := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+	mcpNow = func() time.Time { return time.Date(2026, 12, 31, 12, 0, 0, 0, time.UTC) }
+	if code, _ := post(list); code != 200 {
+		t.Fatalf("before the end: %d", code)
+	}
+	mcpNow = func() time.Time { return time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC) }
+	if code, _ := post(list); code != 403 {
+		t.Fatalf("after the end: %d", code)
+	}
+	if !aclExpired("127.0.0.1 until=2026-12-31T23:59Z") || aclExpired("127.0.0.1 rw") {
+		t.Error("aclExpired")
 	}
 }

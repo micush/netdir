@@ -2649,14 +2649,15 @@
     // MCP access: "10.1.0.0/24" (read-only), "10.1.1.50 rw", "10.1.0.0/24 strict" (an address or network, ro or rw, a privacy level)
     mcpacl: {
       key: "mcpacl", wide: true, empty: "No sources allowed without a key.",
-      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }, { name: "Devices", pills: true }],
+      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }, { name: "Devices", pills: true }, { name: "Expires (UTC)", ph: "never, 2026-12-31 or 2026-12-31 17:00" }],
       parse: (line) => {
         const w = String(line).trim().split(/\s+/), f = w.map((x) => x.toLowerCase());
         const lv = f.slice(1).find((x) => ["none", "standard", "strict"].includes(x));
         const dv = w.slice(1).find((x) => x.toLowerCase().startsWith("devices="));
-        return [w[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default", dv ? dv.slice(8) : ""];
+        const un = w.slice(1).find((x) => x.toLowerCase().startsWith("until="));
+        return [w[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default", dv ? dv.slice(8) : "", un ? un.slice(6).replace("T", " ").replace(/Z$/, "") : ""];
       },
-      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "") + (c[3] ? " devices=" + c[3] : "")),
+      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "") + (c[3] ? " devices=" + c[3] : "") + (c[4] && c[4].trim() ? " until=" + c[4].trim().replace(/\s+/, "T") : "")),
       mark: (c) => !c[0],
       isOff: (l) => /\sdisabled\s*$/i.test(String(l)),   // a row switched off with right-click ▸ Disable stays in the list but allows nothing
     },
@@ -2816,6 +2817,17 @@
     const changed = () => { draw(); el.dispatchEvent(new Event("change", { bubbles: true })); };
     const NAME_RE = MCP_NAME_RE;
     const day = (t) => (t ? new Date(t * 1000).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }) : "");
+    const when = (t) => (t ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : "");   // UTC
+    const expired = (k) => !!k.expires && k.expires * 1000 <= Date.now();
+    // "2026-12-31" is the end of that day, "2026-12-31 17:00" that minute; all UTC; "" is never; null is not a time
+    const readWhen = (s) => {
+      s = s.trim();
+      if (!s || /^never$/i.test(s)) return 0;
+      const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?Z?$/.exec(s);
+      if (!m) return null;
+      const t = m[4] ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) : Date.UTC(+m[1], m[2] - 1, +m[3], 23, 59);
+      return Number.isNaN(t) ? null : Math.floor(t / 1000);
+    };
     const shown = (k) => !!k.key && k.key !== "(hidden)";   // a key made before keys were kept has a hash only; a read-only account is not given it
     // a new key under the same name and access: whatever used the old one is refused from the next save
     function replaceKey(k) {
@@ -2843,14 +2855,23 @@
         // the key in a password box like every other secret (the eye is added to it like to the others); an old key has none to show
         const keyIn = h("input", { type: shown(k) ? "password" : "text", readonly: true, autocomplete: "off", spellcheck: "false", "aria-label": "Key of " + k.name, class: "mono",
           value: shown(k) ? k.key : k.key || "", placeholder: "not kept: Replace key" });
+        const exp = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "20", "aria-label": "Expires (UTC) of " + k.name, value: when(k.expires), placeholder: "never",
+          title: "UTC. Empty: never. 2026-12-31 is the end of that day; 2026-12-31 17:00 that minute. After it the key is refused; the row stays." });
+        exp.addEventListener("change", (ev) => {
+          const t = readWhen(exp.value);
+          if (t === null) { ev.stopPropagation(); exp.value = when(k.expires); return; }   // not a time: the old one comes back
+          if (t) k.expires = t; else delete k.expires;
+          changed();
+        });
         const devs = devicePicker(k.devices, (l) => { if (l.length) k.devices = l; else delete k.devices; });
-        const tr = h("tr", { class: k.disabled ? "off" : "" },
+        const tr = h("tr", { class: k.disabled || expired(k) ? "off" : "", title: expired(k) ? "Expired " + when(k.expires) + " UTC: refused" : "" },
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
           h("td", {}, name),
           h("td", {}, acc),
           h("td", {}, priv),
           h("td", {}, devs),
           h("td", { class: "ctext" }, day(k.created)),
+          h("td", {}, exp),
           h("td", {}, keyIn));
         tr.addEventListener("contextmenu", rowMenu([
           ["Add key", addKey],
@@ -2862,7 +2883,7 @@
         return tr;
       }));
       const tbl = h("table", { class: "policy zones rows mcpkeytab" },
-        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Devices"), h("th", {}, "Added"), h("th", {}, "Key"))), tbody);
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Devices"), h("th", {}, "Added"), h("th", {}, "Expires (UTC)"), h("th", {}, "Key"))), tbody);
       const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
       empty.hidden = keys.length > 0;
       const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2891,7 +2912,7 @@
       name.focus();
     }
     draw();
-    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.devices && k.devices.length ? { devices: k.devices } : {}), ...(k.disabled ? { disabled: true } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
+    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.devices && k.devices.length ? { devices: k.devices } : {}), ...(k.disabled ? { disabled: true } : {}), ...(k.expires ? { expires: k.expires } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
   // the range under a number field, with its default, on one line: "10 to 600 s. Default 30."

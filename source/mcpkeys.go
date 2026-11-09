@@ -43,6 +43,25 @@ type MCPKey struct {
 	Devices []string `json:"devices,omitempty"`
 	// Disabled keeps the key in the list and lets it do nothing: the caller is refused like one with an unknown key (right-click ▸ Disable).
 	Disabled bool `json:"disabled,omitempty"`
+	// Expires is the unix time from which the key does nothing (0: never).  It stays in the list, shown as expired, until it is deleted.
+	Expires int64 `json:"expires,omitempty"`
+}
+
+// mcpNow is the clock of the expiry checks (a variable for the tests).
+var mcpNow = time.Now
+
+// Expired says whether the key's time has passed.
+func (k MCPKey) Expired() bool { return k.Expires > 0 && mcpNow().Unix() >= k.Expires }
+
+// mcpKeyExpired says that the key presented is one of the list but its time has passed.
+func mcpKeyExpired(keys []MCPKey, presented string) bool {
+	got := mcpKeyHash(presented)
+	for _, k := range keys {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(k.Hash)) == 1 && k.Expired() {
+			return true
+		}
+	}
+	return false
 }
 
 func mcpKeyHash(key string) string {
@@ -86,6 +105,9 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 		if k.Devices, derr = normDevices(k.Devices); derr != nil {
 			return nil, fmt.Errorf("mcp: key %q: %w", k.Name, derr)
 		}
+		if k.Expires < 0 || k.Expires > 253402300799 {
+			return nil, fmt.Errorf("mcp: key %q: the expiry is a time (unix seconds) or empty for never", k.Name)
+		}
 		var okLevel bool
 		if k.Privacy, okLevel = normLevel(k.Privacy); !okLevel {
 			return nil, fmt.Errorf("mcp: key %q: the privacy level is none, standard or strict", k.Name)
@@ -118,7 +140,7 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 func mcpKeyAccess(keys []MCPKey, presented string) (name, access string) {
 	got := mcpKeyHash(presented)
 	for _, k := range keys {
-		if subtle.ConstantTimeCompare([]byte(got), []byte(k.Hash)) == 1 && name == "" && !k.Disabled {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(k.Hash)) == 1 && name == "" && !k.Disabled && !k.Expired() {
 			name, access = k.Name, k.Access
 		}
 	}
