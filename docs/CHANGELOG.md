@@ -1,5 +1,14 @@
 # Changelog
 
+## [v108] - 2026-11-09 — Unimus: read a backup by name
+
+### Added
+- **`show backup <name|address|id>`** on the Unimus server device: the text of the latest backup of that device, filtered like any configuration (secrets hidden). Before, the text was reachable only through a second device entry with the option `device`, so an MCP client asking the server device for "the backup of nphxdcswi101" got metadata only.
+- Devices are found by address, by the name Unimus shows (exact, or the one device whose name starts with it) or by ID.
+
+### Changed
+- `show backups device=<name|address|id>` takes a name too; on API v2 it lists the backups of that device (`/devices/<id>/backups`).
+
 ## [v107] - 2026-11-09 — Unimus: older releases
 
 ### Fixed

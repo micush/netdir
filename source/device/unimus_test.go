@@ -249,8 +249,36 @@ func TestUnimusFallsBackToV2(t *testing.T) {
 	if err != nil || !strings.Contains(c, "hostname old1") {
 		t.Fatalf("config %v %q", err, c)
 	}
+	if out, err := drv.Show(context.Background(), "show backup old1"); err != nil || !strings.Contains(RedactConfig(cfg), "hostname old1") || !strings.Contains(out, "hostname old1") || strings.Contains(out, "V2SECRET") {
+		t.Errorf("v2 show backup by name: %v %q", err, out)
+	}
 	rows, _ := drv.(*unimus).list(context.Background(), "/devices", "devices", 0)
 	if rows := uniImportRows(rows); len(rows) != 1 || rows[0].Platform != "ios" || rows[0].ID != "7" {
 		t.Errorf("import rows %+v", rows)
+	}
+}
+
+func TestUnimusShowBackupByName(t *testing.T) {
+	st := &uniState{}
+	d := uniStub(t, st, nil)
+	drv, err := Open(d, Credential{Token: uniTok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drv.Close(context.Background())
+	for _, ref := range []string{"core1", "CORE1", "10.0.0.5", uniDevUUID} {
+		out, err := drv.Show(context.Background(), "show backup "+ref)
+		if err != nil || !strings.Contains(out, "hostname sw1") {
+			t.Fatalf("%s: %v %q", ref, err, out)
+		}
+		if strings.Contains(out, "UNIPASS") || strings.Contains(out, "unicomm") {
+			t.Errorf("%s: secrets in the answer: %s", ref, out)
+		}
+	}
+	if _, err := drv.Show(context.Background(), "show backup nosuch"); err == nil {
+		t.Error("an unknown device must fail")
+	}
+	if out, err := drv.Show(context.Background(), "show backups device=core1"); err != nil || strings.Contains(out, "hostname sw1") {
+		t.Errorf("metadata only: %v %s", err, out)
 	}
 }

@@ -220,38 +220,60 @@ func (u *unimus) Neighbors(context.Context) ([]Neighbor, error)   { return nil, 
 
 // findDevice gives the device the option "device" names.
 func (u *unimus) findDevice(ctx context.Context) (map[string]any, error) {
+	return u.resolve(ctx, u.dev)
+}
+
+var uniNumRE = regexp.MustCompile(`^[0-9]{1,12}$`)
+
+// resolve finds a device by its UUID or ID, its address, or its name (the description Unimus shows).
+func (u *unimus) resolve(ctx context.Context, ref string) (map[string]any, error) {
 	if err := u.probe(ctx); err != nil {
 		return nil, err
 	}
-	if entraGUIDRE.MatchString(u.dev) {
-		v, err := u.get(ctx, "/devices/"+u.dev)
+	nf := fmt.Errorf("Unimus has no device %q (an address, a name as Unimus shows it, or an ID)", ref)
+	if entraGUIDRE.MatchString(ref) || uniNumRE.MatchString(ref) {
+		v, err := u.get(ctx, "/devices/"+ref)
 		if err != nil {
 			return nil, err
 		}
 		if m, ok := v.(map[string]any); ok {
 			return m, nil
 		}
-		return nil, fmt.Errorf("device %s: Unimus has no device %s", u.d.Name, u.dev)
+		return nil, nf
 	}
-	q := "addresses"
 	if u.ver == "v2" {
-		v, err := u.get(ctx, "/devices/findByAddress/"+url.PathEscape(u.dev))
-		if err != nil {
-			return nil, err
+		if v, err := u.get(ctx, "/devices/findByAddress/"+url.PathEscape(ref)); err == nil {
+			if m, ok := v.(map[string]any); ok && len(m) > 0 {
+				return m, nil
+			}
 		}
-		if m, ok := v.(map[string]any); ok {
-			return m, nil
-		}
-		return nil, fmt.Errorf("device %s: Unimus has no device with address %s", u.d.Name, u.dev)
+	} else if rs, err := u.list(ctx, "/devices?addresses="+url.QueryEscape(ref), "devices", 2); err != nil {
+		return nil, err
+	} else if len(rs) > 0 {
+		return rs[0], nil
 	}
-	rs, err := u.list(ctx, "/devices?"+q+"="+url.QueryEscape(u.dev), "devices", 2)
+	rs, err := u.list(ctx, "/devices", "devices", 0)
 	if err != nil {
 		return nil, err
 	}
-	if len(rs) == 0 {
-		return nil, fmt.Errorf("device %s: Unimus has no device with address %s", u.d.Name, u.dev)
+	want := strings.ToLower(ref)
+	var part []map[string]any
+	for _, r := range rs {
+		d, ad := strings.ToLower(strings.TrimSpace(str(r["description"]))), strings.ToLower(str(r["address"]))
+		if d == want || ad == want {
+			return r, nil
+		}
+		if d != "" && (strings.HasPrefix(d, want) || strings.HasPrefix(d, want+".")) {
+			part = append(part, r)
+		}
 	}
-	return rs[0], nil
+	if len(part) == 1 {
+		return part[0], nil
+	}
+	if len(part) > 1 {
+		return nil, fmt.Errorf("%q fits %d devices: give the address or the full name", ref, len(part))
+	}
+	return nil, nf
 }
 
 func uniID(m map[string]any) string { return firstOf(str(m["uuid"]), str(m["id"])) }
@@ -265,6 +287,11 @@ func (u *unimus) Config(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return u.backupText(ctx, row)
+}
+
+// backupText reads the latest backup of a device (a row of the device list).
+func (u *unimus) backupText(ctx context.Context, row map[string]any) (string, error) {
 	id := uniID(row)
 	if id == "" {
 		return "", errors.New("Unimus gave the device no ID")
@@ -387,10 +414,24 @@ func (u *unimus) uniRead(path string) (string, error) {
 }
 
 func (u *unimus) Show(ctx context.Context, cmd string) (string, error) {
-	usage := errors.New("show health | devices [addresses=… vendors=… types=… models=…] | zones | tags | jobs | backups [device=<address|uuid>]   for example: show devices vendors=Cisco")
+	usage := errors.New("show health | devices [addresses=… vendors=… types=… models=…] | zones | tags | jobs | backups [device=<name|address|id>] | backup <name|address|id>   for example: show backup core1")
 	f := strings.Fields(cmd)
 	if len(f) < 2 || !strings.EqualFold(f[0], "show") || strings.Contains(cmd, "|") {
 		return "", usage
+	}
+	if strings.EqualFold(f[1], "backup") { // the text of the latest backup of one device, filtered like any configuration
+		if len(f) != 3 || !uniDevRE.MatchString(f[2]) {
+			return "", usage
+		}
+		row, err := u.resolve(ctx, f[2])
+		if err != nil {
+			return "", err
+		}
+		txt, err := u.backupText(ctx, row)
+		if err != nil {
+			return "", err
+		}
+		return RedactConfig(txt), nil
 	}
 	q := url.Values{}
 	for _, kv := range f[2:] {
@@ -409,19 +450,23 @@ func (u *unimus) Show(ctx context.Context, cmd string) (string, error) {
 	case "jobs":
 		p = "/jobs/tasks/status"
 	case "backups":
+		d := q.Get("device")
+		q.Del("device")
+		_ = u.probe(ctx)
 		p = "/devices/backups"
-		if d := q.Get("device"); d != "" {
-			q.Del("device")
-			if !entraGUIDRE.MatchString(d) {
-				_ = u.probe(ctx)
-				tmp := &unimus{d: u.d, api: u.api, ver: u.ver, base: u.base, dev: d}
-				row, err := tmp.findDevice(ctx)
-				if err != nil {
-					return "", err
-				}
-				d = uniID(row)
+		if u.ver == "v2" && d == "" {
+			return "", errors.New("show backups device=<name|address|id>: Unimus API v2 lists the backups of one device")
+		}
+		if d != "" {
+			row, err := u.resolve(ctx, d)
+			if err != nil {
+				return "", err
 			}
-			q.Set("deviceUuids", d)
+			if u.ver == "v2" {
+				p = "/devices/" + uniID(row) + "/backups"
+			} else {
+				q.Set("deviceUuids", uniID(row))
+			}
 		}
 	default:
 		return "", usage
@@ -455,7 +500,7 @@ func (u *unimus) APIGet(ctx context.Context, path string) (any, bool, error) {
 func (u *unimus) APICatalog(context.Context) (any, error) {
 	return map[string]any{
 		"how": "GET paths of the Unimus API below /api/v3 (/api/v2 with the option api_version=v2): /devices, /devices/<uuid>, /devices/backups?deviceUuids=<uuid>&latest=true, /zones, /tags, /jobs/tasks/status, /health. " +
-			"List paths take page and size. Only GET is sent. The text of a backup is not part of these answers: it is the configuration of a device with the option device (an address or UUID). Credentials and connections are not read.",
+			"List paths take page and size. Only GET is sent. The text of a backup is not part of these answers: read it with the Show command `show backup <name|address|id>` or as the configuration of a device with the option device. Credentials and connections are not read.",
 		"examples": []string{"/health", "/devices", "/devices?vendors=Cisco", "/devices/<uuid>", "/devices/backups?deviceUuids=<uuid>&latest=true", "/zones", "/tags", "/jobs/tasks/status"},
 	}, nil
 }
