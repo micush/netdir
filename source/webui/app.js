@@ -1313,7 +1313,7 @@
         ["LLDP and CDP details", () => devAsk(name, "neighbor_details")], ["Routes", () => devAsk(name, "routes")], ["Routing protocols", () => devAsk(name, "routing")], ["Firewall", () => devAsk(name, "firewall")], ["CPU, memory and power", () => devAsk(name, "resources")], ["VLANs", () => devAsk(name, "vlans")], ["API catalog", () => devAsk(name, "api_catalog")],
         ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)]]],
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
-        ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
+        ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user", () => troubleForm(name)], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
@@ -2636,7 +2636,7 @@
   // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
   const PLATFORM_LABEL = {
     aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
-    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", sdwan: "Cisco Catalyst SD-WAN",
+    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",

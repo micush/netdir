@@ -1,5 +1,18 @@
 # Changelog
 
+## [v106] - 2026-11-09 — Unimus
+
+### Added
+- **`unimus`** (Unimus configuration backup, REST API v3, v2 by option): facts, `show`, `device_api_get`/`device_api_catalog`, changes with `device_change_raw` (guarded: no push, credentials, connections, backup uploads or deletes). With the option `device` the configuration is that device's latest backup (filtered over MCP).
+- **Import ▸ Devices** from a Unimus server: platform picked from vendor, type and model, disabled, tagged `source=unimus`.
+- GUI: platform label, import menu, help; README section.
+
+### Verified
+- Tests with a stub server: health and counts, paging, address lookup, latest backup decoded and filtered, API reads that name credentials refused, the backup text kept out of API answers, the change guard, import, platform mapping.
+
+### Not verified
+- Not run against a real Unimus; the v3 API is a draft and field names come from its OpenAPI file.
+
 ## [v105] - 2026-11-08 — Copy ▸ To all gateways
 
 ### Added
