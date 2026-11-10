@@ -46,6 +46,17 @@ type recDrv struct {
 	plat string
 }
 
+// bare is the driver that is wrapped.  A test that needs the driver's own type (drv.(*unimus)) asks through bareDriver,
+// because under the leak test the driver it opened is the recording one.
+func (r recDrv) bare() Driver { return r.Driver }
+
+func bareDriver(d Driver) Driver {
+	if b, ok := d.(interface{ bare() Driver }); ok {
+		return b.bare()
+	}
+	return d
+}
+
 func (r recDrv) Facts(ctx context.Context) (Facts, error) {
 	v, err := r.Driver.Facts(ctx)
 	leakAdd(r.plat, "facts", v, err)

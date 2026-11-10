@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Palo Alto Networks PAN-OS firewalls and Panorama over the XML API (/api/), one driver for both:
@@ -25,7 +26,7 @@ import (
 // The login is an API key (Device ▸ Administrators, or "type=keygen"), given as the credential's token, or a user name and a
 // password, from which the driver makes a key at the start of each request.  The key is sent in the X-PAN-KEY header, never in
 // the URL; the password only in the body of the key request.  An administrator role with the XML API's "operational requests"
-// and "configuration" enabled and nothing else (read-only) is enough.  Options: "vsys" (default vsys1) names the virtual system
+// and "configuration" enabled and nothing else (read-only) is enough; reading the logs (type=log) needs "log" enabled too.  Options: "vsys" (default vsys1) names the virtual system
 // of a firewall, "device_group" limits a Panorama's rules and objects to one device group.
 //
 // Every request but the key request is a GET.  PAN-OS answers HTTP 200 with <response status="error"> for a request it refuses,
@@ -1199,20 +1200,120 @@ func panShowNames(cmd string) ([]string, error) {
 	return names, nil
 }
 
-// APIGet reads the XML API: /api/?type=op&cmd=<show>... (a show command) or /api/?type=config&action=show&xpath=/config/... (the
-// running configuration; action=get is the candidate).  The key, a target, and every other parameter are refused, and so is
-// everything that is not a show command or a read of the configuration.
+// panLogTypes are the logs the XML API searches (type=log&log-type=...).
+var panLogTypes = map[string]bool{"traffic": true, "threat": true, "url": true, "wildfire": true, "data": true, "config": true, "system": true,
+	"hipmatch": true, "globalprotect": true, "userid": true, "auth": true, "tunnel": true, "decryption": true, "gtp": true, "sctp": true,
+	"iptag": true, "corr": true, "corr-detail": true, "corr-categ": true}
+
+// PanLogTypeOK says whether t is a log the XML API searches.
+func PanLogTypeOK(t string) bool { return panLogTypes[t] }
+
+const panLogMax = 5000 // the most logs PAN-OS gives for one search
+
+// replaceable in tests
+var (
+	panLogPoll = 500 * time.Millisecond
+	panLogWait = 90 * time.Second
+)
+
+const panLogSlow = "PAN-OS: the log search did not finish in time; narrow the query or ask for fewer logs"
+
+var panJobRE = regexp.MustCompile(`^[0-9]{1,12}$`)
+
+// logQuery checks the parameters of a log search and returns them as PAN-OS takes them.
+func panLogQuery(q url.Values) (url.Values, error) {
+	lt := q.Get("log-type")
+	if !panLogTypes[lt] {
+		return nil, errors.New("path: type=log needs a log-type: traffic, threat, url, wildfire, data, config, system, hipmatch, globalprotect, userid, auth, tunnel, decryption, gtp, sctp, iptag, corr, corr-detail or corr-categ")
+	}
+	out := url.Values{"type": {"log"}, "log-type": {lt}}
+	if f := q.Get("query"); f != "" {
+		if len(f) > 2000 || strings.ContainsFunc(f, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return nil, errors.New("path: the query of a log search is one line of at most 2000 characters, e.g. (user.src eq 'acme\\jo')")
+		}
+		out.Set("query", f)
+	}
+	for k, max := range map[string]int{"nlogs": panLogMax, "skip": 1 << 30} {
+		if v := q.Get(k); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > max || k == "nlogs" && n == 0 {
+				return nil, fmt.Errorf("path: %s is a number (nlogs: 1 to %d, 20 when left out)", k, panLogMax)
+			}
+			out.Set(k, strconv.Itoa(n))
+		}
+	}
+	switch d := q.Get("dir"); d {
+	case "":
+	case "backward", "forward":
+		out.Set("dir", d)
+	default:
+		return nil, errors.New("path: dir is backward (newest first, the default) or forward")
+	}
+	return out, nil
+}
+
+// logs runs one log search.  PAN-OS answers a search with a job, which is asked for its result until it has finished, and
+// is then removed: the three requests are made here, so one read gives the logs.  A search reads; it changes nothing on the
+// device but the job, which is its own.
+func (p *panos) logs(ctx context.Context, q url.Values) (any, error) {
+	v, err := p.req(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	job, _ := dig(v, "job").(string)
+	if !panJobRE.MatchString(job) {
+		return nil, errors.New("PAN-OS: the log search answered no job")
+	}
+	defer func() { // the job is removed whatever became of it, also when the caller has gone away
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_, _ = p.req(fctx, url.Values{"type": {"log"}, "action": {"finish"}, "job-id": {job}})
+	}()
+	ctx, cancel := context.WithTimeout(ctx, panLogWait)
+	defer cancel()
+	for {
+		r, err := p.req(ctx, url.Values{"type": {"log"}, "action": {"get"}, "job-id": {job}})
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, errors.New(panLogSlow)
+			}
+			return nil, err
+		}
+		if st, _ := dig(r, "job", "status").(string); st == "FIN" {
+			l, _ := dig(r, "log", "logs").(map[string]any)
+			if l["entry"] == nil {
+				return map[string]any{"entry": []any{}}, nil // nothing matched
+			}
+			return l, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, errors.New(panLogSlow)
+		case <-time.After(panLogPoll):
+		}
+	}
+}
+
+// APIGet reads the XML API: /api/?type=op&cmd=<show>... (a show command), /api/?type=config&action=show&xpath=/config/... (the
+// running configuration; action=get is the candidate) or /api/?type=log&log-type=...&query=... (a search of the logs).  The key,
+// a target, and every other parameter are refused, and so is everything that is not a show command, a read of the
+// configuration or a log search.
 func (p *panos) APIGet(ctx context.Context, path string) (any, bool, error) {
 	u, err := url.Parse(path)
 	if err != nil || u.Path != "/api" && u.Path != "/api/" {
-		return nil, false, errors.New("path: PAN-OS reads /api/?type=op&cmd=<show>... and /api/?type=config&action=show&xpath=... (the catalog has examples)")
+		return nil, false, errors.New("path: PAN-OS reads /api/?type=op&cmd=<show>..., /api/?type=config&action=show&xpath=... and /api/?type=log&log-type=... (the catalog has examples)")
 	}
 	q, err := url.ParseQuery(u.RawQuery)
 	if err != nil {
 		return nil, false, fmt.Errorf("path: the query: %v", err)
 	}
+	isLog := q.Get("type") == "log"
 	for k, vs := range q {
-		if k != "type" && k != "cmd" && k != "xpath" && k != "action" || len(vs) != 1 {
+		known := k == "type" || !isLog && (k == "cmd" || k == "xpath" || k == "action") || isLog && (k == "log-type" || k == "query" || k == "nlogs" || k == "skip" || k == "dir")
+		if !known || len(vs) != 1 {
+			if isLog {
+				return nil, false, fmt.Errorf("path: the parameter %q is not read here (a log search takes one each of log-type, query, nlogs, skip and dir)", k)
+			}
 			return nil, false, fmt.Errorf("path: the parameter %q is not read here (only one each of type, cmd, xpath and action)", k)
 		}
 	}
@@ -1231,8 +1332,18 @@ func (p *panos) APIGet(ctx context.Context, path string) (any, bool, error) {
 			return nil, false, errors.New("path: type=config needs an xpath that starts with /, e.g. /config/devices/entry[@name='localhost.localdomain']/network")
 		}
 		clean = url.Values{"type": {"config"}, "action": {q.Get("action")}, "xpath": {q.Get("xpath")}}
+	case "log":
+		lq, err := panLogQuery(q)
+		if err != nil {
+			return nil, false, err
+		}
+		v, err := p.logs(ctx, lq)
+		if err != nil {
+			return nil, false, err
+		}
+		return Redact(v), false, nil
 	default:
-		return nil, false, errors.New("path: type=op (a show command) or type=config (a read of the configuration)")
+		return nil, false, errors.New("path: type=op (a show command), type=config (a read of the configuration) or type=log (a search of the logs)")
 	}
 	v, err := p.req(ctx, clean)
 	if err != nil {
@@ -1251,11 +1362,15 @@ func (p *panos) APICatalog(ctx context.Context) (any, error) {
 	out := map[string]any{
 		"how": "GET /api/?type=op&cmd=<XML> runs a show command: the CLI words as nested elements, <show><system><info></info></system></show> for \"show system info\". " +
 			"GET /api/?type=config&action=show&xpath=<XPath> reads the running configuration (action=get: the candidate). " +
+			"GET /api/?type=log&log-type=<type>&query=<filter>&nlogs=<N> searches the logs and answers the entries, newest first (log-type: traffic, threat, url, system, globalprotect, userid, auth, hipmatch, decryption, tunnel, ...; " +
+			"query: the filter of the Monitor tab, e.g. (machinename eq 'PC-1') or (addr.src in 10.0.0.5) and (receive_time geq '2026/11/10 08:00:00'); nlogs: 1 to 5000, 20 when left out; skip and dir=forward page through them). " +
+			"A space in a query is %20. " +
 			"An <entry> or a <member> is always a list. Percent-encode what the URL needs. Nothing that changes, clears or commits anything is sent.",
 		"examples": []string{
 			"/api/?type=op&cmd=<show><system><info></info></system></show>",
 			"/api/?type=op&cmd=<show><interface>all</interface></show>",
 			"/api/?type=config&action=show&xpath=/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/security",
+			"/api/?type=log&log-type=traffic&nlogs=50&query=(addr.src%20in%2010.0.0.5)",
 		},
 	}
 	if _, err := p.system(ctx); err == nil && p.panorama() {
@@ -1264,6 +1379,7 @@ func (p *panos) APICatalog(ctx context.Context) (any, error) {
 			"/api/?type=op&cmd=<show><devices><all></all></devices></show>",
 			"/api/?type=op&cmd=<show><devicegroups></devicegroups></show>",
 			"/api/?type=config&action=show&xpath=/config/shared/pre-rulebase/security",
+			"/api/?type=log&log-type=globalprotect&nlogs=50&query=(machinename%20eq%20'PC-1')",
 		}
 	} else if err == nil {
 		out["kind"] = "firewall"

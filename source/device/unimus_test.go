@@ -263,7 +263,7 @@ func TestUnimusFallsBackToV2(t *testing.T) {
 	if out, err := drv.Show(context.Background(), "show backup old1"); err != nil || !strings.Contains(RedactConfig(cfg), "hostname old1") || !strings.Contains(out, "hostname old1") || strings.Contains(out, "V2SECRET") {
 		t.Errorf("v2 show backup by name: %v %q", err, out)
 	}
-	rows, _ := drv.(*unimus).list(context.Background(), "/devices", "devices", 0)
+	rows, _ := bareDriver(drv).(*unimus).list(context.Background(), "/devices", "devices", 0)
 	if rows := uniImportRows(rows); len(rows) != 1 || rows[0].Platform != "ios" || rows[0].ID != uniDevUUID {
 		t.Errorf("import rows %+v", rows)
 	}

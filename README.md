@@ -335,7 +335,7 @@ The Dashboard API (`https://api.meraki.com/api/v1`), with an **API key** as the 
 
 ### Palo Alto Networks (PAN-OS, `panos`, and Panorama, `panorama`)
 
-The XML API at `/api/`, with an admin's API key as the credential's token, or a user name and password from which a key is made (the only POST sent, with the password in the body, never in a URL). The key travels in the `X-PAN-KEY` header and never reaches an error text. Give the admin an XML API role that allows Operational Requests and Configuration, read only.
+The XML API at `/api/`, with an admin's API key as the credential's token, or a user name and password from which a key is made (the only POST sent, with the password in the body, never in a URL). The key travels in the `X-PAN-KEY` header and never reaches an error text. Give the admin an XML API role that allows Operational Requests and Configuration, read only, and **Log** if the logs are to be searched (`device_api_get` with `/api/?type=log&log-type=globalprotect&query=…&nlogs=50`: traffic, threat, url, system, globalprotect, userid, auth and the other log types; the configuration log is not read over MCP). A log search is three GETs on the device (start the job, read it, remove it) and one read for the caller.
 
 - Platform `panos` recognises a Panorama from its system information; `panorama` forces it. Options: `vsys` (default `vsys1`) and, for a Panorama, `device_group`.
 - **Facts** are `show system info`; **Interfaces** and **Ports** are `show interface all` and the interface counters, with comments and link state from the configuration; the management interface is included.

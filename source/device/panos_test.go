@@ -10,12 +10,14 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // panStubState records what the stub saw.
 type panStubState struct {
 	keygens atomic.Int32
 	queries []url.Values // every GET of the XML API, as the device got it
+	polls   int          // how often a log job was asked for its result
 }
 
 const panKey = "LUFRPT1key"
@@ -57,6 +59,23 @@ func panStub(t *testing.T, answers map[string]string) (Device, *panStubState) {
 		key := q.Get("cmd")
 		if q.Get("type") == "config" {
 			key = "config:" + q.Get("xpath")
+		}
+		// a log search: "log:<log-type>" answers the job, the first read of a job says it is still running, the next is
+		// "logget:<job>", and a finish is always accepted
+		if q.Get("type") == "log" {
+			switch q.Get("action") {
+			case "":
+				key = "log:" + q.Get("log-type")
+			case "get":
+				key = "logget:" + q.Get("job-id")
+				if st.polls++; st.polls == 1 {
+					_, _ = w.Write([]byte(`<response status="success"><result><job><status>ACT</status><id>` + q.Get("job-id") + `</id></job><log><logs count="0" progress="40"/></log></result></response>`))
+					return
+				}
+			case "finish":
+				_, _ = w.Write([]byte(`<response status="success"></response>`))
+				return
+			}
 		}
 		a, ok := answers[key]
 		switch {
@@ -590,5 +609,94 @@ func TestNewSecretNamesAreHidden(t *testing.T) {
 	}
 	if got := RedactText("snmp-community-string public\nphash $1$abc\nnxos pwd hunter2\nhostname fw1"); strings.Contains(got, "public") || strings.Contains(got, "$1$abc") || strings.Contains(got, "hunter2") || !strings.Contains(got, "hostname fw1") {
 		t.Errorf("%q", got)
+	}
+}
+
+func TestPANOSLogSearch(t *testing.T) {
+	oldP := panLogPoll
+	panLogPoll = time.Millisecond
+	t.Cleanup(func() { panLogPoll = oldP })
+	answers := panFirewall()
+	answers["log:globalprotect"] = ok(`<job>18</job><msg><line>query job enqueued with jobid 18</line></msg>`)
+	answers["logget:18"] = ok(`<job><tenq>09:00:01</tenq><status>FIN</status><id>18</id></job><log><logs count="2" progress="100">` +
+		`<entry logid="71"><receive_time>2026/11/10 09:00:00</receive_time><serial>007051000012345</serial><type>GLOBALPROTECT</type><eventid>gateway-connected</eventid>` +
+		`<srcuser>acme\jo.doe</srcuser><machinename>A-GTHKFGPW4Q</machinename><public_ip>198.51.100.77</public_ip><private_ip>10.20.30.40</private_ip><status>success</status></entry>` +
+		`<entry logid="70"><receive_time>2026/11/10 08:59:00</receive_time><eventid>portal-auth</eventid><srcuser>acme\jo.doe</srcuser><machinename>A-GTHKFGPW4Q</machinename><status>success</status></entry>` +
+		`</logs></log>`)
+	answers["log:traffic"] = ok(`<job>19</job>`)
+	answers["logget:19"] = ok(`<job><status>FIN</status><id>19</id></job><log><logs count="0" progress="100"/></log>`)
+	answers["log:system"] = "ERR 403 Unauthorized request"
+	d, st := panStub(t, answers)
+	a := open(t, d, panCred).(APIer)
+	ctx := context.Background()
+
+	v, text, err := a.APIGet(ctx, "/api/?type=log&log-type=globalprotect&nlogs=50&query=(machinename%20eq%20'A-GTHKFGPW4Q')")
+	if err != nil || text {
+		t.Fatalf("%v %v", err, text)
+	}
+	es, _ := v.(map[string]any)["entry"].([]any)
+	if len(es) != 2 || es[0].(map[string]any)["machinename"] != "A-GTHKFGPW4Q" || es[0].(map[string]any)["eventid"] != "gateway-connected" {
+		t.Fatalf("the entries: %+v", v)
+	}
+	// what the device got: the search with the query decoded, the reads of the job until it had finished, and its removal
+	var got []string
+	for _, q := range st.queries {
+		if q.Get("type") == "log" {
+			got = append(got, q.Get("action")+"/"+q.Get("job-id")+"/"+q.Get("log-type")+"/"+q.Get("nlogs")+"/"+q.Get("query"))
+		}
+	}
+	want := []string{"//globalprotect/50/(machinename eq 'A-GTHKFGPW4Q')", "get/18///", "get/18///", "finish/18///"}
+	if strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("the requests of a log search:\n got %q\nwant %q", got, want)
+	}
+	// nothing matched is an empty list, not an error
+	if v, _, err := a.APIGet(ctx, "/api/?type=log&log-type=traffic&dir=forward&skip=20"); err != nil || len(v.(map[string]any)["entry"].([]any)) != 0 {
+		t.Errorf("an empty search: %v %+v", err, v)
+	}
+	// a role without the log permission: the device's refusal is the answer
+	if _, _, err := a.APIGet(ctx, "/api/?type=log&log-type=system"); err == nil {
+		t.Error("a refused search gave no error")
+	}
+	before := len(st.queries)
+	for _, bad := range []string{
+		"/api/?type=log", "/api/?type=log&log-type=nosuch", "/api/?type=log&log-type=traffic&nlogs=0", "/api/?type=log&log-type=traffic&nlogs=5001", "/api/?type=log&log-type=traffic&nlogs=x",
+		"/api/?type=log&log-type=traffic&dir=sideways", "/api/?type=log&log-type=traffic&skip=-1", "/api/?type=log&action=get&job-id=18", "/api/?type=log&action=finish&job-id=18",
+		"/api/?type=log&log-type=traffic&key=abc", "/api/?type=log&log-type=traffic&cmd=<show></show>", "/api/?type=log&log-type=traffic&log-type=threat",
+		"/api/?type=log&log-type=traffic&query=a%0Ab", "/api/?type=report&reporttype=predefined", "/api/?type=export&category=traffic-log",
+	} {
+		if _, _, err := a.APIGet(ctx, bad); err == nil {
+			t.Errorf("%s was read", bad)
+		}
+	}
+	if len(st.queries) != before {
+		t.Errorf("a refused path reached the device: %v", st.queries[before:])
+	}
+	// over MCP: every log but the configuration log, and never the job requests
+	for _, good := range []string{"/api/?type=log&log-type=globalprotect&query=(machinename%20eq%20'A-GTHKFGPW4Q')", "/api/?type=log&log-type=traffic&nlogs=100", "/api/?type=log&log-type=auth"} {
+		if err := CheckAPIPathMCP(good); err != nil {
+			t.Errorf("%s refused over MCP: %v", good, err)
+		}
+	}
+	for _, bad := range []string{"/api/?type=log&log-type=config", "/api/?type=log", "/api/?type=log&log-type=nosuch", "/api/?type=log&log-type=traffic&action=get&job-id=1"} {
+		if err := CheckAPIPathMCP(bad); err == nil {
+			t.Errorf("%s allowed over MCP", bad)
+		}
+	}
+}
+
+func TestPANOSLogSearchGivesUp(t *testing.T) {
+	oldP, oldW := panLogPoll, panLogWait
+	panLogPoll, panLogWait = time.Millisecond, 30*time.Millisecond
+	t.Cleanup(func() { panLogPoll, panLogWait = oldP, oldW })
+	answers := panFirewall()
+	answers["log:threat"] = ok(`<job>20</job>`)
+	answers["logget:20"] = ok(`<job><status>ACT</status><id>20</id></job>`)
+	d, st := panStub(t, answers)
+	a := open(t, d, panCred).(APIer)
+	if _, _, err := a.APIGet(context.Background(), "/api/?type=log&log-type=threat"); err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("a search that never finishes: %v", err)
+	}
+	if q := st.queries[len(st.queries)-1]; q.Get("action") != "finish" || q.Get("job-id") != "20" {
+		t.Errorf("the job was not removed: %v", q)
 	}
 }

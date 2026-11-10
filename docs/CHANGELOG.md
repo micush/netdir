@@ -1,5 +1,32 @@
 # Changelog
 
+## [v121] - 2026-11-10 — PAN-OS and Panorama: search the logs
+
+### Added
+- `device_api_get` (the `api` read of a device, `op=api`) reads the logs of a PAN-OS firewall or a Panorama: `/api/?type=log&log-type=globalprotect&nlogs=50&query=(machinename%20eq%20'PC-1')`. Until now the driver took only `type=op` (show commands) and `type=config`, so an assistant asked "when did this machine last connect" had to answer that it could not search the logs.
+- Parameters: `log-type` (traffic, threat, url, wildfire, data, config, system, hipmatch, globalprotect, userid, auth, tunnel, decryption, gtp, sctp, iptag, corr, corr-detail, corr-categ), `query` (the filter of the Monitor tab, one line, at most 2000 characters), `nlogs` (1 to 5000; PAN-OS gives 20 when it is left out), `skip` and `dir` (backward, the default, or forward). Anything else is refused before the device is asked.
+- PAN-OS answers a log search with a job. The driver starts it, reads it until it has finished (every half second, for at most 90 seconds) and removes it, so the caller makes one read and gets the entries; nothing matched is an empty list. The job requests (`action=get`, `action=finish`, `job-id`) are not taken from a caller.
+- Over MCP every log type is read but `config`: the entries of the configuration log carry the changed configuration, secrets included.
+- `device_api_catalog` explains the log search and gives an example for a firewall and for a Panorama; the tool description of `device_api_get`, the README and the help say so too.
+
+### Changed
+- The admin's XML API role needs **Log** as well as Operational Requests and Configuration for this. Without it PAN-OS refuses the search and that refusal is the answer; show commands and configuration reads work as before.
+- "Only GET is ever sent" still holds: the three requests of a search are GETs. The removal of the job is the one request that is not a pure read; it removes only the job the search itself made.
+
+### Fixed
+- `sh tools/leaktest.sh` failed before it checked anything: `TestUnimusFallsBackToV2` asked the driver for its own type, which under the leak test is the recording wrapper (it failed the same way in v116). The test now asks through `bareDriver`.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub).
+- New tests against the TLS stub of the XML API (`TestPANOSLogSearch`, `TestPANOSLogSearchGivesUp`): the search reaches the device with the query decoded, the job is read until `FIN` and then removed, the entries come back; an empty result; a refusal by the device; fifteen paths that are refused without a request (no or unknown log type, bad numbers, the job requests, a key, a second log type, a control character, `type=report`, `type=export`); a job that never finishes gives "did not finish in time" and is still removed; the MCP gate allows the log types and refuses `config` and the job requests.
+- `sh tools/leaktest.sh`: passes (1265 recorded answers, 31 platforms), with the log entries of the new test (addresses, a serial number) among them.
+
+### Not verified
+- Not run against a real firewall or Panorama. The requests and the shape of the answers (`<job>`, `<job><status>FIN`, `<log><logs><entry>`) are PAN-OS's documented XML API as only seen in the stub; the field names of a GlobalProtect entry in the test are examples.
+- A Panorama searches the logs it holds (its log collectors); logs kept only on a firewall are asked of that firewall.
+- Log entries name users and machines. The strict privacy level hides addresses, serial numbers and the like in them as in every answer (the leak test covers those); user and machine names are not something the leak test looks for.
+- GUI unchanged apart from one sentence in the help; not opened in a browser.
+
 ## [v120] - 2026-11-10 — Download as CSV on Monitor ▸ MCP and Monitor ▸ Node; MCP first in the Monitor menu
 
 ### Added

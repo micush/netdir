@@ -293,8 +293,21 @@ func checkPanosQueryMCP(query string) error {
 				return err
 			}
 		}
+	case "log":
+		// a search of the logs: every log but the configuration log, whose entries carry the changed configuration (secrets too)
+		switch lt := q.Get("log-type"); {
+		case lt == "config":
+			return errors.New("path: the configuration log holds what was changed, secrets included, and is not available over MCP")
+		case !PanLogTypeOK(lt):
+			return errors.New("path: type=log needs a log-type (traffic, threat, url, system, globalprotect, userid, auth, ...)")
+		}
+		for k := range q {
+			if k == "action" || k == "job-id" {
+				return errors.New("path: a log search is one request here (log-type, query, nlogs, skip, dir): the job is handled for you")
+			}
+		}
 	default:
-		return errors.New("path: over MCP the XML API reads type=op (a show command) or type=config (a part of the configuration)")
+		return errors.New("path: over MCP the XML API reads type=op (a show command), type=config (a part of the configuration) or type=log (a search of the logs)")
 	}
 	return nil
 }
