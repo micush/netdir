@@ -1,5 +1,25 @@
 # Changelog
 
+## [v120] - 2026-11-10 — Download as CSV on Monitor ▸ MCP and Monitor ▸ Node; MCP first in the Monitor menu
+
+### Added
+- Monitor ▸ Node: the small download icon of the DNS Director in the corner of each chart (CPU, Memory, Disk, Network utilization), the Filesystems table, the Network interfaces table and the LLDP neighbors card. It saves that card's numbers as a CSV file (`netdir-<card>.csv`), built in the browser from what the page holds. A chart gives one row per sample for the picked range, times in UTC, with the busiest sample of each interval beside the average for CPU, disk I/O and network; a gap is an empty cell.
+- Monitor ▸ MCP: the same icon on Calls per hour, Data returned per hour, By key, By source address, By tool, By device and Newest calls, for the picked time range. Sizes are in bytes and times in UTC. A table with no calls has no icon. The tiles have none: they are the totals of the tables.
+- A text cell that starts with `=`, `+`, `-` or `@` is written with a leading apostrophe, so a key or device name cannot be read as a formula by a spreadsheet (as in the DNS Director).
+- Help (Monitor ▸ Node, Monitor ▸ MCP): a "Download as CSV" paragraph each.
+
+### Changed
+- The Monitor menu starts MCP, Node, Devices; the rest is as it was (Gateways, Cluster, Anycast, Alerts, Capture, Log).
+- Monitor ▸ Devices has no download: the page asks devices questions and shows their answers as text, and an answer already has its own Download button.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `app.js` and `help.js`.
+- Headless Chromium against a real daemon with a real PAM login, light and dark: the menu order; on Node the six icons shown (no LLDP on the sandbox) and the CPU, Network, Filesystems and Network interfaces files downloaded and read (headers, one row per sample, empty cells for the gap before the daemon started); on MCP the two chart files. No script errors.
+- The MCP tables with calls in them: the same page with `/api/mcpusage` answered by sample data (the sandbox has no MCP caller): all seven icons, and By key, By device, Newest calls and Calls per hour downloaded and read, including a key named `=claude, "desk"` (written `'=claude, ""desk""` in quotes).
+
+### Not verified
+- The LLDP neighbors download (no lldpd in the sandbox; the code is the DNS Director's). The cluster view of Monitor ▸ Node. Opening the files in Excel or LibreOffice.
+
 ## [v119] - 2026-11-10 — A BGP neighbor's address can be changed
 
 ### Changed

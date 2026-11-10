@@ -763,3 +763,7 @@ table.policy td .devpick input[type=text] { flex: 1 1 7rem; width: auto; min-wid
 /* a checkbox with its text beside it, in a form (Add device ▸ Enable them) */
 .f.check { display: flex; align-items: center; gap: .5rem; }
 .f.check input { width: auto; }
+/* the download icon in a card's header (Monitor ▸ MCP, Monitor ▸ Node) */
+.btn.small.csv { padding: .2rem .35rem; line-height: 0; color: var(--muted); }
+.btn.small.csv:hover { color: var(--text); }
+.btn.csv svg { width: 1rem; height: 1rem; display: block; }

@@ -306,7 +306,7 @@
   const NAV_GROUPS = [
     ["Configure", [["cfg_general", "Settings"], ["cfg_groups", "Gateways"], ["cfg_mcp", "MCP"], ["cfg_privacy", "Privacy"], ["cfg_devices", "Devices"], ["cfg_web", "Web GUI"], ["cfg_monitoring", "Monitoring"], ["cfg_alerts", "Alerts"], ["cfg_backup", "Backup"], ["anycast", "Anycast"], ["users", "Users"], ["history", "History"]]],
     ["Operate", [["node", "Node"], ["cluster", "Cluster"], ["anycastop", "Anycast"], ["scheduler", "Scheduler"], ["updates", "Upgrade"]]],
-    ["Monitor", [["devices", "Devices"], ["host", "Node"], ["mcpusage", "MCP"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
+    ["Monitor", [["mcpusage", "MCP"], ["host", "Node"], ["devices", "Devices"], ["gateways", "Gateways"], ["nodes", "Cluster"], ["anycaststatus", "Anycast"], ["alerts", "Alerts"], ["capture", "Capture"], ["log", "Log"]]],
   ];
   const TABS = [["topology", TOPO]].concat(NAV_GROUPS.flatMap(([, items]) => items));
   const groupOf = (id) => (id === "topology" ? TOPO : (NAV_GROUPS.find(([, items]) => items.some(([i]) => i === id)) || [null])[0]);
@@ -3844,6 +3844,31 @@
     const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: name });
     document.body.append(a); a.click(); a.remove();
   }
+  // The small download icon on the cards of Monitor ▸ MCP and Monitor ▸ Node: the card's numbers as a CSV file, built in the
+  // browser from what the page already holds.  rows() runs at the click (the first row is the header).  A text cell that starts with
+  // = + - or @ is written with a leading apostrophe, so a spreadsheet cannot read a name that came from the network as a formula.
+  const csvCell = (v) => {
+    if (v == null) return "";
+    let s = String(v);
+    if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csvIso = (sec) => new Date(sec * 1000).toISOString();
+  const csvNum = (v) => (typeof v === "number" && isFinite(v) ? Math.round(v * 1000) / 1000 : "");
+  function saveCsv(name, rows) {
+    const url = URL.createObjectURL(new Blob([rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" }));
+    const a = h("a", { href: url, download: name });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+  function csvButton(title, rows) {
+    const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
+    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round" })) svg.setAttribute(k, v);
+    p.setAttribute("d", "M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16");
+    svg.append(p);
+    const file = "netdir-" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + ".csv";
+    return h("button", { type: "button", class: "btn small csv", title: "Download as CSV", "aria-label": "Download " + title + " as CSV", onclick: () => saveCsv(file, rows()) }, svg);
+  }
   // Expiry warning under the tabs (certificate state is cheap to check once per login).
   async function certBanner() {
     const slot = document.getElementById("banner");
@@ -4315,7 +4340,13 @@
         onmouseleave: () => { cross.classList.add("hidden"); tip.classList.add("hidden"); dots.forEach((c) => c.classList.add("hidden")); } });
       svg.append(cross, ...dots, hit, tip);
       const legend = series.length > 1 || o.legend ? h("div", { class: "qlegend" }, series.map((s) => h("span", { class: "qchip " + s.cls }, h("span", { class: "sw" }), s.label))) : null;
-      return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body" }, legend, svg));
+      // the chart's numbers: one row per sample, the busiest sample of the interval beside the average where there is one; a gap is an empty cell
+      const sampleRows = () => {
+        const cell = (v) => (v < 0 ? "" : csvNum(v));
+        return [["Time (UTC)", ...series.flatMap((s) => [s.label + " (" + o.unit + ")", ...(s.peaks ? [s.label + " peak (" + o.unit + ")"] : [])])],
+          ...Array.from({ length: n }, (_, i) => [csvIso(d.start + i * d.step), ...series.flatMap((s) => [cell(s.values[i]), ...(s.peaks ? [cell(s.peaks[i])] : [])])])];
+      };
+      return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }), csvButton(title, sampleRows)), h("div", { class: "body" }, legend, svg));
     }
 
     function draw(d) {
@@ -4336,22 +4367,25 @@
       const cpuT = (i) => pc(d.cpu[i]) + " (peak " + pc(d.cpu_max[i]) + ")";
       const fsCls = ["t4", "t5", "t6", "t7", "t8", "t-other"];
       const ioT = (i) => pc(d.io[i]) + " (peak " + pc(d.io_max[i]) + ")";
-      const diskSeries = [{ label: "I/O busy", cls: "t2", values: d.io, text: ioT }].concat((d.fs || []).map((f, k) => ({ label: f.mount + " used", cls: fsCls[k % fsCls.length], values: f.pct, text: (i) => pc(f.pct[i]) })));
+      const diskSeries = [{ label: "I/O busy", cls: "t2", values: d.io, peaks: d.io_max, text: ioT }].concat((d.fs || []).map((f, k) => ({ label: f.mount + " used", cls: fsCls[k % fsCls.length], values: f.pct, text: (i) => pc(f.pct[i]) })));
       clear(charts).append(
-        lineChart("CPU utilization", d, [{ label: "CPU", cls: "t1", values: d.cpu, text: cpuT }], { floor: 10, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%" }),
-        lineChart("Memory utilization", d, [{ label: "Memory", cls: "t3", values: d.mem, text: (i) => pc(d.mem[i]) }], { floor: 10, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%" }),
-        lineChart("Disk utilization", d, diskSeries, { fixedMax: 100, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%", legend: true }),
+        lineChart("CPU utilization", d, [{ label: "CPU", cls: "t1", values: d.cpu, peaks: d.cpu_max, text: cpuT }], { unit: "%", floor: 10, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%" }),
+        lineChart("Memory utilization", d, [{ label: "Memory", cls: "t3", values: d.mem, text: (i) => pc(d.mem[i]) }], { unit: "%", floor: 10, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%" }),
+        lineChart("Disk utilization", d, diskSeries, { unit: "%", fixedMax: 100, axis: (v) => (Number.isInteger(v) ? v : v.toFixed(1)) + "%", legend: true }),
         lineChart("Network utilization", d, [
-          { label: "In", cls: "t5", values: d.rx, text: (i) => bits(d.rx[i]) + " (peak " + bits(d.rx_max[i]) + ")" },
-          { label: "Out", cls: "t6", values: d.tx, text: (i) => bits(d.tx[i]) + " (peak " + bits(d.tx_max[i]) + ")" }], { floor: 1000, axis: (v) => bits(v) }));
+          { label: "In", cls: "t5", values: d.rx, peaks: d.rx_max, text: (i) => bits(d.rx[i]) + " (peak " + bits(d.rx_max[i]) + ")" },
+          { label: "Out", cls: "t6", values: d.tx, peaks: d.tx_max, text: (i) => bits(d.tx[i]) + " (peak " + bits(d.tx_max[i]) + ")" }], { unit: "bits/s", floor: 1000, axis: (v) => bits(v) }));
       const fsRows = (n.fs || []).map((f) => h("tr", {}, h("td", { class: "mono" }, f.mount), h("td", {}, f.device + " · " + f.type), h("td", { class: "num" }, bytes(f.used) + " of " + bytes(f.total)), h("td", { class: "num" }, pc(f.pct))));
-      const ifRows = (n.ifaces || []).filter((i) => !/(^| )lo$/.test(i.name))   /* "lo", or "node lo" in the cluster view */.map((i) => h("tr", { class: i.counted ? null : "muted" }, h("td", { class: "mono" }, i.name), h("td", { title: i.counted ? null : "Not in the totals" }, i.up ? "up" : "down", i.counted ? "" : " *"),
+      const ifList = (n.ifaces || []).filter((i) => !/(^| )lo$/.test(i.name));   // "lo", or "node lo" in the cluster view
+      const ifRows = ifList.map((i) => h("tr", { class: i.counted ? null : "muted" }, h("td", { class: "mono" }, i.name), h("td", { title: i.counted ? null : "Not in the totals" }, i.up ? "up" : "down", i.counted ? "" : " *"),
         h("td", { class: "num" }, i.speed ? i.speed + " Mb/s" : "–"), h("td", { class: "num" }, bits(i.rx_bps)), h("td", { class: "num" }, bits(i.tx_bps)), h("td", { class: "num" }, i.util_pct >= 0 ? pc(i.util_pct) : "–")));
       fill(tables, 
-        h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Filesystems"))), h("div", { class: "body flush" }, fsRows.length
+        h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Filesystems")), h("span", { class: "grow" }), fsRows.length ? csvButton("Filesystems", () => [["Mount", "Device", "Type", "Used (bytes)", "Total (bytes)", "Use (%)"],
+          ...(n.fs || []).map((f) => [f.mount, f.device, f.type, f.used, f.total, csvNum(f.pct)])]) : null), h("div", { class: "body flush" }, fsRows.length
           ? h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Mount"), h("th", {}, "Device"), h("th", { class: "num" }, "Used"), h("th", { class: "num" }, "Use"))), h("tbody", {}, fsRows))
           : h("div", { class: "empty" }, "No disk filesystems found."))),
-        h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Network interfaces"))), h("div", { class: "body flush" }, ifRows.length
+        h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Network interfaces")), h("span", { class: "grow" }), ifRows.length ? csvButton("Network interfaces", () => [["Interface", "State", "Counted in totals", "Speed (Mb/s)", "In (bits/s)", "Out (bits/s)", "Link use (%)"],
+          ...ifList.map((i) => [i.name, i.up ? "up" : "down", i.counted ? "yes" : "no", i.speed || "", csvNum(i.rx_bps), csvNum(i.tx_bps), i.util_pct >= 0 ? csvNum(i.util_pct) : ""])]) : null), h("div", { class: "body flush" }, ifRows.length
           ? h("div", { class: "scroll" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Interface"), h("th", {}, "State"), h("th", { class: "num" }, "Speed"), h("th", { class: "num" }, "In"), h("th", { class: "num" }, "Out"), h("th", { class: "num" }, "Link use"))), h("tbody", {}, ifRows)))
           : h("div", { class: "empty" }, "No interfaces found."))));
       clear(cnote).append(...clusterNote(d.cluster));   // which nodes are added together, when the Node menu says Cluster
@@ -4395,7 +4429,9 @@
         : !st.running ? h("div", { class: "empty" }, lldpWords(st))
         : rows.length ? h("div", { class: "scroll" }, h("table", {}, h("thead", {}, h("tr", {}, ["Interface", "Switch", "Port", "VLAN", "Management", "Seen"].map((t, i) => h("th", { class: i === 5 ? "num" : null }, t)))), h("tbody", {}, rows)))
         : h("div", { class: "empty" }, "None seen yet.");
-      clear(neigh).append(h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("LLDP neighbors"))), h("div", { class: "body flush" }, body)));
+      const dl = !st.error && st.running && ns.length ? csvButton("LLDP neighbors", () => [["Interface", "Switch", "Port", "VLAN", "Management", "Seen"],
+        ...ns.map((n) => [n.interface, n.system_name || n.chassis_id || "", n.port_descr || n.port_id || "", (n.vlans || []).join("; "), (n.mgmt_ips || []).join("; "), n.age || ""])]) : null;
+      clear(neigh).append(h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("LLDP neighbors")), h("span", { class: "grow" }), dl), h("div", { class: "body flush" }, body)));
     }
 
     function setRange(r) {
@@ -4550,18 +4586,21 @@
     const at = (u) => (u ? new Date(u * 1000).toLocaleString() : "–");
     const num = (n) => n.toLocaleString();
     const hm = (u, long) => new Date(u * 1000).toLocaleString([], long ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false } : { hour: "2-digit", minute: "2-digit", hour12: false });
-    const card = (title, ...kids) => h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body flush" }, ...kids));
+    // csv: the rows of the card's download, or null when it has none to give
+    const card = (title, csv, ...kids) => h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }), csv ? csvButton(title, csv) : null), h("div", { class: "body flush" }, ...kids));
+    const sumCsv = (first, rows) => () => [[first, "Calls", "Errors", "Refused", "Changes", "Data (bytes)", "Avg ms", "Last (UTC)"],
+      ...rows.map((r) => [r.name, r.calls, r.errors, r.refused, r.writes, r.bytes, r.avg_ms, r.last ? csvIso(r.last) : ""])];
     const COLS = [["Calls", (r) => num(r.calls), true], ["Errors", (r) => (r.errors ? num(r.errors) : "–"), true], ["Refused", (r) => (r.refused ? num(r.refused) : "–"), true],
       ["Changes", (r) => (r.writes ? num(r.writes) : "–"), true], ["Data", (r) => size(r.bytes), true], ["Avg ms", (r) => num(r.avg_ms), true], ["Last", (r) => at(r.last), false]];
     function sumCard(title, first, rows) {
-      return card(title, rows.length
+      return card(title, rows.length ? sumCsv(first, rows) : null, rows.length
         ? h("div", { class: "scroll" }, h("table", {},
           h("thead", {}, h("tr", {}, h("th", {}, first), COLS.map((c) => h("th", { class: c[2] ? "num" : "" }, c[0])))),
           h("tbody", {}, rows.map((r) => h("tr", {}, h("td", { class: "mono" }, r.name), COLS.map((c) => h("td", { class: c[2] ? "num" : "" }, c[1](r))))))))
         : h("div", { class: "empty" }, "No calls in this time range."));
     }
     // bars per hour; red is the part that failed
-    function bars(title, hours, cls, pick, fail2, text) {
+    function bars(title, hours, cls, pick, fail2, text, csv) {
       const W = 620, H = 230, L = 12, R = 12, T = 12, B = 28, n = hours.length, max = Math.max(1, ...hours.map(pick));
       const pw = W - L - R, ph = H - T - B, bw = pw / Math.max(1, n);
       const svg = sv("svg", { class: "qchart", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": title });
@@ -4574,7 +4613,7 @@
       });
       svg.append(sv("text", { class: "qax", x: L, y: H - 8 }, hm(hours[0].t, n > 24)), sv("text", { class: "qax", x: W - R, y: H - 8, "text-anchor": "end" }, hm(hours[n - 1].t, n > 24)),
         sv("text", { class: "qax", x: W - R, y: T + 10, "text-anchor": "end" }, "most " + max.toLocaleString()));
-      return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title))), h("div", { class: "body" }, svg));
+      return h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc(title)), h("span", { class: "grow" }), csvButton(title, csv)), h("div", { class: "body" }, svg));
     }
     function draw(r) {
       const sig = JSON.stringify(r);
@@ -4591,10 +4630,13 @@
         tile("t5", "Data returned", size(t.bytes), "after privacy masking"),
         tile("t6", "Average time", num(t.avg_ms) + " ms", "per call on this node"));
       clear(charts).append(
-        bars("Calls per hour", r.hours, "t1", (x) => x.calls, (x) => x.errors, (x) => x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : "")),
-        bars("Data returned per hour", r.hours, "t5", (x) => x.bytes, null, (x) => size(x.bytes)));
+        bars("Calls per hour", r.hours, "t1", (x) => x.calls, (x) => x.errors, (x) => x.calls + " call" + (x.calls === 1 ? "" : "s") + (x.errors ? ", " + x.errors + " failed" : ""),
+          () => [["Hour (UTC)", "Calls", "Errors"], ...r.hours.map((x) => [csvIso(x.t), x.calls, x.errors])]),
+        bars("Data returned per hour", r.hours, "t5", (x) => x.bytes, null, (x) => size(x.bytes),
+          () => [["Hour (UTC)", "Data (bytes)"], ...r.hours.map((x) => [csvIso(x.t), x.bytes])]));
       clear(tables).append(sumCard("By key", "Key", r.by_key), sumCard("By source address", "Address", r.by_source), sumCard("By tool", "Tool", r.by_tool), sumCard("By device", "Device, tag or target", r.by_target));
-      clear(recent).append(card("Newest calls", r.recent.length
+      clear(recent).append(card("Newest calls", r.recent.length ? () => [["Time (UTC)", "Key", "Address", "Tool", "Target", "Result", "Change", "Ms", "Data (bytes)"],
+        ...r.recent.map((c) => [new Date(c.time).toISOString(), c.caller, c.addr, c.tool, c.target || "", c.result, c.write ? "yes" : "no", c.ms, c.bytes])] : null, r.recent.length
         ? h("div", { class: "scroll" }, h("table", {},
           h("thead", {}, h("tr", {}, ["Time", "Key", "Address", "Tool", "Target", "Result", "Ms", "Data"].map((x, i) => h("th", { class: i >= 6 ? "num" : "" }, x)))),
           h("tbody", {}, r.recent.map((c) => h("tr", {}, h("td", {}, new Date(c.time).toLocaleTimeString([], { hour12: false })), h("td", { class: "mono" }, c.caller), h("td", { class: "mono" }, c.addr),
