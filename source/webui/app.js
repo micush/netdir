@@ -4929,12 +4929,17 @@
       const desc = h("input", { type: "text", value: n.description || "", maxlength: "60", "aria-label": "Description of " + n.peer });
       const pw = h("input", { type: "password", value: n.password || "", autocomplete: "new-password", "aria-label": "Password for " + n.peer });
       const mh = h("input", { class: "as", type: "text", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", value: n.multihop > 1 ? String(n.multihop) : "", placeholder: "off", "aria-label": "Multihop of " + n.peer });
-      const commit = () => {
+      // the address can be changed like the rest of the row; "was" tells the server it is the same neighbor
+      const peer = h("input", { class: "mono", type: "text", value: n.peer, spellcheck: "false", autocomplete: "off", "aria-label": "Address of " + n.peer });
+      const commit = async () => {
+        const addr = peer.value.trim() || n.peer;
         const next = clone(cfg);
-        next.neighbors[idx] = { peer: n.peer, remote_as: Number(as.value) || 0, description: desc.value.trim(), password: pw.value, multihop: Number(mh.value) || 0 };
-        save(next);
+        next.neighbors[idx] = { peer: addr, remote_as: Number(as.value) || 0, description: desc.value.trim(), password: pw.value, multihop: Number(mh.value) || 0 };
+        if (addr === n.peer) { peer.value = n.peer; save(next); return; }
+        next.neighbors[idx].was = n.peer;
+        if (await save(next)) { if (sel === n.peer) sel = addr; drawNeighbors(); }
       };
-      for (const el of [as, desc, pw, mh]) el.addEventListener("change", commit);
+      for (const el of [peer, as, desc, pw, mh]) el.addEventListener("change", commit);
       // on/off for this one neighbor (the same as Operate ▸ Anycast): off shuts the session down and keeps the neighbor
       const on = h("input", { type: "checkbox", checked: !n.disabled, disabled: !!cfg.disabled, title: cfg.disabled ? "BGP is switched off on this node" : "Off: the session is shut down and nothing is announced to this neighbor", "aria-label": "Neighbor " + n.peer + " enabled" });
       on.addEventListener("change", () => {
@@ -4945,7 +4950,7 @@
           await load();
         });
       });
-      return h("tr", { "data-peer": n.peer }, h("td", { class: "mono" }, n.peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}, on));
+      return h("tr", { "data-peer": n.peer }, h("td", {}, peer), h("td", {}, as), h("td", {}, desc), h("td", {}, withEye(pw)), h("td", {}, mh), h("td", {}, on));
     }
 
     // the new row: becomes a neighbor once it has an address and an AS

@@ -1,5 +1,21 @@
 # Changelog
 
+## [v119] - 2026-11-10 — A BGP neighbor's address can be changed
+
+### Changed
+- Configure ▸ Anycast ▸ Neighbors: the address of a neighbor can be changed after it is added. The first column of a row is now a box like the others: type the new address and leave it. Until now the address was plain text and the only way was to remove the neighbor and add it again.
+- The neighbor stays the same neighbor: its AS, description, password and multihop are kept, and one that was switched off stays off. The page sends the old address along (`was`) with `PUT /api/bgp`; it is used to carry the on/off state over and is never saved. A bad address or one another neighbor already has is refused and the old one comes back.
+- Help (Configure ▸ Anycast) says so. From the command line the way is unchanged: remove the neighbor and add it with the new address.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `app.js` and `help.js`.
+- New test `TestBGPNeighborAddressCanBeChanged`: the address changes, the neighbor stays switched off, the old address is in neither the answer nor the file, a neighbor added without `was` starts switched on, a duplicate or bad address is refused.
+- Headless Chromium against a real daemon with a real PAM login (dark): set an AS, added neighbor 192.0.2.1, changed its address to 192.0.2.9 in the row: `GET /api/bgp` and the row show 192.0.2.9 and one neighbor; typing `nonsense` was refused and 192.0.2.9 came back. No script errors.
+
+### Not verified
+- FRR was not installed for this run, so no session was watched moving from the old address to the new one; `frr.conf` is written from the saved settings as before.
+- The switched-off state carried over is covered by the Go test, not clicked in the browser. Light theme not looked at for this change (a text box replaced text in one column).
+
 ## [v118] - 2026-11-10 — Back up to the cluster nodes in one step
 
 ### Added
