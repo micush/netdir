@@ -139,6 +139,10 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 		}
 	}
 	m.cl.OnConfig(dc)
+	// the devices or their logins may have changed: the drivers kept open for reads are closed (device/pool.go)
+	if n := device.PoolFlush(); n > 0 {
+		debugf("devices: %d kept connection(s) closed: the configuration was loaded", n)
+	}
 }
 
 // keepNodePaused makes dc carry this node's live pause flag.  Whether the whole node is paused is changed only by
@@ -616,3 +620,6 @@ func (m *Mgmt) localGwIPs() []string {
 	}
 	return m.gwIPsFn()
 }
+
+// closeDevicePool closes the device drivers kept open for reads (the daemon is stopping).
+func closeDevicePool() { device.PoolFlush() }

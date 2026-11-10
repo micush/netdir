@@ -79,11 +79,19 @@ type Result struct {
 	Error    string `json:"error,omitempty"`
 	Data     any    `json:"data,omitempty"`
 	MS       int64  `json:"ms"`
+	// Reused says that the answer came over a driver kept open from an earlier request (FanoutReuse): no new login.
+	Reused bool `json:"reused,omitempty"`
 }
 
 // Fanout runs fn against every device in devs, at most par at a time, each with its own time limit, and returns one
 // Result per device in the order of devs.  A device's driver is opened before fn and closed after it.
 func Fanout(ctx context.Context, devs []Device, creds []Credential, par int, each time.Duration, fn func(context.Context, Driver) (any, error)) []Result {
+	return fanout(ctx, devs, creds, par, each, fn, one)
+}
+
+// fanout is Fanout with the way one device is asked: with a driver of its own (one) or with one that is kept (oneReuse).
+func fanout(ctx context.Context, devs []Device, creds []Credential, par int, each time.Duration, fn func(context.Context, Driver) (any, error),
+	ask func(context.Context, Device, map[string]Credential, time.Duration, func(context.Context, Driver) (any, error)) Result) []Result {
 	if par < 1 {
 		par = 1
 	}
@@ -105,7 +113,7 @@ func Fanout(ctx context.Context, devs []Device, creds []Credential, par int, eac
 				return
 			}
 			defer func() { <-sem }()
-			out[i] = one(ctx, d, cred, each, fn)
+			out[i] = ask(ctx, d, cred, each, fn)
 		}()
 	}
 	wg.Wait()

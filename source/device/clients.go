@@ -12,13 +12,19 @@ type UserDeviceLooker interface {
 	UserDevices(ctx context.Context, who string) (user map[string]any, devices []map[string]any, err error)
 }
 
-// ClientQuery is what to look for on a network: clients with one of these names (a DHCP host name, with or without a domain) or MACs,
+// ClientQuery is what to look for on a network: clients with one of these names (a DHCP host name, with or without a domain), MACs or users,
 // seen in the last Hours hours, in one network or in all of them.
 type ClientQuery struct {
-	Names   []string
-	MACs    []string
-	Hours   int
-	Network string
+	Names []string
+	MACs  []string
+	// Users are account names (jsmith, or the sign-in name): a client that signed in to the network as one of them (802.1X)
+	// matches too, whatever its host name.
+	Users []string
+	// NotNames are host names that are reported elsewhere already: a client that matches by its user and has one of these
+	// names is left out.
+	NotNames []string
+	Hours    int
+	Network  string
 }
 
 // ClientReporter is a network platform that can say how a client has been doing (Meraki, an organization device).

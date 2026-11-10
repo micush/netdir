@@ -793,3 +793,7 @@ func (o *observium) APICatalog(context.Context) (any, error) {
 }
 
 func (o *observium) Close(context.Context) { o.api.close() }
+
+// reuse forgets the row of the monitored device that was looked up last (its status and uptime are in it), which is kept for
+// the length of one request only.
+func (o *observium) reuse() { o.ref, o.row = "", nil }

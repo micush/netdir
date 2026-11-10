@@ -7,25 +7,29 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 )
 
-// ClientReport: where a device of a given name was seen on the Meraki networks in the last hours, and how it did.  For each network the
-// clients seen in the window are read (perPage 1000, filtered here by host name or MAC) and, for at most three matches, the things
+// ClientReport: where a device of a given name was seen on the Meraki networks in the last hours, and how it did.  For each network
+// that has something clients connect to (at most 400, five asked at a time; one that fails is named and the others still answer) the
+// clients seen in the window are read (perPage 1000, filtered here by host name, MAC or the account of an 802.1X sign-in) and, for at most three matches, the things
 // one looks at when someone cannot get online, each as its own part that may be missing (a wired client has no wireless statistics, a
 // switch of an old model answers less):
 //
 //	client          the record: IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage, status
 //	usage           the client's usage history (sent and received over time)
 //	policy          the client's device policy (normal, blocked, group policy)
-//	connection      wireless: connection statistics (association, authentication, DHCP, DNS, success), latency, and the connectivity
-//	                events and failed connections of the window
+//	connection      wireless: "now" (SSID, AP, the newest RSSI and SNR), the signal quality, data rate and latency over the window
+//	                (the intervals that have a value), connection statistics (association, authentication, DHCP, DNS, success),
+//	                latency, and the connectivity events and failed connections of the window
 //	switch_port     wired: the status of the switch port it was on (speed, duplex, errors, warnings, traffic, PoE)
 //	upstream        the AP or switch it was on: online or not, when it last reported
 //
 // The paths come from Meraki's dashboard API reference; none was tried against a real dashboard.
 
 const (
-	merakiClientNetworks = 60 // networks searched; more are named in the answer
+	merakiClientNetworks = 400 // networks searched; more are named in the answer
+	merakiClientWorkers  = 5   // networks asked at a time (the dashboard allows an organization ten requests a second)
 	merakiClientMatches  = 3
 	merakiClientPerPage  = 1000
 )
@@ -63,8 +67,8 @@ func (m *meraki) ClientReport(ctx context.Context, q ClientQuery) (map[string]an
 			macs[a] = true
 		}
 	}
-	if len(names)+len(macs) == 0 {
-		return nil, errors.New("nothing to look for: give a device name or a MAC address")
+	if len(names)+len(macs)+len(q.Users) == 0 {
+		return nil, errors.New("nothing to look for: give a device name, a MAC address or a user")
 	}
 	org, err := m.orgID(ctx)
 	if err != nil {
@@ -83,38 +87,119 @@ func (m *meraki) ClientReport(ctx context.Context, q ClientQuery) (map[string]an
 		}
 		nets = rows(v)
 	}
-	out := map[string]any{"window_hours": q.Hours, "searched_for": append(boolKeys(names), boolKeys(macs)...)}
+	out := map[string]any{"window_hours": q.Hours, "searched_for": append(append(boolKeys(names), boolKeys(macs)...), q.Users...)}
 	var notes []string
-	if len(nets) > merakiClientNetworks {
-		notes = append(notes, fmt.Sprintf("%d networks: only the first %d were searched; name a network to search the others", len(nets), merakiClientNetworks))
-		nets = nets[:merakiClientNetworks]
+	// a network that has nothing clients connect to (cameras, sensors, systems manager only) is not asked
+	if q.Network == "" {
+		var keep []map[string]any
+		for _, n := range nets {
+			pt, _ := n["productTypes"].([]any)
+			ok := len(pt) == 0
+			for _, x := range pt {
+				if t := str(x); t == "wireless" || t == "switch" || t == "appliance" || t == "cellularGateway" || t == "wirelessController" {
+					ok = true
+				}
+			}
+			if ok {
+				keep = append(keep, n)
+			}
+		}
+		nets = keep
+		if len(nets) > merakiClientNetworks {
+			notes = append(notes, fmt.Sprintf("%d networks: only the first %d were searched; name a network to search the others", len(nets), merakiClientNetworks))
+			nets = nets[:merakiClientNetworks]
+		}
+	}
+	notNames := map[string]bool{}
+	for _, n := range q.NotNames {
+		if k := merakiHostKey(n); k != "" {
+			notNames[k] = true
+		}
+	}
+	users := map[string]bool{}
+	for _, u := range q.Users {
+		if u = strings.ToLower(strings.TrimSpace(u)); u != "" {
+			users[u] = true
+		}
 	}
 	type hit struct {
 		net, name string
 		c         map[string]any
 	}
+	// the networks are asked a few at a time; one that fails is named and the others still answer
+	type netAnswer struct {
+		hits   []hit
+		ok     bool
+		cut    bool
+		failed string
+	}
+	answers := make([]netAnswer, len(nets))
+	sem := make(chan struct{}, merakiClientWorkers)
+	var wg sync.WaitGroup
+	for i, n := range nets {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			id := str(n["id"])
+			v, err := m.get(ctx, fmt.Sprintf("/networks/%s/clients?perPage=%d&timespan=%d", id, merakiClientPerPage, span))
+			if err != nil {
+				var se *statusError
+				if errors.As(err, &se) && (se.Code == 400 || se.Code == 404) { // a network without clients (a systems manager network) answers 400
+					return
+				}
+				answers[i].failed = err.Error()
+				return
+			}
+			a := netAnswer{ok: true}
+			l := rows(v)
+			a.cut = len(l) >= merakiClientPerPage
+			for _, c := range l {
+				// by the name the client gave, by its MAC, or by the account it signed in to the network with (802.1X)
+				u := strings.ToLower(str(c["user"]))
+				if i := strings.LastIndexByte(u, '\\'); i >= 0 {
+					u = u[i+1:]
+				}
+				byUser := u != "" && (users[u] || users[strings.SplitN(u, "@", 2)[0]]) &&
+					!notNames[merakiHostKey(str(c["description"]))] && !notNames[merakiHostKey(str(c["dhcpHostname"]))]
+				if names[merakiHostKey(str(c["description"]))] || names[merakiHostKey(str(c["dhcpHostname"]))] || macs[normMAC(str(c["mac"]))] || byUser {
+					a.hits = append(a.hits, hit{id, str(n["name"]), c})
+				}
+			}
+			answers[i] = a
+		}()
+	}
+	wg.Wait()
 	var hits []hit
-	searched := 0
-	for _, n := range nets {
-		id := str(n["id"])
-		v, err := m.get(ctx, fmt.Sprintf("/networks/%s/clients?perPage=%d&timespan=%d", id, merakiClientPerPage, span))
-		if err != nil {
-			var se *statusError
-			if errors.As(err, &se) && (se.Code == 400 || se.Code == 404) { // a network without clients (a systems manager network) answers 400
-				continue
+	searched, failed := 0, 0
+	for i, a := range answers {
+		id := str(nets[i]["id"])
+		switch {
+		case a.failed != "":
+			if failed++; failed <= 3 {
+				notes = append(notes, fmt.Sprintf("network %s could not be searched: %s", id, a.failed))
 			}
-			return nil, fmt.Errorf("clients of %s: %w", id, err)
-		}
-		searched++
-		l := rows(v)
-		if len(l) >= merakiClientPerPage {
-			notes = append(notes, fmt.Sprintf("network %s has %d or more clients in the window: the list may be cut; shorten the window", id, merakiClientPerPage))
-		}
-		for _, c := range l {
-			if names[merakiHostKey(str(c["description"]))] || names[merakiHostKey(str(c["dhcpHostname"]))] || macs[normMAC(str(c["mac"]))] {
-				hits = append(hits, hit{id, str(n["name"]), c})
+		case a.ok:
+			searched++
+			if a.cut {
+				notes = append(notes, fmt.Sprintf("network %s has %d or more clients in the window: the list may be cut; shorten the window", id, merakiClientPerPage))
 			}
+			hits = append(hits, a.hits...)
 		}
+	}
+	if failed > 3 {
+		notes = append(notes, fmt.Sprintf("%d networks in all could not be searched", failed))
+	}
+	if searched == 0 && failed > 0 {
+		return nil, fmt.Errorf("no network could be searched: %s", answers[func() int {
+			for i, a := range answers {
+				if a.failed != "" {
+					return i
+				}
+			}
+			return 0
+		}()].failed)
 	}
 	out["networks_searched"] = searched
 	if len(hits) == 0 {
@@ -181,7 +266,14 @@ func (m *meraki) clientParts(ctx context.Context, org, net, netName string, c ma
 	wireless := strings.EqualFold(str(c["recentDeviceConnection"]), "wireless") || str(c["ssid"]) != ""
 	if wireless {
 		w := "/networks/" + net + "/wireless/clients/" + id
+		hist := "?timespan=" + fmt.Sprint(span) + "&autoResolution=true&clientId=" + url.QueryEscape(id)
+		sig := historyRows(m.part(ctx, "/networks/"+net+"/wireless/signalQualityHistory"+hist), "rssi", "snr")
 		res["connection"] = map[string]any{
+			// where it is now: the SSID, the AP, and the newest signal the dashboard has for it
+			"now":                 wirelessNow(c, sig),
+			"signal_quality":      sig,
+			"data_rate":           historyRows(m.part(ctx, "/networks/"+net+"/wireless/dataRateHistory"+hist), "averageKbps", "downloadKbps", "uploadKbps"),
+			"latency_history":     historyRows(m.part(ctx, "/networks/"+net+"/wireless/latencyHistory"+hist), "avgLatencyMs"),
 			"stats":               m.part(ctx, w+"/connectionStats?timespan="+fmt.Sprint(span)),
 			"latency":             m.part(ctx, w+"/latencyStats?timespan="+fmt.Sprint(span)),
 			"connectivity_events": m.part(ctx, w+"/connectivityEvents?perPage=100&timespan="+fmt.Sprint(span)),
@@ -210,4 +302,44 @@ func (m *meraki) clientParts(ctx context.Context, org, net, netName string, c ma
 		res["upstream"] = v
 	}
 	return res
+}
+
+// historyRows keeps the intervals of a history that have a value (the dashboard answers one row per interval, most of them
+// empty when the client was not there); what is not a list (a part that is unavailable) is returned as it is.
+func historyRows(v any, keys ...string) any {
+	l, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, 0, len(l))
+	for _, x := range l {
+		r, _ := x.(map[string]any)
+		for _, k := range keys {
+			if r[k] != nil {
+				out = append(out, x)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// wirelessNow is the short answer to "how is its Wi-Fi": the SSID and AP of the client's record and the newest signal reading.
+func wirelessNow(c map[string]any, signal any) map[string]any {
+	now := map[string]any{}
+	for k, name := range map[string]string{"ssid": "ssid", "recentDeviceName": "ap", "recentDeviceSerial": "ap_serial", "status": "status", "lastSeen": "last_seen", "vlan": "vlan", "ip": "ip"} {
+		if v := c[k]; v != nil && str(v) != "" {
+			now[name] = v
+		}
+	}
+	if l, ok := signal.([]any); ok && len(l) > 0 {
+		if r, ok := l[len(l)-1].(map[string]any); ok {
+			for _, k := range []string{"rssi", "snr", "endTs"} {
+				if r[k] != nil {
+					now[map[string]string{"rssi": "rssi_dbm", "snr": "snr_db", "endTs": "signal_at"}[k]] = r[k]
+				}
+			}
+		}
+	}
+	return redactMap(now)
 }

@@ -20,6 +20,9 @@ func troubleEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...s
 	return troubleEnvWith(t, false, acl...)
 }
 
+// troubleTokens counts the sign-ins the stub Entra of troubleEnvWith got (a token request each).
+var troubleTokens int
+
 // troubleLogQueries are the log searches the stub Panorama of troubleEnvWith got, "log-type: query".
 var troubleLogQueries []string
 
@@ -27,7 +30,7 @@ var troubleLogQueries []string
 // GlobalProtect log says Joe connected with JSMITH-LAPTOP (and before that with JSMITH-HOME), its traffic log has one entry.
 func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg string, hdr ...string) (int, map[string]any)) {
 	t.Helper()
-	troubleLogQueries = nil
+	troubleLogQueries, troubleTokens = nil, 0
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := func(code int, v any) {
 			w.WriteHeader(code)
@@ -81,6 +84,7 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 			out(200, J{"value": []J{}})
 		case strings.HasSuffix(p, "/oauth2/v2.0/token"):
 			_, _ = io.Copy(io.Discard, r.Body)
+			troubleTokens++
 			out(200, J{"access_token": "TOK", "expires_in": 3599})
 		case p == "/v1.0/users/joe@contoso.com":
 			out(200, J{"id": "11111111-2222-3333-4444-555555555555", "displayName": "Joe Smith", "userPrincipalName": "joe@contoso.com"})
@@ -91,7 +95,10 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 		case p == "/api/v1/organizations/1/networks":
 			out(200, []J{{"id": "L_1", "name": "HQ"}})
 		case p == "/api/v1/networks/L_1/clients":
-			out(200, []J{{"id": "k1", "mac": "aa:bb:cc:00:00:01", "description": "jsmith-laptop", "ip": "10.1.1.5", "recentDeviceSerial": "Q2AB-CDEF-GHIJ", "recentDeviceConnection": "Wired", "lastSeen": 1000}})
+			out(200, []J{{"id": "k1", "mac": "aa:bb:cc:00:00:01", "description": "jsmith-laptop", "ip": "10.1.1.5", "recentDeviceSerial": "Q2AB-CDEF-GHIJ", "recentDeviceConnection": "Wired", "lastSeen": 1000},
+				{"id": "k2", "mac": "aa:bb:cc:00:00:02", "description": "Joes-iPhone", "user": "joe@contoso.com", "ip": "10.1.1.77", "ssid": "corp", "recentDeviceConnection": "Wireless", "lastSeen": 900}})
+		case p == "/api/v1/networks/L_1/wireless/signalQualityHistory":
+			out(200, []J{{"startTs": "a", "endTs": "b", "snr": 30, "rssi": -60}})
 		case p == "/api/v1/networks/L_1/clients/k1/usageHistory":
 			out(200, []J{{"ts": 1, "sent": 1, "received": 2}})
 		case p == "/api/v1/organizations/1/devices/statuses":
@@ -148,8 +155,12 @@ func TestDeviceTroubleshoot(t *testing.T) {
 	if err := json.Unmarshal(b, &r); err != nil {
 		t.Fatalf("%v: %s", err, b)
 	}
-	if r.EntraDevice != "entra" || r.MerakiDevice != "mer" || r.Count != 2 || r.Hours != 6 || len(r.Devices) != 1 {
+	// the device Entra names, and what signed in to the network with the account (a phone on the Wi-Fi)
+	if r.EntraDevice != "entra" || r.MerakiDevice != "mer" || r.Count != 2 || r.Hours != 6 || len(r.Devices) != 2 {
 		t.Fatalf("answer: %s", b)
+	}
+	if !strings.Contains(string(b), `"found_by"`) || !strings.Contains(string(b), "Joes-iPhone") || !strings.Contains(string(b), `"rssi_dbm":-60`) {
+		t.Errorf("the client found by the account, with its Wi-Fi signal: %s", b)
 	}
 	d := r.Devices[0]
 	if d.Entra["displayName"] != "JSMITH-LAPTOP" || len(d.Network.Matches) != 1 || d.Network.Matches[0].Client["ip"] != "10.1.1.5" || d.Network.Matches[0].Usage == nil {
@@ -244,14 +255,14 @@ func TestTroubleshootUserWithFirewallLogs(t *testing.T) {
 	}
 	// the Entra device and the VPN's machine are one; the machine only the VPN log knows is followed too
 	ds := m["devices"].([]any)
-	if len(ds) != 2 || ds[0].(map[string]any)["name"] != "JSMITH-LAPTOP" || ds[0].(map[string]any)["entra"] == nil || ds[1].(map[string]any)["name"] != "JSMITH-HOME" || ds[1].(map[string]any)["entra"] != nil {
+	if len(ds) != 3 || ds[2].(map[string]any)["found_by"] == nil || ds[0].(map[string]any)["name"] != "JSMITH-LAPTOP" || ds[0].(map[string]any)["entra"] == nil || ds[1].(map[string]any)["name"] != "JSMITH-HOME" || ds[1].(map[string]any)["entra"] != nil {
 		t.Errorf("devices: %s", txt)
 	}
 	fw := m["firewall"].(map[string]any)
-	if got := fmt.Sprint(fw["addresses"]); got != "[10.9.9.9 10.9.9.8 10.1.1.5]" {
+	if got := fmt.Sprint(fw["addresses"]); got != "[10.9.9.9 10.9.9.8 10.1.1.5 10.1.1.77]" {
 		t.Errorf("addresses: %s", got)
 	}
-	if fw["query"] != "(addr in 10.9.9.9) or (addr in 10.9.9.8) or (addr in 10.1.1.5)" || len(fw["traffic"].([]any)) != 1 || len(fw["threat"].([]any)) != 0 {
+	if fw["query"] != "(addr in 10.9.9.9) or (addr in 10.9.9.8) or (addr in 10.1.1.5) or (addr in 10.1.1.77)" || len(fw["traffic"].([]any)) != 1 || len(fw["threat"].([]any)) != 0 {
 		t.Errorf("firewall: %s", txt)
 	}
 	if got := strings.Join(troubleLogQueries, " | "); got != "globalprotect: (srcuser contains 'joe') | traffic: "+fw["query"].(string)+" | threat: "+fw["query"].(string) {
@@ -329,5 +340,59 @@ func TestTroubleshootNames(t *testing.T) {
 	}
 	if _, err := pickLogDevice(nil, ""); err == nil || !strings.Contains(err.Error(), "no enabled panorama or panos") {
 		t.Errorf("none: %v", err)
+	}
+}
+
+// A read of a device keeps its driver, and with it the sign-in, for the next read: over MCP, and for the troubleshooting.
+func TestDeviceReadsShareOneSignIn(t *testing.T) {
+	if !device.ReuseDrivers {
+		t.Skip("NETDIR_DEVICE_REUSE=0")
+	}
+	e, post := troubleEnvWith(t, false, "127.0.0.1")
+	device.PoolFlush()
+	// the query route reads the inventory the supervisor holds
+	inventory := func() {
+		dc, _, _ := e.mg.LiveConfig()
+		sup := e.ws.status.sup
+		sup.mu.Lock()
+		sup.dc.Settings.Devices, sup.dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
+		sup.mu.Unlock()
+	}
+	inventory()
+	facts := func() string {
+		_, m := post(mcpCall("device_api_get", `{"target":"mer","path":"/organizations/1/networks"}`))
+		txt, isErr := toolResult(t, m)
+		if isErr || !strings.Contains(txt, "HQ") {
+			t.Fatalf("the read: %v %s", isErr, txt)
+		}
+		if _, m := tsAnswer(t, e, `{"user":"joe@contoso.com"}`); m["user"] == nil {
+			t.Fatal("the troubleshooting did not find the user")
+		}
+		return strings.ReplaceAll(txt, " ", "")
+	}
+	if txt := facts(); strings.Contains(txt, `"reused":true`) || troubleTokens != 1 {
+		t.Fatalf("the first read: %d sign-ins, %s", troubleTokens, txt)
+	}
+	for i := 0; i < 3; i++ {
+		if txt := facts(); !strings.Contains(txt, `"reused":true`) {
+			t.Fatalf("read %d was not over the kept driver: %s", i+2, txt)
+		}
+	}
+	if troubleTokens != 1 {
+		t.Errorf("%d sign-ins to Entra for four troubleshootings; one was enough", troubleTokens)
+	}
+	// a saved configuration closes what was kept: the next read signs in again
+	dc, _, _ := e.mg.LiveConfig()
+	dc.Settings.Devices[0].Tags = []string{"site=hq"}
+	if err := e.mg.PutConfig(dc, "test", "a tag"); err != nil {
+		t.Fatal(err)
+	}
+	e.mg.OnConfigLoaded(dc)
+	inventory()
+	if n := device.PoolIdle(); n != 0 {
+		t.Errorf("%d drivers kept after the configuration changed", n)
+	}
+	if txt := facts(); strings.Contains(txt, `"reused":true`) || troubleTokens != 2 {
+		t.Errorf("after the change: %d sign-ins, %s", troubleTokens, txt)
 	}
 }

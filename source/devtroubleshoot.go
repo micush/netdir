@@ -162,7 +162,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	}
 	devs, creds := dc.Settings.Devices, dc.Settings.DeviceCredentials
 	ask := func(d device.Device, to time.Duration, fn func(context.Context, device.Driver) (any, error)) (any, error) {
-		r := device.Fanout(context.Background(), []device.Device{d}, creds, 1, to, fn)[0]
+		r := device.FanoutReuse(context.Background(), []device.Device{d}, creds, 1, to, fn)[0]
 		if !r.OK {
 			return nil, errors.New(r.Error)
 		}
@@ -377,9 +377,13 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		}
 		devOut = append(devOut, e)
 	}
+	var byUser []string // the account names a client may have signed in to the network with
+	if a.User != "" && short != "" {
+		byUser = []string{short}
+	}
 	if merr != nil {
 		note("no network lookup: %v", merr)
-	} else if len(machines) > 0 {
+	} else if len(machines) > 0 || len(byUser) > 0 {
 		out["meraki_device"] = md.Name
 		res, err := ask(md, 150*time.Second, func(ctx context.Context, d device.Driver) (any, error) {
 			r, ok := d.(device.ClientReporter)
@@ -387,7 +391,9 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				return nil, errors.New("this device cannot report on clients")
 			}
 			var all []any
+			var seen []string
 			for _, mc := range machines {
+				seen = append(seen, mc.name)
 				rep, err := r.ClientReport(ctx, device.ClientQuery{Names: []string{mc.name}, Hours: hours, Network: a.Network})
 				if err != nil {
 					all = append(all, map[string]any{"error": err.Error()})
@@ -395,9 +401,21 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				}
 				all = append(all, rep)
 			}
+			// a user's other clients: whatever signed in to the network with the account (802.1X), such as a phone on the
+			// Wi-Fi, which no directory lists by a name the network knows
+			if len(byUser) > 0 {
+				if rep, err := r.ClientReport(ctx, device.ClientQuery{Users: byUser, NotNames: seen, Hours: hours, Network: a.Network}); err == nil {
+					if ms, _ := rep["matches"].([]map[string]any); len(ms) > 0 {
+						all = append(all, rep)
+					}
+				}
+			}
 			return all, nil
 		})
 		reps, _ := res.([]any)
+		if len(reps) > len(devOut) { // the clients found by the account
+			devOut = append(devOut, map[string]any{"name": "signed in to the network as " + short, "found_by": "the account the client signed in to the network with (802.1X)"})
+		}
 		for i := range devOut {
 			switch {
 			case err != nil:
@@ -458,8 +476,8 @@ func mcpDeviceTroubleshootTool() mcpTool {
 		desc: "Troubleshoot a user (\"tshoot user msmith\") or a machine (\"tshoot host PC-123\"): give user or host, not both. " +
 			"For a user: look the user up in Microsoft Entra by sign-in name, account name, object ID or name and take the device they signed in with most recently; search the firewall's VPN (GlobalProtect) log for the account, which names the machine they connected with and its addresses. " +
 			"For a host: the VPN log says which user last connected with that machine and from where, and Entra which users are registered on a device of that name (last_user). " +
-			"Then, for each machine found: find it on the Meraki network by its name and return what helps when someone cannot get online or is slow, for the last few hours (not only now): the Meraki client (IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage), its usage history and device policy; " +
-			"for a wireless client its connection statistics, latency, connectivity events and failed connections; for a wired one its switch port's status (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. " +
+			"Then, for each machine found: find it on the Meraki network by its name (and, for a user, also every client that signed in to the network with the account, such as a phone on the Wi-Fi) and return what helps when someone cannot get online or is slow, for the last few hours (not only now): the Meraki client (IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage), its usage history and device policy; " +
+			"for a wireless client its Wi-Fi now (SSID, AP, RSSI and SNR), its signal quality, data rate and latency over the window, its connection statistics, connectivity events and failed connections; for a wired one its switch port's status (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. " +
 			"Last, the firewall's newest traffic and threat log entries for the addresses found (the VPN address, the address on the network). " +
 			"The answer has: user or host and last_user, devices (each with entra and network), vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
 			"The firewall logs are those of the Panorama in the inventory (or of the one PAN-OS firewall); a system that is not configured is left out with a note. The systems are matched by name (case and domain ignored); a phone often has a different host name, so a device may be reported as not seen. Read only.",

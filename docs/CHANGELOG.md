@@ -1,5 +1,34 @@
 # Changelog
 
+## [v125] - 2026-11-10 — Reads keep their login; tshoot gets the Wi-Fi
+
+### Added
+- **Reads reuse the driver.** A read of a device used to cost a TLS handshake and, on most platforms, a login before the question and a logout after it. The driver a read used (its connections and its session or token) is now kept for the next read of the same device (`device/pool.go`, `FanoutReuse`): for two minutes without use and never longer than ten minutes, one request at a time per driver (two reads at once use two), at most two idle per device and 512 in all. Every `device_*` read (`/api/devices/query`) and `tshoot` use it. What the device answers is asked anew each time: nothing a device said is kept (the PAN-OS and Observium drivers, which remembered something for the length of a request, forget it before they are used again).
+- An answer that came over a kept driver says `"reused": true`.
+- A kept driver whose session the device has ended (401, 403) or whose connection has gone fails the first read it is used for; that read is then made once more with a new driver, so the caller sees no error. A driver that failed in any way is closed, not kept.
+- Changes (`device_change`, `device_change_raw`), captures and the health check do not use it: each has a driver and a login of its own, as before.
+- The kept drivers are closed, and their sessions logged out, when the configuration is loaded (a device or login may have changed; the key of a kept driver is everything it was opened with, the login included) and when the daemon stops.
+- `NETDIR_DEVICE_REUSE=0` in the daemon's environment switches it off.
+- **tshoot: the Wi-Fi.** A wireless client's `connection` now starts with `now` (SSID, AP, VLAN, address, the newest RSSI in dBm and SNR in dB) and has `signal_quality`, `data_rate` and `latency_history` over the window (only the intervals that have a value), beside the connection statistics, latency, connectivity events and failed connections it had.
+- **tshoot user: the clients that signed in with the account.** Besides the machines Entra and the VPN log name, every Meraki client that signed in to the network as the user (802.1X; `CORP\jsmith`, `jsmith@…` and `jsmith` are one) is reported, as one more entry of `devices` with `found_by`: a phone on the Wi-Fi has a host name no directory knows. Their addresses go into the firewall log search too.
+
+### Fixed
+- tshoot searched only the first 60 Meraki networks, one after the other, and one network the dashboard failed on (a 502) ended the whole search with an error. It now asks every network that has an AP, a switch or an appliance (at most 400; camera, sensor and systems manager networks are skipped), five at a time, and a network that fails is named in `notes` while the others answer. In an organization with more than 60 networks a client beyond the first 60 was reported as not seen, and with it its Wi-Fi.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `sh tools/leaktest.sh`.
+- The pool (`device/pool_test.go`, with the race detector): three reads are one login and no logout; a change has a driver of its own; another password or address is another driver; the idle time and the age limit, also for a driver in steady use; a 401 on a kept driver is asked again and the caller gets the answer, a 404 is the answer and the driver is closed; 40 reads at once never share a driver, none is lost, at most two stay; a driver that panics is closed; switched off, nothing is kept.
+- `TestDeviceReadsShareOneSignIn`: against the Entra and Meraki stubs four troubleshootings and four MCP reads make one sign-in to Entra, the second MCP read says `reused`, and after the configuration is saved nothing is kept and the next read signs in again.
+- `TestMerakiClientReport`: the signal history without its empty intervals, `now` with the newest reading, the data rate, a history the dashboard does not have said as unavailable; the camera network is not asked; the network that answers 502 is named and the others are searched; by the account (`CORP\jsmith`) the phone is found, and the laptop is left out when it is reported under its name. The troubleshooting tests have the phone as a third entry with its signal.
+
+### Not verified
+- No speed was measured: there is no real device in the sandbox. What is saved per read is one TLS handshake and one login (and a logout), which on a switch or a firewall is usually most of a short read; the tests count logins, not milliseconds.
+- Not run against real devices. The risk of keeping sessions is on platforms that limit them (ArubaOS-CX allows a few sessions per user): netdir now holds up to two sessions per device for up to two idle minutes where it held one for the length of a read; the health check's own login comes on top, as before. If a platform objects, `NETDIR_DEVICE_REUSE=0` restores the old way.
+- The connections of a kept driver still close after 30 seconds without use (unchanged), so a read after a longer pause saves the login but not the handshake.
+- The Wi-Fi history paths (`/networks/{id}/wireless/signalQualityHistory`, `dataRateHistory`, `latencyHistory` with `clientId`, `timespan`, `autoResolution`) and the `user` and `productTypes` fields are Meraki's dashboard API as documented, seen only in the stub, like the rest of the client report. A part the dashboard refuses is shown as `unavailable` with its reason.
+- Why the Wi-Fi was missing on your gateway was not seen (no access to that answer): the network limit and the single failing network are the two causes found in the code. If it is still missing, the `notes` and the `network` part of the answer say what was searched and found.
+- GUI: nothing changed; not opened.
+
 ## [v124] - 2026-11-10 — tshoot user and tshoot host, with the firewall's logs; troubleshoot is tshoot
 
 ### Added

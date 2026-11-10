@@ -1389,6 +1389,9 @@ func (p *panos) APICatalog(ctx context.Context) (any, error) {
 
 func (p *panos) Close(context.Context) { p.api.close() }
 
+// reuse forgets the system info (the uptime is in it), which is kept for the length of one request only.
+func (p *panos) reuse() { p.sys, p.sysDone = nil, false }
+
 // LogSearch is the search of one log for the troubleshooting of a user or a host: the newest n entries that match.
 func (p *panos) LogSearch(ctx context.Context, logType, query string, n int) ([]map[string]any, error) {
 	q, err := panLogQuery(url.Values{"log-type": {logType}, "query": {query}, "nlogs": {strconv.Itoa(n)}})

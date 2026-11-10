@@ -32,13 +32,29 @@ func merakiClientStub(t *testing.T) (Device, *[]string) {
 		seen = append(seen, p)
 		switch p {
 		case "/organizations/1/networks":
-			out(200, []J{{"id": "L_1", "name": "HQ"}, {"id": "L_2", "name": "Branch"}})
+			out(200, []J{{"id": "L_1", "name": "HQ", "productTypes": []string{"wireless", "switch"}}, {"id": "L_2", "name": "Branch", "productTypes": []string{"switch"}},
+				{"id": "L_3", "name": "Cameras", "productTypes": []string{"camera", "sensor"}}, {"id": "L_4", "name": "Broken", "productTypes": []string{"wireless"}}})
+		case "/networks/L_4/clients": // a network the dashboard fails on: the others still answer
+			out(502, J{"errors": []string{"Internal server error"}})
+		case "/networks/L_1/wireless/signalQualityHistory":
+			if q := r.URL.Query(); q.Get("clientId") != "k1" && q.Get("clientId") != "k7" || q.Get("timespan") != "21600" || q.Get("autoResolution") != "true" {
+				t.Errorf("signalQualityHistory %v", q)
+			}
+			out(200, []J{{"startTs": "2026-11-05T09:00:00Z", "endTs": "2026-11-05T09:05:00Z", "snr": nil, "rssi": nil}, {"startTs": "2026-11-05T09:05:00Z", "endTs": "2026-11-05T09:10:00Z", "snr": 31, "rssi": -58},
+				{"startTs": "2026-11-05T09:10:00Z", "endTs": "2026-11-05T09:15:00Z", "snr": 12, "rssi": -81}})
+		case "/networks/L_1/wireless/dataRateHistory":
+			out(200, []J{{"startTs": "2026-11-05T09:10:00Z", "endTs": "2026-11-05T09:15:00Z", "averageKbps": 86000, "downloadKbps": 120000, "uploadKbps": 52000}, {"startTs": "x", "endTs": "y", "averageKbps": nil}})
+		case "/networks/L_1/wireless/latencyHistory":
+			out(404, J{})
+		case "/networks/L_1/clients/k7/usageHistory", "/networks/L_1/clients/k7/policy", "/networks/L_1/wireless/clients/k7/connectionStats", "/networks/L_1/wireless/clients/k7/latencyStats", "/networks/L_1/wireless/clients/k7/connectivityEvents":
+			out(200, []J{})
 		case "/networks/L_1/clients":
 			if r.URL.Query().Get("timespan") != "21600" {
 				t.Errorf("timespan %q", r.URL.Query().Get("timespan"))
 			}
 			out(200, []J{{"id": "k1", "mac": "aa:bb:cc:00:00:01", "description": "JSMITH-LAPTOP", "ip": "10.1.1.5", "recentDeviceSerial": "Q2AB-CDEF-GHIJ", "recentDeviceConnection": "Wireless", "ssid": "corp", "lastSeen": 1000},
-				{"id": "k9", "description": "OTHER-PC", "lastSeen": 3000}})
+				{"id": "k9", "description": "OTHER-PC", "lastSeen": 3000},
+				{"id": "k7", "mac": "aa:bb:cc:00:00:07", "description": "Joes-iPhone", "user": "CORP\\jsmith", "ip": "10.1.1.77", "recentDeviceSerial": "Q2AB-CDEF-GHIJ", "recentDeviceName": "AP-Lobby", "recentDeviceConnection": "Wireless", "ssid": "corp", "lastSeen": 900}})
 		case "/networks/L_2/clients":
 			out(200, []J{{"id": "k3", "mac": "aa:bb:cc:00:00:01", "description": "jsmith-laptop.corp.local", "ip": "10.2.2.9", "switchport": "5", "recentDeviceSerial": "Q2SW-ITCH-0001", "recentDeviceConnection": "Wired", "lastSeen": 2000}})
 		case "/networks/L_1/clients/k1/usageHistory", "/networks/L_2/clients/k3/usageHistory":
@@ -54,7 +70,7 @@ func merakiClientStub(t *testing.T) (Device, *[]string) {
 		case "/networks/L_1/wireless/clients/k1/connectivityEvents":
 			out(200, []J{{"type": "dhcp", "subtype": "timeout"}})
 		case "/networks/L_1/wireless/failedConnections":
-			if r.URL.Query().Get("clientId") != "k1" {
+			if id := r.URL.Query().Get("clientId"); id != "k1" && id != "k7" {
 				t.Errorf("failedConnections %v", r.URL.Query())
 			}
 			out(200, []J{})
@@ -94,6 +110,15 @@ func TestMerakiClientReport(t *testing.T) {
 	if len(ms) != 2 || rep["networks_searched"] != 2 || rep["window_hours"] != 6 {
 		t.Fatalf("report: %s", js)
 	}
+	// the camera network is not asked, and the one the dashboard fails on is named without costing the others
+	for _, p := range *seen {
+		if strings.Contains(p, "L_3") {
+			t.Errorf("a network without clients was asked: %s", p)
+		}
+	}
+	if !strings.Contains(js, "network L_4 could not be searched") {
+		t.Errorf("the network that failed is not named: %v", rep["notes"])
+	}
 	// the one seen last (the wired one at Branch) comes first? both are reported; find them by network
 	byNet := map[string]map[string]any{}
 	for _, m := range ms {
@@ -106,6 +131,15 @@ func TestMerakiClientReport(t *testing.T) {
 	conn := w["connection"].(map[string]any)
 	if conn["stats"].(map[string]any)["connectionStats"] == nil || conn["latency"].(map[string]any)["unavailable"] == nil || conn["connectivity_events"] == nil || conn["failed_connections"] == nil {
 		t.Errorf("wireless parts: %v", conn)
+	}
+	// the Wi-Fi: the signal over time without the empty intervals, the newest reading as "now", the data rate, and a part
+	// the dashboard does not have said as such
+	now := conn["now"].(map[string]any)
+	if sig := conn["signal_quality"].([]any); len(sig) != 2 || now["rssi_dbm"] != float64(-81) || now["snr_db"] != float64(12) || now["ssid"] != "corp" {
+		t.Errorf("signal: %v now %v", conn["signal_quality"], now)
+	}
+	if dr := conn["data_rate"].([]any); len(dr) != 1 || conn["latency_history"].(map[string]any)["unavailable"] == nil {
+		t.Errorf("data rate and latency history: %v %v", conn["data_rate"], conn["latency_history"])
 	}
 	if w["switch_port"] != nil {
 		t.Errorf("a wireless client got a switch port: %v", w["switch_port"])
@@ -125,6 +159,13 @@ func TestMerakiClientReport(t *testing.T) {
 	}
 	if strings.Contains(js, "OTHER-PC") {
 		t.Error("an unrelated client was reported")
+	}
+	// by the account a client signed in to the network with: the phone, whatever its name; the laptop is left out when it is
+	// reported under its name already
+	rep, err = cr.ClientReport(context.Background(), ClientQuery{Users: []string{"jsmith"}, NotNames: []string{"JSMITH-LAPTOP"}})
+	if ms, _ := rep["matches"].([]map[string]any); err != nil || len(ms) != 1 || ms[0]["client"].(map[string]any)["description"] != "Joes-iPhone" ||
+		ms[0]["connection"].(map[string]any)["now"].(map[string]any)["ap"] != "AP-Lobby" {
+		t.Fatalf("by user: %v %v", rep, err)
 	}
 	// by MAC alone; one network; a window of 6 hours is the default, other windows are sent as seconds
 	*seen = nil

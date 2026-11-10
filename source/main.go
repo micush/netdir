@@ -536,6 +536,7 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	ensureReadGroup(dc.Web)
 	web.Apply(dc.Web)
 	defer web.Stop()
+	defer closeDevicePool() // log out of the devices whose sessions were kept open for reads
 	web.mcp.Start()
 	defer web.mcp.Stop()
 	mg.OnConfigLoaded(dc) // first history entry, cluster listener

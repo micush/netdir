@@ -175,7 +175,7 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(allDevs), op, cmd, to, got)
 		}()
 	}
-	local := device.Fanout(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (v any, err error) {
+	local := device.FanoutReuse(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (v any, err error) {
 		device.RunRaw(s.raw, func() { v, err = runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp && !s.raw) })
 		return v, err
 	})
