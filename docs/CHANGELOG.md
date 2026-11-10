@@ -1,5 +1,47 @@
 # Changelog
 
+## [v118] - 2026-11-10 — Back up to the cluster nodes in one step
+
+### Added
+- Configure ▸ Backup ▸ Servers ▸ **Use the cluster nodes** (shown in a cluster) and `netdir --backup-cluster` (`POST /api/backup/cluster`). One press replaces doing this by hand on every node: each node makes itself a local account `netdirbackup` (no password, key only), a directory `backups` in its home, and an `authorized_keys` with the backup keys of all the nodes; every node is then added to the shared list of servers. No password is typed or kept.
+- The keys are added as `restrict,command="internal-sftp"`: file transfer only, no shell command. The account has a real shell (`/bin/sh`) because many SSH servers start SFTP through the account's shell, and a `nologin` shell is what made "Ensure the remote shell produces no output" appear when this was set up by hand.
+- It can be pressed again: an account, key or server that is already there is left alone. A node that does not answer is named in red beside the button (and by the CLI, which then exits 1); press again when it is back.
+- `POST /api/backup/provision` is what a node sends the others (the keys to authorize); it goes through the cluster's signed relay and is refused for read-only users like every other change.
+- Help (Configure ▸ Backup): a step-by-step for it. Usage text: `--backup-cluster`.
+
+### Changed
+- Nothing in the existing servers, Install key or restore. The list still holds at most 8 servers: in a larger cluster the first 8 nodes are added and the rest are reported.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `app.js` and `help.js`.
+- New tests (`backupcluster_test.go`): the account is made once (`useradd --password *`), the keys are written once with the SFTP-only options, modes 700/600, a second run changes nothing, a line that is no key is dropped, an account with uid 0 is refused, a `.ssh` that is a symbolic link is not followed, and no cluster is an error.
+- Live, as root in the sandbox: a real `sshd`, two real daemons clustered on 127.0.0.1 and 127.0.0.2. `--backup-cluster` on the replica: the account was made with password field `*`, `.ssh` 700, `authorized_keys` 600 with both nodes' keys, `backups` 700; both nodes' `netdir.conf` got the two servers (the change went through the primary). `--backup-now` on both: each node's archive arrived in `~netdirbackup/backups` and `--backup-status` shows success on both servers. `ssh … id` with a node's key answers "This service allows sftp connections only".
+- Headless Chromium against those daemons with a real PAM login, light and dark: removed a server row, pressed **Use the cluster nodes**, the row came back, both config files hold both servers, no red text, no script errors.
+
+### Not verified
+- The two daemons ran on one host, so they shared one `/etc` and one account: the second node found the account the first had made. Making the account on a separate machine through the relay was not run (the per-node mount namespace check of the Users page was not repeated for this).
+- Only Ubuntu's OpenSSH and `useradd` were used. RHEL-family hosts (SELinux contexts on a new `~/.ssh`, `sshd` settings such as `AllowUsers`/`AllowGroups` that would keep `netdirbackup` out) were not tried; **Test** on the row says so if a node refuses the login.
+- A node that is down during the run, and a cluster of more than 8 nodes, were only read in the code, not run.
+- A node also backs up to itself (it is in the shared list); that copy is of no use if the node is lost.
+
+## [v117] - 2026-11-10 — The Install key password box keeps its width when shown
+
+### Fixed
+- Configure ▸ Backup ▸ Servers ▸ Install key: clicking the eye beside the password made the box narrower (288 px to 261 px). The width was set by a rule for `input[type=password]` only, and the eye turns the box into `type=text`. The width is now set by where the box is, not by its type (`style.css`).
+
+### Added
+- Test `TestPasswordBoxKeepsItsSizeWhenRevealed`: fails for any rule in `style.css` that sizes a password box without also naming the text type.
+
+### Verified
+- The new test passes, and fails with the old rule put back. `gofmt -l .` prints nothing.
+- Real daemon (PAM build, amd64) with a throwaway PAM user, headless Chromium, light and dark: the box is 288 px wide hidden, shown and hidden again; with the old stylesheet the same run measured 288, 261, 288. No script errors.
+- PAM login over HTTPS: the group member got in; a wrong password and a valid user outside the group were refused with the same message.
+
+### Not verified
+- The owner asked for the change without the full process, so these were not run for this version: `go vet ./...`, `go test -race -count=1 ./...`, the `CGO_ENABLED=0` vet and tests, and the cross-compiles (`linux/amd64`, `arm64`, `arm`, `386`, `riscv64`). The change is one CSS rule and one new test file.
+- The root login in the PAM check was answered by the lockout ("Too many failed attempts") after the two refusals before it, not by the generic message; it was not repeated on its own.
+- Other password boxes were not measured. No other rule sizes only the password type, but a few size only `input[type=text]` (`.bgprow`, `.devask`, `table.policy`), which could change a box there when it is shown.
+
 ## [v116] - 2026-11-09 — Clear unused join codes
 
 ### Added
