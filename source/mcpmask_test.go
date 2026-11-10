@@ -150,3 +150,14 @@ func TestMaskXForms(t *testing.T) {
 		}
 	}
 }
+
+// An e-mail address is shown by the name before the @ and nothing else: no @, no domain, no token.
+func TestMaskEmailShowsOnlyTheName(t *testing.T) {
+	out := maskText("contact Jo.Doe+net@Corp.Example.COM and noc@corp.example.com, not ops@other.example.net.")
+	if want := "contact Jo.Doe+net and noc, not ops."; out != want {
+		t.Fatalf("masked: %q, want %q", out, want)
+	}
+	if again := maskText(out); again != out {
+		t.Errorf("masking twice changed it: %q", again)
+	}
+}

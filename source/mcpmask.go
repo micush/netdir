@@ -317,7 +317,8 @@ func (m *maskRules) text(s string) string {
 		s = m.hideEncoded(s)
 	}
 	if r.Emails {
-		s = reMail.ReplaceAllStringFunc(s, func(x string) string { return maskTag("MASKED-EMAIL", strings.ToLower(x)) })
+		// only the name before the @ is shown: the @ and the domain, which say whose address it is, are left out
+		s = reMail.ReplaceAllStringFunc(s, func(x string) string { return x[:strings.LastIndexByte(x, '@')] })
 	}
 	if r.PublicASNs || r.PrivateASNs || r.PublicIPs || r.PrivateIPs {
 		s = reRDText.ReplaceAllStringFunc(s, func(x string) string {

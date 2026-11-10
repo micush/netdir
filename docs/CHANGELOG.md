@@ -1,5 +1,41 @@
 # Changelog
 
+## [v123] - 2026-11-10 — Privacy: an e-mail address is shown by its name only
+
+### Changed
+- An e-mail address in an answer to an MCP caller is now the name before the `@` and nothing else: `jo.doe@example.com` is `jo.doe`. v122 wrote `jo.doe@MASKED-EMAIL-3fa91c`; the `@` and the token are gone. Nothing of the domain is shown and nothing stands in for it.
+- So an answer no longer says that a name was an e-mail address, or which addresses share a domain. The `MASKED-EMAIL` token is no longer made.
+- **E-mail addresses** on Configure ▸ Privacy, its default (on for standard and strict) and the setting are unchanged; with the box off an address is shown whole.
+- The tool instructions an MCP caller reads, the help (MCP) and the README say so.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `help.js`.
+- Test `TestMaskEmailShowsOnlyTheName` (it replaces v122's): three addresses in a sentence become their names as written, the text around them is untouched, and masking the result again changes nothing.
+- `sh tools/leaktest.sh` passes: no whole e-mail address of the drivers' test data gets through the strict level.
+
+### Not verified
+- The name before the `@` reaches the caller by design; a name that is itself sensitive is shown unless it is a word of yours on Configure ▸ Privacy.
+- A domain that appears on its own in an answer (a host name, a DNS zone) is not hidden by this box, as before.
+- Not looked at through a live MCP caller.
+
+## [v122] - 2026-11-10 — Privacy: an e-mail address keeps its name, only the domain is hidden
+
+### Changed
+- An e-mail address in an answer to an MCP caller is no longer replaced whole. The name before the `@` stays and the domain becomes the token: `jo.doe@example.com` is now `jo.doe@MASKED-EMAIL-3fa91c` (was `MASKED-EMAIL-3fa91c`). So an assistant can tell users apart and name them, without learning whose domain it is.
+- The token is made from the domain alone (lower case), so every address of one domain carries the same token and another domain another. As before it is a keyed hash that changes at a restart and between nodes and cannot be turned back.
+- This is what **E-mail addresses** on Configure ▸ Privacy does at both levels; the box, its default (on for standard and strict) and the setting are unchanged. With the box off an address is shown whole, as before.
+- The tool instructions an MCP caller reads, the help (MCP) and the README say so.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `help.js`.
+- New test `TestMaskEmailHidesOnlyTheDomain`: the name is kept as written (with its capitals, dots and `+tag`), two addresses of one domain get one token whatever the case of the domain, another domain another token, no part of a domain is left, and masking the result again changes nothing.
+- `sh tools/leaktest.sh` passes: no whole e-mail address of the drivers' test data gets through the strict level.
+
+### Not verified
+- The name before the `@` now reaches the caller by design. The leak test looks for whole addresses (name, `@`, domain), so it says nothing about names; a name that is itself sensitive (a person's full name) is shown. A word of yours on Configure ▸ Privacy still hides it.
+- A domain that also appears on its own in an answer (a host name, a DNS zone) is not hidden by this box: that was so before and is unchanged.
+- Not looked at through a live MCP caller; the change is one function in `mcpmask.go`.
+
 ## [v121] - 2026-11-10 — PAN-OS and Panorama: search the logs
 
 ### Added
