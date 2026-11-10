@@ -1,5 +1,36 @@
 # Changelog
 
+## [v124] - 2026-11-10 — tshoot user and tshoot host, with the firewall's logs; troubleshoot is tshoot
+
+### Added
+- `netdir tshoot host NAME [HOURS]` (`--troubleshoot-host NAME`, `GET /api/devices/troubleshoot?host=NAME`, `device_troubleshoot_user` with `host`): start from a machine. The VPN (GlobalProtect) log of the Panorama says which user last connected with it and from where, Entra says which users are registered on a device of that name; the answer's `last_user` is the newest VPN event's user, or the user registered on the Entra device when the log has none. The machine is then followed like a user's.
+- `netdir tshoot user NAME [HOURS]` now also asks the firewall: the VPN log is searched for the account (`(srcuser contains 'msmith')`), which names the machine the user connected with and its addresses, so a user who is only on the VPN is found too and a machine Entra does not list is followed (at most 3 machines).
+- Both add `firewall`: the newest 50 traffic and 20 threat log entries for the addresses found (the VPN address and the address the Meraki client had, at most 4; `(addr in 10.1.2.3) or …`), and `vpn`: the query, the newest event as `last` and the newest 20 events.
+- `troubleshoot` is the same word as `tshoot`: `netdir troubleshoot user msmith`, `netdir troubleshoot host PC-123 12`. `tshoot NAME` without `user` is still a user.
+- `panorama=NAME` (MCP: `panorama`) picks the device whose logs are searched when there are several; without it the Panorama of the inventory is used, else the one PAN-OS firewall.
+- GUI: the form has a **Host** box beside **User** (one of the two), and the menu item, now **Troubleshoot user or host**, is also on a Panorama and a PAN-OS firewall.
+- Drivers: `LogSearch` on PAN-OS (the log search of v121 as a list of entries) and `DeviceUsers` on Entra (`/devices?$filter=displayName eq '…'`, then each device's `registeredUsers` and `registeredOwners`).
+
+### Changed
+- None of the three systems is required any more. Each is asked when it is in the inventory and enabled; one that is missing, or fails, is left out and `notes` says why. A user with no Entra device in the inventory is an error only when there is no Panorama or firewall to ask instead. A system that is named (`entra=`, `panorama=`) and cannot be used is still an error.
+- The answer keeps its shape (`user`, `devices` with `entra` and `network`, `notes`, `window_hours`) and gains `name` on each device, `host`, `last_user`, `vpn`, `firewall` and `panorama_device`. A user without devices in Entra no longer ends the lookup: the VPN log may still name a machine.
+- The names that go into a log filter are checked first (letters, digits and `. _ -`): a host with a quote or a bracket is refused, and a user typed as a name with spaces or an object ID is searched in the logs by the account name Entra gave.
+- `hours` bounds the Meraki part as before. The log entries are the newest ones whatever their age: the firewall's clock and time zone are its own, so no time is put into the filter.
+- Usage text, the MCP tool's description, the help and the README say all this.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` (cgo off: the PAM stub), `node --check` on `app.js` and `help.js`, `sh tools/leaktest.sh`.
+- The tests of v123 for the user lookup pass unchanged (same answers without a Panorama).
+- New tests against one stub that is Entra, Meraki and a Panorama: `TestTroubleshootUserWithFirewallLogs` (the three searches the firewall got, the machine of the VPN log joined with the Entra device by name, a second machine only the VPN log knows, the addresses and the traffic entry), `TestTroubleshootHost` (last user from the VPN log; from Entra's registered users without a Panorama; an unknown host is an answer with notes; a user and a host together, a quote, a space, a filter typed as a host, a wrong `panorama=` are refused), `TestTroubleshootHostOverMCPReadOnly` (a read-only caller gets it, the public address of the VPN event is hidden), `TestTroubleshootNames`, more cases in `TestShortCommand`; in the drivers `TestEntraDeviceUsers` and `LogSearch` in `TestPANOSLogSearch`.
+- Live CLI against a real daemon with a Panorama that refuses the connection: `netdir troubleshoot host pc-1`, `netdir tshoot user msmith 3` and `netdir tshoot msmith` answer with the query, the error of the search and the notes; a host with a quote is refused; the audit line is logged for each.
+
+### Not verified
+- Not run against a real Panorama, Entra or Meraki. The filters rest on PAN-OS's log field names as documented, not on a device: `srcuser` and `machinename` with `contains` in the GlobalProtect log, `addr in` in the traffic and threat logs, and `private_ip` as the VPN address of an entry. If your Panorama names one differently the search answers an error or nothing, `vpn.query` and `firewall.query` in the answer show exactly what was asked, and `device_api_get` with `type=log` takes any filter by hand.
+- Entra: reading `/devices` and a device's registered users needs the application to be allowed to read devices and users (it already reads a user's devices; whether your registration covers this direction was not tried). A refusal is shown on the device as `registered_users_error`.
+- `contains` matches part of a name: `joe` also finds `joey`. The account name is used whole, but a short one can match others; the events show the names found.
+- The GUI form and menu were not opened in a browser (`node --check` only).
+- Log entries name users and machines; masking for MCP callers is as for every answer (addresses, serial numbers; not names).
+
 ## [v123] - 2026-11-10 — Privacy: an e-mail address is shown by its name only
 
 ### Changed

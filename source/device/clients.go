@@ -25,3 +25,15 @@ type ClientQuery struct {
 type ClientReporter interface {
 	ClientReport(ctx context.Context, q ClientQuery) (map[string]any, error)
 }
+
+// DeviceUserLooker is a directory that knows who uses a device (Entra): the devices of that name, each with the users registered
+// on it and its owners.
+type DeviceUserLooker interface {
+	DeviceUsers(ctx context.Context, name string) ([]map[string]any, error)
+}
+
+// LogSearcher is a firewall or its manager whose logs can be searched (PAN-OS, Panorama): the newest n entries of one log that
+// match a filter, newest first.
+type LogSearcher interface {
+	LogSearch(ctx context.Context, logType, query string, n int) ([]map[string]any, error)
+}

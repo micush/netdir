@@ -17,8 +17,8 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/vmactest", w.authed(w.op("vmac.test", nil)))
 	mux.HandleFunc("POST /api/canvas/edit", w.authed(w.op("canvas.edit", nil))) // as --canvas-*: used by the MCP tools (mcp.go)
 	// configuration history
-	mux.HandleFunc("GET /api/devices/troubleshoot", w.authed(w.op("device.troubleshoot", []string{"user", "hours", "devices", "network", "entra", "meraki"}))) // a user's devices on the network: MCP device_troubleshoot_user (devtroubleshoot.go)
-	mux.HandleFunc("POST /api/devices/signin", w.authed(w.op("device.signin_start", nil)))                                                                     // Entra browser sign-in (devsignin.go)
+	mux.HandleFunc("GET /api/devices/troubleshoot", w.authed(w.op("device.troubleshoot", []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama"}))) // a user's devices on the network: MCP device_troubleshoot_user (devtroubleshoot.go)
+	mux.HandleFunc("POST /api/devices/signin", w.authed(w.op("device.signin_start", nil)))                                                                                         // Entra browser sign-in (devsignin.go)
 	mux.HandleFunc("POST /api/devices/signin/poll", w.authed(w.op("device.signin_poll", nil)))
 	mux.HandleFunc("POST /api/devices/capture", w.authed(w.op("device.capture", nil)))         // packet capture on a device: MCP device_capture (devcapture.go)
 	mux.HandleFunc("POST /api/devices/raw", w.authed(w.op("device.raw", nil)))                 // arbitrary configuration change: MCP device_change_raw (devraw.go)

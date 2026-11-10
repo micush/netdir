@@ -41,7 +41,7 @@ type cliFlags struct {
 	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                             *bool
 	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, label, anycast, address, scope, node, realMACs, device                                   *string
 	pos, group                                                                                                                                                                          *int
-	deviceChange, deviceTarget, deviceRaw, deviceBody, deviceLines, deviceCapture, deviceSignin, deviceImport, troubleUser, troubleHours                                                *string
+	deviceChange, deviceTarget, deviceRaw, deviceBody, deviceLines, deviceCapture, deviceSignin, deviceImport, troubleUser, troubleHost, troubleHours                                   *string
 	dryRun, deviceSave                                                                                                                                                                  *bool
 	_                                                                                                                                                                                   *string
 }
@@ -63,7 +63,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		canvas: b("canvas"), vmacTest: b("test-vmac"), tshoot: b("tshoot"), tshootCapture: b("tshoot-capture"), tshootFile: s("tshoot-file"), realMACs: s("real-macs"), canvasAdd: s("canvas-add"), canvasDel: s("canvas-del"),
 		canvasSet: s("canvas-set"), canvasMove: s("canvas-move"), pos: fs.Int("to", 0, ""), canvasPause: s("canvas-pause"), canvasResume: s("canvas-resume"), vip6: s("vip6"), label: s("label"), anycast: s("anycast"), address: s("address"), scope: s("scope"), node: s("node"), device: s("device"),
 		vip: s("vip"), ifname: s("interface"), deviceChange: s("device-change"), deviceTarget: s("target"), dryRun: b("dry-run"),
-		deviceRaw: s("device-raw"), deviceBody: s("device-body"), deviceLines: s("device-lines"), deviceCapture: s("device-capture"), deviceSignin: s("device-signin"), deviceImport: s("device-import"), troubleUser: s("troubleshoot-user"), troubleHours: s("troubleshoot-hours"), deviceSave: b("device-save"),
+		deviceRaw: s("device-raw"), deviceBody: s("device-body"), deviceLines: s("device-lines"), deviceCapture: s("device-capture"), deviceSignin: s("device-signin"), deviceImport: s("device-import"), troubleUser: s("troubleshoot-user"), troubleHost: s("troubleshoot-host"), troubleHours: s("troubleshoot-hours"), deviceSave: b("device-save"),
 		group:    fs.Int("group", 0, ""),
 		schedule: b("schedule"), scheduleHistory: b("schedule-history"), scheduleSet: s("schedule-set"), scheduleDel: s("schedule-del"), scheduleRun: s("schedule-run"),
 		users: b("users"), userAdd: s("user-add"), userPasswd: s("user-passwd"), userExpiry: s("user-expiry"), userDel: s("user-del"), userGrant: s("user-grant"), userRevoke: s("user-revoke"), expires: s("expires"),
@@ -396,8 +396,8 @@ func (f *cliFlags) run(sock string) bool {
 		runScan(sock, *f.scanAddr)
 	case *f.deviceChange != "":
 		runDeviceChange(sock, *f.deviceChange, *f.deviceTarget, *f.dryRun, *f.yes)
-	case *f.troubleUser != "":
-		runTroubleshootUser(sock, *f.troubleUser, *f.troubleHours)
+	case *f.troubleUser != "" || *f.troubleHost != "":
+		runTroubleshootUser(sock, *f.troubleUser, *f.troubleHost, *f.troubleHours)
 	case *f.deviceImport != "":
 		runDeviceImport(sock, *f.deviceImport, *f.dryRun)
 	case *f.deviceSignin != "":

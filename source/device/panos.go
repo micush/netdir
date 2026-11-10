@@ -1388,3 +1388,24 @@ func (p *panos) APICatalog(ctx context.Context) (any, error) {
 }
 
 func (p *panos) Close(context.Context) { p.api.close() }
+
+// LogSearch is the search of one log for the troubleshooting of a user or a host: the newest n entries that match.
+func (p *panos) LogSearch(ctx context.Context, logType, query string, n int) ([]map[string]any, error) {
+	q, err := panLogQuery(url.Values{"log-type": {logType}, "query": {query}, "nlogs": {strconv.Itoa(n)}})
+	if err != nil {
+		return nil, err
+	}
+	v, err := p.logs(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	m, _ := Redact(v).(map[string]any)
+	es, _ := m["entry"].([]any)
+	out := make([]map[string]any, 0, len(es))
+	for _, e := range es {
+		if x, ok := e.(map[string]any); ok {
+			out = append(out, x)
+		}
+	}
+	return out, nil
+}

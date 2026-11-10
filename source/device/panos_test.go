@@ -649,6 +649,18 @@ func TestPANOSLogSearch(t *testing.T) {
 	if strings.Join(got, " | ") != strings.Join(want, " | ") {
 		t.Errorf("the requests of a log search:\n got %q\nwant %q", got, want)
 	}
+	// the same search for the troubleshooting of a user or a host: the entries as a list
+	if es, err := bareDriver(a.(Driver)).(LogSearcher).LogSearch(ctx, "globalprotect", "(machinename contains 'A-GTHKFGPW4Q')", 20); err != nil || len(es) != 2 || es[1]["eventid"] != "portal-auth" {
+		t.Errorf("LogSearch: %v %+v", err, es)
+	} else if q := st.queries[len(st.queries)-3]; q.Get("nlogs") != "20" || q.Get("query") != "(machinename contains 'A-GTHKFGPW4Q')" {
+		t.Errorf("LogSearch asked: %v", q)
+	}
+	if es, err := bareDriver(a.(Driver)).(LogSearcher).LogSearch(ctx, "traffic", "(addr in 10.0.0.5)", 50); err != nil || es == nil || len(es) != 0 {
+		t.Errorf("LogSearch, nothing matched: %v %+v", err, es)
+	}
+	if _, err := bareDriver(a.(Driver)).(LogSearcher).LogSearch(ctx, "nosuch", "", 5); err == nil {
+		t.Error("LogSearch took an unknown log")
+	}
 	// nothing matched is an empty list, not an error
 	if v, _, err := a.APIGet(ctx, "/api/?type=log&log-type=traffic&dir=forward&skip=20"); err != nil || len(v.(map[string]any)["entry"].([]any)) != 0 {
 		t.Errorf("an empty search: %v %+v", err, v)

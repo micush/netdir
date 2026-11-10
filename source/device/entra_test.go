@@ -97,6 +97,18 @@ func entraStub(t *testing.T, st *entraState) Device {
 			out(200, J{"value": []J{dev("d1", "LAPTOP-ALICE", "Windows")}, "@odata.nextLink": "https://" + host + "/v1.0/users/" + aliceID + "/ownedDevices/microsoft.graph.device?page=2&$top=999"})
 		case p == "/users/"+aliceID+"/ownedDevices/microsoft.graph.device" && q.Get("page") == "2":
 			out(200, J{"value": []J{dev("d3", "Surface-Lab", "Windows")}})
+		case p == "/devices" && strings.Contains(q.Get("$filter"), "'LAPTOP-ALICE'"): // two devices of one name: the machine was set up again
+			old, cur := dev(bobID, "LAPTOP-ALICE", "Windows"), dev(aliceID, "LAPTOP-ALICE", "Windows")
+			old["approximateLastSignInDateTime"], cur["approximateLastSignInDateTime"] = "2026-01-01T00:00:00Z", "2026-11-09T08:00:00Z"
+			out(200, J{"value": []J{old, cur}})
+		case p == "/devices":
+			out(200, J{"value": []J{}})
+		case p == "/devices/"+aliceID+"/registeredUsers":
+			out(200, J{"value": []J{{"@odata.type": "#microsoft.graph.user", "id": aliceID, "displayName": "Alice Adams", "userPrincipalName": "alice@contoso.com"}}})
+		case p == "/devices/"+aliceID+"/registeredOwners", p == "/devices/"+bobID+"/registeredOwners":
+			out(200, J{"value": []J{}})
+		case p == "/devices/"+bobID+"/registeredUsers":
+			out(403, J{"error": J{"code": "Authorization_RequestDenied"}})
 		case p == "/users/"+bobID+"/registeredDevices/microsoft.graph.device" || p == "/users/"+bobID+"/ownedDevices/microsoft.graph.device":
 			out(200, J{"value": []J{}})
 		default:
@@ -266,5 +278,40 @@ func TestEntraAPIGet(t *testing.T) {
 	}
 	if len(st.calls) != before {
 		t.Errorf("a refused path reached Graph: %v", st.calls[before:])
+	}
+}
+
+func TestEntraDeviceUsers(t *testing.T) {
+	st := &entraState{}
+	drv := openEntra(t, entraStub(t, st), "S3CRET")
+	l, ok := bareDriver(drv).(DeviceUserLooker)
+	if !ok {
+		t.Fatal("the Entra driver cannot look up a device's users")
+	}
+	ctx := context.Background()
+	ds, err := l.DeviceUsers(ctx, "LAPTOP-ALICE")
+	leakAdd("entra", "deviceusers", ds, err)
+	if err != nil || len(ds) != 2 {
+		t.Fatalf("%v %+v", err, ds)
+	}
+	// the one signed in most recently first, with its users; a list that cannot be read is said, and the device is still there
+	us, _ := ds[0]["registered_users"].([]map[string]any)
+	if ds[0]["id"] != aliceID || len(us) != 1 || us[0]["userPrincipalName"] != "alice@contoso.com" || us[0]["@odata.type"] != nil {
+		t.Errorf("the newest device and its users: %+v", ds[0])
+	}
+	if ds[1]["id"] != bobID || ds[1]["registered_users_error"] == nil || ds[1]["owners"] == nil {
+		t.Errorf("a device whose users cannot be read: %+v", ds[1])
+	}
+	if ds, err := l.DeviceUsers(ctx, "NOSUCH"); err != nil || len(ds) != 0 {
+		t.Errorf("no such device: %v %+v", err, ds)
+	}
+	before := len(st.calls)
+	for _, bad := range []string{"", "a'b", "x' or startswith(displayName,'", strings.Repeat("a", 65), "a/b"} {
+		if _, err := l.DeviceUsers(ctx, bad); err == nil {
+			t.Errorf("%q was looked up", bad)
+		}
+	}
+	if len(st.calls) != before {
+		t.Errorf("a refused name reached Graph: %v", st.calls[before:])
 	}
 }

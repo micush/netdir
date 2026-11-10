@@ -67,9 +67,13 @@ the web GUI):
                                         (any configuration change in the platform's own terms: a REST request, a PAN-OS
                                          action with an XPath, or lines of CLI configuration for Arista EOS and NX-OS;
                                          planned first, --device-save keeps it over a reboot)
-                   tshoot USER [HOURS]   or   --troubleshoot-user USER [--troubleshoot-hours N]
-                                        (look a user up in Entra and follow their most recently used device on the Meraki
-                                         network over the last N hours (default 6): client, usage, wireless or switch-port health)
+                   tshoot user NAME [HOURS]   or   --troubleshoot-user NAME [--troubleshoot-hours N]
+                   tshoot host NAME [HOURS]   or   --troubleshoot-host NAME [--troubleshoot-hours N]
+                                        (troubleshoot is the same as tshoot, and "tshoot NAME" is a user.  A user is looked
+                                         up in Entra and in the firewall's VPN log, a host's last user in the VPN log and
+                                         in Entra; the machine is then followed on the Meraki network over the last N hours
+                                         (default 6): client, usage, wireless or switch-port health; and the firewall's
+                                         newest traffic and threat logs for its addresses are added)
                    --device-import OBSERVIUM [--dry-run]
                                         (add the devices an Observium, IP Fabric, Centreon, Panorama, PDM or AFC server knows to the inventory,
                                          each one disabled and with no login; those with no driver, or already there, are listed as skipped)

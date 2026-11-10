@@ -1279,14 +1279,16 @@
         textPopup("Import devices from " + name, async (put) => { const r = (await api("POST", "/api/devices/import", { device: name })).data; put(importText(r)); await load(); refresh(); });
       }, "btn");
     }
-    // Entra: a user's most recently used device, followed on the Meraki network for the last hours
-    function troubleForm(name) {
-      form("Troubleshoot user — " + name, [{ k: "user", l: "User", v: state.lastUser || "", ph: "joe.smith@contoso.com" }, { k: "hours", l: "Hours back", v: "6", ph: "6" }], (v) => {
-        if (!v.user) return "Give a sign-in name, an object ID or a name.";
+    // a user's most recently used device, or a host and its last user: Entra and the firewall's logs say which machine and
+    // who, the machine is followed on the Meraki network for the last hours, and the firewall's logs for its addresses are added.
+    // key is the parameter that names the device the form was opened on (entra, or panorama for a Panorama or a firewall)
+    function troubleForm(name, key) {
+      form("Troubleshoot — " + name, [{ k: "user", l: "User", v: state.lastUser || "", ph: "joe.smith@contoso.com" }, { k: "host", l: "Host", v: "", ph: "PC-123" }, { k: "hours", l: "Hours back", v: "6", ph: "6" }], (v) => {
+        if (!v.user === !v.host) return "Give a user or a host, one of the two.";
         if (!/^\d{1,3}$/.test(v.hours || "6") || Number(v.hours || 6) < 1 || Number(v.hours || 6) > 168) return "Hours back: 1 to 168.";
-        state.lastUser = v.user;
-        setTimeout(() => textPopup("Troubleshoot " + v.user, async (put) => {
-          const q = new URLSearchParams({ user: v.user, hours: v.hours || "6", entra: name });
+        if (v.user) state.lastUser = v.user;
+        setTimeout(() => textPopup("Troubleshoot " + (v.user || v.host), async (put) => {
+          const q = new URLSearchParams({ ...(v.user ? { user: v.user } : { host: v.host }), hours: v.hours || "6", [key]: name });
           put(JSON.stringify((await api("GET", "/api/devices/troubleshoot?" + q.toString())).data, null, 2));
         }), 0);
         return "";
@@ -1315,7 +1317,8 @@
         ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)]]],
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
-        ...(d.platform === "entra" ? [["Troubleshoot user", () => troubleForm(name)], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
+        ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
+        ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
         [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes

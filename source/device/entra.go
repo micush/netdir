@@ -420,3 +420,44 @@ func (e *entra) UserDevices(ctx context.Context, who string) (map[string]any, []
 	})
 	return redactMap(u), devs, nil
 }
+
+var entraDeviceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$`)
+
+// DeviceUsers finds the devices of that name (a name may be there more than once: a machine that was set up again) and, for each,
+// the users registered on it and its owners, most recently signed in first.
+func (e *entra) DeviceUsers(ctx context.Context, name string) ([]map[string]any, error) {
+	name = strings.TrimSpace(name)
+	if !entraDeviceNameRE.MatchString(name) {
+		return nil, errors.New("host: a device name; letters, digits and . _ - only")
+	}
+	devs, err := e.list(ctx, "/devices?$filter="+url.QueryEscape("displayName eq "+odataQuote(name))+"&$top=5&"+entraDeviceSel)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(devs, func(i, j int) bool {
+		return str(devs[i]["approximateLastSignInDateTime"]) > str(devs[j]["approximateLastSignInDateTime"])
+	})
+	out := make([]map[string]any, 0, len(devs))
+	for _, d := range devs {
+		id := str(d["id"])
+		d = redactMap(d)
+		if entraGUIDRE.MatchString(id) {
+			for _, rel := range []struct{ path, key string }{{"registeredUsers", "registered_users"}, {"registeredOwners", "owners"}} {
+				us, err := e.list(ctx, "/devices/"+id+"/"+rel.path+"?$top=20&$select=id,displayName,userPrincipalName")
+				if err != nil {
+					d[rel.key+"_error"] = err.Error()
+					continue
+				}
+				l := make([]map[string]any, 0, len(us))
+				for _, u := range us {
+					u = redactMap(u)
+					delete(u, "@odata.type")
+					l = append(l, u)
+				}
+				d[rel.key] = l
+			}
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
