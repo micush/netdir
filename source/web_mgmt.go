@@ -43,6 +43,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	// cluster
 	mux.HandleFunc("GET /api/cluster", w.authed(w.op("cluster.status", nil)))
 	mux.HandleFunc("POST /api/cluster/token", w.authed(w.op("cluster.token", nil)))
+	mux.HandleFunc("POST /api/cluster/token/clear", w.authed(w.op("cluster.token.clear", nil)))
 	mux.HandleFunc("POST /api/cluster/join", w.authed(w.op("cluster.join", nil)))
 	mux.HandleFunc("POST /api/cluster/promote", w.authed(w.op("cluster.promote", nil)))
 	mux.HandleFunc("POST /api/cluster/peers/remove", w.authed(w.op("cluster.remove", nil)))

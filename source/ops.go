@@ -177,6 +177,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "cluster.token":
 		code, exp, err := m.cl.MintJoinCode(actor)
 		return map[string]any{"code": code, "expires": exp}, err
+	case "cluster.token.clear":
+		n, err := m.cl.ClearJoinCodes(actor)
+		return map[string]any{"cleared": n}, err
 	case "cluster.join":
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()

@@ -42,6 +42,7 @@ var mcpRoutes = []apiRoute{
 	{Method: "POST", Path: "/api/cluster/promote"},
 	{Method: "POST", Path: "/api/cluster/sync"},
 	{Method: "POST", Path: "/api/cluster/token"},
+	{Method: "POST", Path: "/api/cluster/token/clear"},
 	{Method: "GET", Path: "/api/clustercapture/download"},
 	{Method: "POST", Path: "/api/clustercapture/start"},
 	{Method: "GET", Path: "/api/clustercapture/status"},

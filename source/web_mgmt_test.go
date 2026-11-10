@@ -21,7 +21,7 @@ var mgmtGETs = []string{
 var mgmtPOSTs = []string{
 	"/api/versions/snapshot", "/api/versions/restore", "/api/versions/upload",
 	"/api/tls/install", "/api/tls/csr", "/api/tls/csr/cancel", "/api/tls/revert", "/api/tls/regenerate",
-	"/api/cluster/token", "/api/cluster/join", "/api/cluster/promote", "/api/cluster/peers/remove",
+	"/api/cluster/token", "/api/cluster/token/clear", "/api/cluster/join", "/api/cluster/promote", "/api/cluster/peers/remove",
 	"/api/cluster/peers/unremove", "/api/cluster/leave", "/api/cluster/sync",
 	"/api/update/upload", "/api/update/fetch", "/api/update/apply", "/api/update/push", "/api/update/cancel", "/api/update/auto",
 	"/api/nodepause",

@@ -4038,7 +4038,7 @@
 
   // ── Cluster  (CLI: --cluster-status/-token/-join/-promote/-remove/-unremove/-leave/-sync) ──
   VIEWS.cluster = (() => {
-    let dyn, status, tokenBox, joinBox;
+    let dyn, status, tokenBox, joinBox, clearBtn;
 
     async function act(path, body, confirmText, okText) {
       if (confirmText && !confirm(confirmText)) return;
@@ -4066,6 +4066,8 @@
       joinBox.classList.toggle("hidden", !v.joinable);
       leaveBtn.classList.toggle("hidden", v.joinable);
       promoteBtn.classList.toggle("hidden", v.role === "primary");
+      clearBtn.disabled = !v.join_codes;
+      clearBtn.title = v.join_codes ? v.join_codes + " unused" : "No unused join codes";
       lastView = v;
     }
     let leaveBtn, promoteBtn, lastView = null;
@@ -4085,6 +4087,11 @@
             catch (e) { fail(status)(e); } finally { ev.target.disabled = false; }
           } }, "Join cluster")));
         leaveBtn = h("button", { class: "btn danger", type: "button", onclick: () => act("/api/cluster/leave", {}, "Leave the cluster? This node keeps its settings and becomes its own single-node cluster.", "Left the cluster.") }, "Leave cluster");
+        // withdraws the join codes this node handed out that nobody used (there can be 20 at most); the code shown above goes with them
+        clearBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: async () => {
+          if (!confirm("Clear this node's unused join codes?\n\nA code created before no longer works.")) return;
+          try { await api("POST", "/api/cluster/token/clear", {}); clear(tokenBox); clear(status); await VIEWS.cluster.poll(); } catch (e) { fail(status)(e); }
+        } }, "Clear join codes");
         promoteBtn = h("button", { class: "btn warn", type: "button", onclick: () => act("/api/cluster/promote", {}, "Promote THIS node to primary?\n\nDo this only if the current primary is gone for good (or you are moving the role on purpose). Every other member follows the new primary.", "This node is now the primary.") }, "Promote this node");
         main.append(status,
           h("div", { class: "toolbar" },
@@ -4095,8 +4102,10 @@
                 clear(tokenBox).append(h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Join code")), h("span", { class: "muted" }, "single use, valid until " + when(r.expires))),
                   h("div", { class: "body" }, ta, h("div", { class: "toolbar" }, copyBtn(() => ta.value),
                     h("span", { class: "hint" }, "Paste it on the new node (Cluster → Join) or run: netdir --cluster-join '<code>'")))));
+                VIEWS.cluster.poll().catch(() => {});   // Clear join codes counts the new one at once
               } catch (e) { fail(status)(e); }
             } }, "Create join code"),
+            clearBtn,
             h("button", { class: "btn", type: "button", onclick: () => act("/api/cluster/sync", {}, null, "Synced.") }, "Sync now"),
             h("span", { class: "spacer" }), promoteBtn, leaveBtn),
           tokenBox, dyn, h("p", { class: "hint" }, "★ marks this node"), joinBox);

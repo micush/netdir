@@ -590,6 +590,7 @@ const NETDIR_HELP = {
       ["ul", ["Add a node to the cluster, or take one out.", "Make a replica the primary when the old primary is gone.", "See whether every node is reachable and running the same version.", "Pull the latest settings to this node at once (**Sync now**)."]],
       ["h", "Step by step: add a node"],
       ["ol", ["On any member of the cluster, choose **Create join code**. The code works once and for an hour, and the member shows it read-only for you to copy.", "On the new node, open **Operate ▸ Cluster** and paste the code under **Join code**. Press **Join**.", "The new node's shared settings are replaced by the cluster's. Its interface, priority and weight stay its own.", "Add the node to the gateways it should serve (Topology ▸ right-click the gateway ▸ **Add node**). A node that has just joined starts out removed from all of them."]],
+      ["note", "A node keeps at most 20 join codes that nobody has used. **Clear join codes** withdraws the ones this node made (a code created before no longer works); it is greyed out when there are none, and its tooltip says how many there are."],
       ["note", "The new node does not offer the release it had staged to the others, so joining with a newer version never pulls the cluster up to it. A joining node on an **older** version still updates itself from the cluster."],
       ["h", "Step by step: make another node the primary"],
       ["ol", ["Pick the replica you want in the **Node** menu in the top right.", "Choose **Promote**."]],
@@ -607,7 +608,7 @@ const NETDIR_HELP = {
       ["fields", [["Node", "The menu at the top right of every page. It picks which member the page shows and acts on: this node (the default) or any other member of the cluster."], ["Join code", "On the new node: paste the code made by **Create join code** on a member. It is single-use, valid for an hour, and not shown again; the member shows it read only for you to copy."]]],
       ["h", "Good to know"],
       ["ul", ["Nodes pin each other's certificates and sign every request with the cluster secret.", "The cluster port (22162 by default) is separate from the console port and must be reachable between the nodes."]],
-      ["cli", "netdir --cluster-status\nnetdir --cluster-token\nnetdir --cluster-join CODE\nnetdir --cluster-promote\nnetdir --cluster-delete ADDR / --cluster-remove ADDR / --cluster-unremove ADDR\nnetdir --cluster-leave\nnetdir --cluster-sync"],
+      ["cli", "netdir --cluster-status\nnetdir --cluster-token\nnetdir --cluster-token-clear\nnetdir --cluster-join CODE\nnetdir --cluster-promote\nnetdir --cluster-delete ADDR / --cluster-remove ADDR / --cluster-unremove ADDR\nnetdir --cluster-leave\nnetdir --cluster-sync"],
     ],
   },
   updates: {

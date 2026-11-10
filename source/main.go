@@ -136,6 +136,7 @@ the web GUI):
   LLDP             --lldp   (neighbor discovery: the setting, lldpd on this node, and the switch port of each interface)
                    --lldp-enable | --lldp-disable   (every node of the cluster runs lldpd, or none does; off by default)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
+                   --cluster-token-clear   (withdraw this node's unused join codes)
                    --cluster-promote  --cluster-remove ADDR
                    --cluster-delete ADDR  --cluster-unremove ADDR  --cluster-leave  --cluster-sync
                    (GUI: the Node menu, top right, configures any member)

@@ -973,6 +973,18 @@ func (c *Cluster) MintJoinCode(by string) (string, time.Time, error) {
 	return joinCodePrefix + base64.RawURLEncoding.EncodeToString(b), exp, nil
 }
 
+// ClearJoinCodes withdraws every join code this node has handed out that was not used yet; it reports how many.
+func (c *Cluster) ClearJoinCodes(by string) (int, error) {
+	if err := c.requireEnabled(); err != nil {
+		return 0, err
+	}
+	n, err := c.node.ClearTokens()
+	if err == nil {
+		infof("cluster: %d unused join code(s) cleared by %s", n, by)
+	}
+	return n, err
+}
+
 func decodeJoinCode(code string) (joinCode, error) {
 	var jc joinCode
 	code = strings.TrimSpace(code)
@@ -1502,10 +1514,13 @@ type ClusterView struct {
 	Warnings      []string   `json:"warnings"`
 	// FailoverOn says whether automatic failover is in force with this many members (from three)
 	FailoverOn bool `json:"failover_on"`
+	// JoinCodes is how many join codes this node has handed out that are unused and still valid
+	JoinCodes int `json:"join_codes"`
 }
 
 func (c *Cluster) View() ClusterView {
 	snap := c.node.Snapshot()
+	joinCodes := c.node.PendingTokens()
 	selfIPs, selfGw := addrList(ethernetAddrs()), c.mg.localGwIPs() // before c.mu: they ask the engines
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1517,6 +1532,7 @@ func (c *Cluster) View() ClusterView {
 	}
 	v.Joinable = snap.Role == RolePrimary && len(snap.Peers) == 0 && snap.Epoch == 1
 	v.FailoverOn = failoverEnabled(len(snap.Peers) + 1)
+	v.JoinCodes = joinCodes
 	v.Peers = append(v.Peers, PeerView{
 		Addr: snap.SelfAddr, NodeID: snap.NodeID, Fingerprint: c.node.Fingerprint(), Self: true, Reachable: true,
 		Role: snap.Role, Epoch: snap.Epoch, IsPrimary: snap.Role == RolePrimary, NodePaused: c.mg.pausedFn != nil && c.mg.pausedFn(), Version: version(),

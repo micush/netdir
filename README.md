@@ -582,7 +582,7 @@ Several nodes are managed as one cluster. The cluster is for management and is i
 
 - **Roles.** One node is the primary and the others are replicas.
 - **Shared and per-node settings.** The `settings` block, the gateways' VIPs, keys and timers, the web login groups and the sign-in rules are shared. They can be edited on any node and are applied on the primary. Interface, priority, weight and the web and cluster blocks stay per node.
-- **Joining.** Create a join code on a member (`--cluster-token`) and use it on the new node (`--cluster-join CODE`). A code works once, for an hour.
+- **Joining.** Create a join code on a member (`--cluster-token`) and use it on the new node (`--cluster-join CODE`). A code works once, for an hour. A node keeps at most 20 unused codes; `--cluster-token-clear` (Operate ▸ Cluster ▸ **Clear join codes**) withdraws them.
 - **Trust.** Nodes pin each other's certificates and sign every request.
 - **Promotion and failover.** Promotion is explicit (`--cluster-promote`). With three or more members there is also automatic failover after 5 minutes, and the primary role is handed over before a planned restart.
 - **Updates.** Upload a release archive on any node (`--update-upload`). Each node then builds it, swaps its binary and restarts, one node at a time, with automatic rollback.

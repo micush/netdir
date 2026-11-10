@@ -1,5 +1,23 @@
 # Changelog
 
+## [v116] - 2026-11-09 — Clear unused join codes
+
+### Added
+- `netdir --cluster-token-clear` and **Clear join codes** on Operate ▸ Cluster (`POST /api/cluster/token/clear`): withdraws every join code this node has handed out that nobody used. A code created before no longer works. A node keeps at most 20 unused codes for an hour each, and until now the only way out of "too many" was to wait.
+- The button is greyed out when there are none and its tooltip says how many there are (`join_codes` in the cluster status). Clearing also takes the code shown on the page away.
+
+### Changed
+- The refusal at 20 says what to do: `20 unused join codes: clear them (Operate ▸ Cluster ▸ Clear join codes, or netdir --cluster-token-clear) or wait for them to expire` (was "too many unused join tokens; wait for them to expire").
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (with PAM, amd64), `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `node --check` on `app.js` and `help.js`.
+- New test `TestClearJoinCodes`: 20 codes, the 21st refused with the new text, the status counts 20, the op clears 20, a cleared code no longer joins, clearing none is no error, and a new code joins. The new route is in the lists the auth and CSRF tests walk.
+- Headless Chromium against the real `webui/` with the API mocked (scratchpad, not in the tree), light and dark: at 20 codes the button is enabled ("20 unused") and Create join code shows the refusal; Clear join codes asks, posts, and is then greyed ("No unused join codes"); a new code can be created and the button counts it.
+
+### Not verified
+- Against a running daemon: the CLI flag was not run against a live socket and the GUI was driven with mocked API answers.
+- The clearing is per node: the codes of another member are cleared on that member (pick it in the Node menu). Not tried on a real cluster.
+
 ## [v115] - 2026-11-09 — MCP on a gateway's right-click menu
 
 ### Added

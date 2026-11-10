@@ -19,7 +19,7 @@ import (
 
 type cliFlags struct {
 	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                                                                                                  *bool
-	clusterStatus, clusterToken, clusterPromote, clusterLeave, clusterSync                                                                                                              *bool
+	clusterStatus, clusterToken, clusterTokenClear, clusterPromote, clusterLeave, clusterSync                                                                                           *bool
 	updateStatus, updateApply, updateHistory, noWait, yes                                                                                                                               *bool
 	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                                                                                         *string
 	certFile, keyFile, cn, san                                                                                                                                                          *string
@@ -52,7 +52,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 	return &cliFlags{
 		versions: b("versions"), versionSnapshot: b("version-snapshot"), tlsStatus: b("tls-status"),
 		tlsInstall: b("tls-install"), tlsCSR: b("tls-csr"), tlsRevert: b("tls-revert"), tlsRegenerate: b("tls-regenerate"),
-		clusterStatus: b("cluster-status"), clusterToken: b("cluster-token"), clusterPromote: b("cluster-promote"),
+		clusterStatus: b("cluster-status"), clusterToken: b("cluster-token"), clusterTokenClear: b("cluster-token-clear"), clusterPromote: b("cluster-promote"),
 		clusterLeave: b("cluster-leave"), clusterSync: b("cluster-sync"),
 		updateStatus: b("update-status"), updateApply: b("update-apply"), updateHistory: b("update-history"),
 		noWait: b("no-wait"), yes: b("yes"),
@@ -316,6 +316,12 @@ func (f *cliFlags) run(sock string) bool {
 		decode(op(sock, "cluster.token", nil), &r)
 		fmt.Printf("Join code (single use, valid until %s):\n\n%s\n\nOn the new node:  netdir --cluster-join '%s'\n", lt(r.Expires), r.Code, r.Code)
 		fmt.Println("\nThe new node's shared settings (settings block, VIPs, keys) will be replaced by this cluster's; its interface, priority and weight stay its own.")
+	case *f.clusterTokenClear:
+		var r struct {
+			Cleared int `json:"cleared"`
+		}
+		decode(op(sock, "cluster.token.clear", nil), &r)
+		fmt.Printf("Cleared %d unused join code(s) on this node. They no longer work.\n", r.Cleared)
 	case *f.clusterJoin != "":
 		askYes("Join this node to the cluster? Its shared settings (settings block, VIPs, keys, timers) will be replaced by the cluster's; a snapshot of the current config is saved first.", *f.yes)
 		var v ClusterView
