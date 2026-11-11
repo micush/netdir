@@ -187,6 +187,9 @@ func (m *Monitor) checkList(ctx context.Context, devs []Device, cred map[string]
 	wg.Wait()
 }
 
+// udpPlatforms are the platforms whose driver talks UDP (SNMP): there is no port to connect to, so the check is the request itself.
+var udpPlatforms = map[string]bool{"ios": true}
+
 func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health, now time.Time) (out Health) {
 	defer func() {
 		if p := recover(); p != nil { // a driver bug costs that device's check, not the loop
@@ -197,7 +200,8 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return Health{Status: "paused", Detail: "disabled: never contacted", Facts: h.Facts, LastOK: h.LastOK}
 	}
 	h.Checked = now.Unix()
-	if d.Platform != "tools" { // the tools are programs on this node: nothing to dial
+	udp := udpPlatforms[d.Platform]
+	if d.Platform != "tools" && !udp { // the tools are programs on this node, and SNMP is UDP: nothing to dial
 		rctx, cancel := context.WithTimeout(ctx, m.Timeout)
 		conn, err := dialFn(rctx, hostPort(d, DefaultPort(d.Platform)))
 		cancel()
@@ -209,7 +213,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 	}
 	wasDown := h.Status != "ok" && h.Status != "warn"
 	_, factsEvery := m.intervals(now)
-	if wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= factsEvery {
+	if udp || wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= factsEvery { // an SNMP device is asked every time: one datagram is the whole check
 		h.FactsAt = now.Unix()
 		f, err := m.facts(ctx, d, c)
 		if err != nil {
@@ -217,6 +221,10 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		} else {
 			h.Facts, h.FactsErr, h.LastOK = &f, "", now.Unix()
 		}
+	}
+	if h.FactsErr != "" && udp { // no TCP port to tell "unreachable" from "refused": a silent agent is unreachable, a wrong community or an ACL looks the same
+		h.Status, h.Detail = "bad", "no answer over SNMP (the device is unreachable, or the community or the ACL is wrong): "+h.FactsErr
+		return h
 	}
 	if h.FactsErr != "" {
 		h.Status, h.Detail = "warn", "the API port answers, but the device refused or failed a request: "+h.FactsErr

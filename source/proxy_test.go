@@ -41,7 +41,7 @@ func TestProxyHandlerRunsAsViaUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := json.Marshal(map[string]any{"config": dc, "note": "relayed"})
+	b, _ := json.Marshal(map[string]any{"config": dc, "note": "relayed", "base": "force"})
 	_, pr = call(proxyReq{User: "alice", Method: "PUT", Path: "/api/config", CT: "application/json", Body: b})
 	if pr.Status != 200 {
 		t.Fatalf("put config: %d %s", pr.Status, pr.Body)

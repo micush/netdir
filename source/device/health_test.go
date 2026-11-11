@@ -231,3 +231,28 @@ func TestMonitorChecksAnEnabledDeviceAtOnce(t *testing.T) {
 	off.Store(true)
 	wait("paused")
 }
+
+// An SNMP device (UDP) has no TCP port: it was reported "the API port does not answer: connection refused" whatever it did.  It is now
+// asked over SNMP: an agent that answers is ok, a silent one is unreachable, and no TCP connection is tried either way.
+func TestMonitorSNMPDeviceIsNotDialled(t *testing.T) {
+	od := dialFn
+	dialFn = func(context.Context, string) (net.Conn, error) {
+		t.Error("a TCP connection was tried for an SNMP device")
+		return nil, errors.New("refused")
+	}
+	defer func() { dialFn = od }()
+	a := &testAgent{mib: iosMIB(), comm: "ro-comm-7q2x"}
+	d := iosDevice(startAgent(t, a))
+	m := NewMonitor()
+	m.Timeout = 500 * time.Millisecond
+	now := time.Now()
+	m.Check(context.Background(), []Device{d}, []Credential{{Name: "x", Token: "ro-comm-7q2x"}}, now)
+	if h := m.Snapshot()["sw1"]; h.Status != "ok" || h.Facts == nil || h.Facts.Hostname != "sw-core-1" {
+		t.Fatalf("an answering agent: %+v", h)
+	}
+	// the same device asked again a minute later is asked again (nothing is cached for SNMP)
+	m.Check(context.Background(), []Device{d}, []Credential{{Name: "x", Token: "wrong-community"}}, now.Add(time.Minute))
+	if h := m.Snapshot()["sw1"]; h.Status != "bad" || !strings.Contains(h.Detail, "no answer over SNMP") || strings.Contains(h.Detail, "wrong-community") {
+		t.Fatalf("a wrong community: %+v", h)
+	}
+}

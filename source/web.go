@@ -948,9 +948,22 @@ func (w *WebServer) handlePutConfig(rw http.ResponseWriter, r *http.Request, s *
 		return
 	}
 
+	// Every save says what it read (base).  One that does not comes from a page run by an older version (a Configure tab left open
+	// across an update keeps its old code: it saved its old copy of the devices over an import) or from a script that never read it:
+	// refused, so that nothing is overwritten without the writer knowing what it replaces.  A script that means to replace the
+	// configuration says so with base "force".
+	base := req.Base
+	switch base {
+	case "":
+		warnf("web: %q save refused: it carries no base (a page from an older version, or a script) (from %s)", s.user, clientIP(r))
+		jsonError(rw, http.StatusConflict, "this page is older than the daemon (it does not say which configuration it read): reload it (Ctrl+F5) and make the change again. Nothing was saved. A script that means to replace the configuration sends \"base\": \"force\".")
+		return
+	case "force":
+		base = ""
+	}
 	infof("web: %q saving %s (from %s)", s.user, w.confPath, clientIP(r))
 	w.mg.keepNodePaused(dc) // the page's copy may be older than the last pause or resume of this node
-	if err := w.mg.PutConfigBase(dc, s.user, req.Note, req.Base); err != nil {
+	if err := w.mg.PutConfigBase(dc, s.user, req.Note, base); err != nil {
 		if errors.Is(err, ErrConfigChanged) {
 			warnf("web: %q save refused: the configuration changed since their page read it (from %s)", s.user, clientIP(r))
 			jsonError(rw, http.StatusConflict, err.Error())
@@ -959,11 +972,11 @@ func (w *WebServer) handlePutConfig(rw http.ResponseWriter, r *http.Request, s *
 		jsonError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	base := configBase(dc)
+	newBase := configBase(dc)
 	if saved, _, err := w.mg.LiveConfig(); err == nil {
-		base = configBase(saved)
+		newBase = configBase(saved)
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc, "base": base})
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc, "base": newBase})
 }
 
 // logLockedOut records a login attempt that was refused because the address or the name is locked out: once a

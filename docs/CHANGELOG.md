@@ -1,5 +1,17 @@
 # Changelog
 
+## [v140] - 2026-11-11 — Imported devices can no longer be wiped by an old page; SNMP (ios) devices are no longer reported unreachable
+
+### Fixed
+- **Imported devices disappeared a third time.** In the tshoot bundle the removal of 256 devices was saved with no note, so it came from the Configure page, not Topology: a Configure tab left open from before v138 still ran the old page code, which sends no `base`, and the Configure page never reloads itself. `PUT /api/config` now **refuses (409) any save that carries no `base`** ("this page is older than the daemon … reload it (Ctrl+F5)"), nothing is written, and the refusal is logged. `dry_run` is unchanged. A script that means to replace the configuration sends `"base": "force"`.
+- Every device of platform **ios** (classic IOS over SNMP) showed red, "the API port does not answer: connect: connection refused", although `snmpwalk` to it worked. The health check opened a TCP connection to the device's port first, and SNMP is UDP, so nothing ever listens there. An SNMP device is now asked over SNMP instead (the same request as its facts, one datagram), every check, with no TCP connection: an agent that answers is green; one that does not is red with "no answer over SNMP (the device is unreachable, or the community or the ACL is wrong)", because SNMP does not tell those apart. The community never appears in the text.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. `TestWebConfigSaveRefusesStaleBase` now also covers a save without `base` (409, nothing changed) and `force` (saved). New test `TestMonitorSNMPDeviceIsNotDialled` against the SNMP stand-in agent: no TCP connection is tried, the right community gives ok with the facts, the wrong one gives bad with the new text and without the community.
+
+### Not verified
+- Not run against a real IOS switch (the stand-in agent answers SNMP v2c only; v3 goes through the same request). The check now sends one SNMP request per device every check interval (default 3 minutes), so a few hundred ios devices mean a few hundred datagrams per round, five at a time.
+
 ## [v139] - 2026-11-11 — Login suggestions in the Devices table
 
 ### Added
@@ -15,7 +27,7 @@
 
 ### Fixed
 - **Imported devices disappeared.** The GUI saves the whole configuration, from the copy the page read when it was opened. A Topology page opened before an import therefore wrote its old copy back at its next change and removed the imported devices with it: in a tshoot bundle the import added 257 devices at 22:17 and a Topology save made from a page opened hours earlier removed 259 devices (the imports and `network_tools`) at 22:20.
-- `GET /api/config` now returns `base`, a token of the shared settings it read, and `PUT /api/config` takes it back as `base`. When the shared settings are not the ones the page read, the save is refused with **409** and nothing is written (`Mgmt.PutConfigBase`, under the same lock as the save, so two saves cannot both pass). A save with no `base` (the CLI, the API, a config import, a restore) works as before. The reply to a successful save carries the new `base`.
+- `GET /api/config` now returns `base`, a token of the shared settings it read, and `PUT /api/config` takes it back as `base`. When the shared settings are not the ones the page read, the save is refused with **409** and nothing is written (`Mgmt.PutConfigBase`, under the same lock as the save, so two saves cannot both pass). A save with no `base` was allowed in v138; since v140 it is refused (see v140). The reply to a successful save carries the new `base`.
 - The **Topology** page keeps the token, sends it with every change, and after a 409 reads the saved configuration again and shows it (your change is dropped, and the next one goes through). The **Configure** pages send it too and show the 409 as "Not saved: …".
 - Limits: a replica compares with its own copy of the shared settings, which the primary updates within seconds, not with the primary's at that instant; and a page that is refused loses the change it was making (it is shown the saved state, nothing is merged).
 

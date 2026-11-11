@@ -473,12 +473,12 @@ func TestConfigSaveNeverChangesTheNodePause(t *testing.T) {
 	var g map[string]any
 	_ = json.Unmarshal(b, &g)
 	cfg := map[string]any{"groups": []any{g}}
-	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true)); r.code != 200 {
+	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true)); r.code != 200 {
 		t.Fatalf("save: %d %v", r.code, r.body)
 	}
 	paused := func() bool { st, _ := e.mg.NodePauseStatus(); return st.Paused }
 	cfg["node_paused"] = true // a copy from before the node was resumed
-	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true)); r.code != 200 {
+	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true)); r.code != 200 {
 		t.Fatalf("save: %d %v", r.code, r.body)
 	}
 	if paused() {
@@ -489,7 +489,7 @@ func TestConfigSaveNeverChangesTheNodePause(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(cfg, "node_paused") // a copy from before the node was paused
-	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true)); r.code != 200 {
+	if r := e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true)); r.code != 200 {
 		t.Fatalf("save: %d %v", r.code, r.body)
 	}
 	if !paused() {
@@ -522,7 +522,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 
 	// invalid: bad VIP → 422, nothing written
 	cfg["groups"].([]any)[0].(map[string]any)["vip4"] = "not-an-ip"
-	r = e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true))
+	r = e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true))
 	if r.code != 422 || !strings.Contains(r.body["error"].(string), "vip4") {
 		t.Fatalf("invalid config: %d %v", r.code, r.body)
 	}
@@ -533,7 +533,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 	// unknown field (typo) rejected
 	cfg["groups"].([]any)[0].(map[string]any)["vip4"] = "10.9.0.1/24"
 	cfg["groups"].([]any)[0].(map[string]any)["prio"] = 5
-	if r = e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true)); r.code != 400 {
+	if r = e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true)); r.code != 400 {
 		t.Fatalf("unknown field: %d %v", r.code, r.body)
 	}
 	delete(cfg["groups"].([]any)[0].(map[string]any), "prio")
@@ -557,7 +557,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 
 	// real save: written 0600, applied via reload, GET round-trips
 	cfg["settings"] = map[string]any{"metrics_acl": []any{"10.0.0.123"}}
-	r = e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true))
+	r = e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true))
 	if r.code != 200 {
 		t.Fatalf("save: %d %v", r.code, r.body)
 	}
@@ -580,7 +580,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 
 	// an existing file keeps its mode
 	os.Chmod(e.conf, 0o640)
-	e.do("PUT", "/api/config", map[string]any{"config": cfg}, withAuth(e, true))
+	e.do("PUT", "/api/config", map[string]any{"config": cfg, "base": "force"}, withAuth(e, true))
 	if st, _ := os.Stat(e.conf); st.Mode().Perm() != 0o640 {
 		t.Fatalf("mode not preserved: %v", st.Mode())
 	}

@@ -34,7 +34,7 @@ func guiEditConfig(t *testing.T, e *webEnv, set string) {
 		t.Fatal(err)
 	}
 	mergeJSON(cur.Config, s)
-	b, _ := json.Marshal(map[string]any{"config": cur.Config})
+	b, _ := json.Marshal(map[string]any{"config": cur.Config, "base": "force"})
 	if rec := do("PUT", "/api/config", b); rec.Code != 200 {
 		t.Fatalf("save config: %d %s", rec.Code, rec.Body.String())
 	}

@@ -51,7 +51,7 @@ func putCfg(e *webEnv, mut func(*DaemonConfig)) resp {
 		mut(dc)
 	}
 	b, _ := json.Marshal(dc)
-	return e.do("PUT", "/api/config", map[string]any{"config": json.RawMessage(b), "note": "from test"}, withAuth(e, true))
+	return e.do("PUT", "/api/config", map[string]any{"config": json.RawMessage(b), "note": "from test", "base": "force"}, withAuth(e, true))
 }
 
 func TestWebVersionsFlow(t *testing.T) {
@@ -205,7 +205,7 @@ func TestWebClusterAndUpdateBasics(t *testing.T) {
 }
 
 // A page that read the configuration earlier cannot write its old copy over what was saved since (an import, another page, another
-// node): the save is refused with 409 and nothing changes.  A save without a base (the CLI, the API) works as before.
+// node): the save is refused with 409 and nothing changes.  A save without a base is refused too (a tab from before an update, a script); "force" overwrites.
 func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
@@ -247,7 +247,15 @@ func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 	if r = put(base1, func(d *DaemonConfig) { d.Settings.Devices[0].Address = "10.0.0.2" }); r.code != 200 {
 		t.Fatalf("save with the new base: %d %s", r.code, r.raw)
 	}
-	if r = put("", func(d *DaemonConfig) { d.Settings.Devices = nil }); r.code != 200 {
+	// a save that says nothing about what it read (a tab from before the update, a script) is refused too
+	if r = put("", func(d *DaemonConfig) { d.Settings.Devices = nil }); r.code != http.StatusConflict || !strings.Contains(string(r.raw), "Ctrl+F5") {
 		t.Fatalf("save without a base: %d %s", r.code, r.raw)
+	}
+	if cur, _, _ := e.mg.LiveConfig(); len(cur.Settings.Devices) != 1 {
+		t.Errorf("the save without a base changed the configuration: %d devices", len(cur.Settings.Devices))
+	}
+	// and a script that means it says "force"
+	if r = put("force", func(d *DaemonConfig) { d.Settings.Devices = nil }); r.code != 200 {
+		t.Fatalf("save with force: %d %s", r.code, r.raw)
 	}
 }
