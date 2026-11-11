@@ -23,6 +23,9 @@ func troubleEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...s
 // troubleTokens counts the sign-ins the stub Entra of troubleEnvWith got (a token request each).
 var troubleTokens int
 
+// troubleNetReads counts the reads of the Meraki network list the stub got.
+var troubleNetReads int
+
 // troubleLogQueries are the log searches the stub Panorama of troubleEnvWith got, "log-type: query".
 var troubleLogQueries []string
 
@@ -30,7 +33,7 @@ var troubleLogQueries []string
 // GlobalProtect log says Joe connected with JSMITH-LAPTOP (and before that with JSMITH-HOME), its traffic log has one entry.
 func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg string, hdr ...string) (int, map[string]any)) {
 	t.Helper()
-	troubleLogQueries, troubleTokens = nil, 0
+	troubleLogQueries, troubleTokens, troubleNetReads = nil, 0, 0
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := func(code int, v any) {
 			w.WriteHeader(code)
@@ -93,6 +96,7 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 		case strings.HasSuffix(p, "/ownedDevices/microsoft.graph.device"):
 			out(200, J{"value": []J{}})
 		case p == "/api/v1/organizations/1/networks":
+			troubleNetReads++
 			out(200, []J{{"id": "L_1", "name": "HQ"}})
 		case p == "/api/v1/networks/L_1/clients":
 			out(200, []J{{"id": "k1", "mac": "aa:bb:cc:00:00:01", "description": "jsmith-laptop", "ip": "10.1.1.5", "recentDeviceSerial": "Q2AB-CDEF-GHIJ", "recentDeviceConnection": "Wired", "lastSeen": 1000},
@@ -360,7 +364,7 @@ func TestDeviceReadsShareOneSignIn(t *testing.T) {
 	}
 	inventory()
 	facts := func() string {
-		_, m := post(mcpCall("device_api_get", `{"target":"mer","path":"/organizations/1/networks"}`))
+		_, m := post(mcpCall("device_api_get", `{"target":"mer","path":"/organizations/1/networks","fresh":true}`))
 		txt, isErr := toolResult(t, m)
 		if isErr || !strings.Contains(txt, "HQ") {
 			t.Fatalf("the read: %v %s", isErr, txt)
@@ -394,5 +398,52 @@ func TestDeviceReadsShareOneSignIn(t *testing.T) {
 	}
 	if txt := facts(); strings.Contains(txt, `"reused":true`) || troubleTokens != 2 {
 		t.Errorf("after the change: %d sign-ins, %s", troubleTokens, txt)
+	}
+}
+
+// An MCP caller that asks the same read twice gets the second from memory, with its age; fresh asks again; a configuration, a
+// search of a log and the GUI are never answered from memory.
+func TestDeviceAnswerCache(t *testing.T) {
+	if !device.CacheOn {
+		t.Skip("NETDIR_DEVICE_CACHE=0")
+	}
+	e, post := troubleEnvWith(t, false, "127.0.0.1")
+	device.CacheFlush()
+	device.Answers.Flush()
+	dc, _, _ := e.mg.LiveConfig()
+	sup := e.ws.status.sup
+	sup.mu.Lock()
+	sup.dc.Settings.Devices, sup.dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
+	sup.mu.Unlock()
+	read := func(args string) string {
+		_, m := post(mcpCall("device_api_get", args))
+		txt, isErr := toolResult(t, m)
+		if isErr || !strings.Contains(txt, "HQ") {
+			t.Fatalf("the read: %v %s", isErr, txt)
+		}
+		return strings.ReplaceAll(txt, " ", "")
+	}
+	const ask = `{"target":"mer","path":"/organizations/1/networks"}`
+	if txt := read(ask); strings.Contains(txt, "cached_s") || troubleNetReads != 1 {
+		t.Fatalf("the first read: %d reads, %s", troubleNetReads, txt)
+	}
+	if txt := read(ask); !strings.Contains(txt, `"cached_s"`) || troubleNetReads != 1 {
+		t.Errorf("the repeat was not from memory: %d reads, %s", troubleNetReads, txt)
+	}
+	if txt := read(`{"target":"mer","path":"/organizations/1/networks","fresh":true}`); strings.Contains(txt, "cached_s") || troubleNetReads != 2 {
+		t.Errorf("fresh was answered from memory: %d reads, %s", troubleNetReads, txt)
+	}
+	// the question, the device and the privilege are part of the key; a configuration and a log search are never kept
+	for _, c := range []struct {
+		op, cmd string
+		want    bool
+	}{{"facts", "", true}, {"config", "", false}, {"show", "show version", false}, {"api", "/api/?type=log&log-type=traffic", false}, {"api", "/x/jobs/1", false}, {"api", "/organizations", true}} {
+		got := answerCacheable(&session{mcp: true}, c.op, c.cmd, "")
+		if got != c.want {
+			t.Errorf("%s %q cacheable = %v", c.op, c.cmd, got)
+		}
+	}
+	if answerCacheable(&session{}, "facts", "", "") || answerCacheable(&session{mcp: true, raw: true}, "facts", "", "") || answerCacheable(&session{mcp: true}, "facts", "", "1") {
+		t.Error("the GUI, a raw caller or a fresh read was answered from memory")
 	}
 }

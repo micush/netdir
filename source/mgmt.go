@@ -140,6 +140,8 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	}
 	m.cl.OnConfig(dc)
 	// the devices or their logins may have changed: the drivers kept open for reads are closed (device/pool.go)
+	device.CacheFlush() // and what was learned about them (device/cache.go, answercache.go)
+	device.Answers.Flush()
 	if n := device.PoolFlush(); n > 0 {
 		debugf("devices: %d kept connection(s) closed: the configuration was loaded", n)
 	}

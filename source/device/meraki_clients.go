@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ClientReport: where a device of a given name was seen on the Meraki networks in the last hours, and how it did.  For each network
@@ -32,6 +33,8 @@ const (
 	merakiClientWorkers  = 5   // networks asked at a time (the dashboard allows an organization ten requests a second)
 	merakiClientMatches  = 3
 	merakiClientPerPage  = 1000
+	merakiNetsFor        = 5 * time.Minute  // the list of networks is kept this long
+	merakiSeenFor        = 30 * time.Minute // where a machine was found is kept this long
 )
 
 // merakiHostKey is a name as clients and directories write it: lower case, without the domain.
@@ -81,11 +84,16 @@ func (m *meraki) ClientReport(ctx context.Context, q ClientQuery) (map[string]an
 		}
 		nets = []map[string]any{{"id": q.Network}}
 	} else {
-		v, err := m.get(ctx, "/organizations/"+org+"/networks?perPage=1000")
-		if err != nil {
-			return nil, fmt.Errorf("networks: %w", err)
+		if v, _, ok := lookups.Get(m.ckey + "|nets|" + org); ok {
+			nets = v.([]map[string]any)
+		} else {
+			v, err := m.get(ctx, "/organizations/"+org+"/networks?perPage=1000")
+			if err != nil {
+				return nil, fmt.Errorf("networks: %w", err)
+			}
+			nets = rows(v)
+			lookups.Put(m.ckey+"|nets|"+org, nets, merakiNetsFor)
 		}
-		nets = rows(v)
 	}
 	out := map[string]any{"window_hours": q.Hours, "searched_for": append(append(boolKeys(names), boolKeys(macs)...), q.Users...)}
 	var notes []string
@@ -126,80 +134,127 @@ func (m *meraki) ClientReport(ctx context.Context, q ClientQuery) (map[string]an
 		net, name string
 		c         map[string]any
 	}
-	// the networks are asked a few at a time; one that fails is named and the others still answer
-	type netAnswer struct {
-		hits   []hit
-		ok     bool
-		cut    bool
-		failed string
-	}
-	answers := make([]netAnswer, len(nets))
-	sem := make(chan struct{}, merakiClientWorkers)
-	var wg sync.WaitGroup
-	for i, n := range nets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			id := str(n["id"])
-			v, err := m.get(ctx, fmt.Sprintf("/networks/%s/clients?perPage=%d&timespan=%d", id, merakiClientPerPage, span))
-			if err != nil {
-				var se *statusError
-				if errors.As(err, &se) && (se.Code == 400 || se.Code == 404) { // a network without clients (a systems manager network) answers 400
+	// search asks the networks and says what it found; a failing network is named in the notes
+	search := func(nets []map[string]any) ([]hit, int, int, error) {
+		// the networks are asked a few at a time; one that fails is named and the others still answer
+		type netAnswer struct {
+			hits   []hit
+			ok     bool
+			cut    bool
+			failed string
+		}
+		answers := make([]netAnswer, len(nets))
+		sem := make(chan struct{}, merakiClientWorkers)
+		var wg sync.WaitGroup
+		for i, n := range nets {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				id := str(n["id"])
+				v, err := m.get(ctx, fmt.Sprintf("/networks/%s/clients?perPage=%d&timespan=%d", id, merakiClientPerPage, span))
+				if err != nil {
+					var se *statusError
+					if errors.As(err, &se) && (se.Code == 400 || se.Code == 404) { // a network without clients (a systems manager network) answers 400
+						return
+					}
+					answers[i].failed = err.Error()
 					return
 				}
-				answers[i].failed = err.Error()
-				return
-			}
-			a := netAnswer{ok: true}
-			l := rows(v)
-			a.cut = len(l) >= merakiClientPerPage
-			for _, c := range l {
-				// by the name the client gave, by its MAC, or by the account it signed in to the network with (802.1X)
-				u := strings.ToLower(str(c["user"]))
-				if i := strings.LastIndexByte(u, '\\'); i >= 0 {
-					u = u[i+1:]
+				a := netAnswer{ok: true}
+				l := rows(v)
+				a.cut = len(l) >= merakiClientPerPage
+				for _, c := range l {
+					// by the name the client gave, by its MAC, or by the account it signed in to the network with (802.1X)
+					u := strings.ToLower(str(c["user"]))
+					if i := strings.LastIndexByte(u, '\\'); i >= 0 {
+						u = u[i+1:]
+					}
+					byUser := u != "" && (users[u] || users[strings.SplitN(u, "@", 2)[0]]) &&
+						!notNames[merakiHostKey(str(c["description"]))] && !notNames[merakiHostKey(str(c["dhcpHostname"]))]
+					if names[merakiHostKey(str(c["description"]))] || names[merakiHostKey(str(c["dhcpHostname"]))] || macs[normMAC(str(c["mac"]))] || byUser {
+						a.hits = append(a.hits, hit{id, str(n["name"]), c})
+					}
 				}
-				byUser := u != "" && (users[u] || users[strings.SplitN(u, "@", 2)[0]]) &&
-					!notNames[merakiHostKey(str(c["description"]))] && !notNames[merakiHostKey(str(c["dhcpHostname"]))]
-				if names[merakiHostKey(str(c["description"]))] || names[merakiHostKey(str(c["dhcpHostname"]))] || macs[normMAC(str(c["mac"]))] || byUser {
-					a.hits = append(a.hits, hit{id, str(n["name"]), c})
+				answers[i] = a
+			}()
+		}
+		wg.Wait()
+		var hits []hit
+		searched, failed := 0, 0
+		for i, a := range answers {
+			id := str(nets[i]["id"])
+			switch {
+			case a.failed != "":
+				if failed++; failed <= 3 {
+					notes = append(notes, fmt.Sprintf("network %s could not be searched: %s", id, a.failed))
 				}
+			case a.ok:
+				searched++
+				if a.cut {
+					notes = append(notes, fmt.Sprintf("network %s has %d or more clients in the window: the list may be cut; shorten the window", id, merakiClientPerPage))
+				}
+				hits = append(hits, a.hits...)
 			}
-			answers[i] = a
-		}()
+		}
+		if failed > 3 {
+			notes = append(notes, fmt.Sprintf("%d networks in all could not be searched", failed))
+		}
+		if searched == 0 && failed > 0 {
+			return nil, 0, 0, fmt.Errorf("no network could be searched: %s", answers[func() int {
+				for i, a := range answers {
+					if a.failed != "" {
+						return i
+					}
+				}
+				return 0
+			}()].failed)
+		}
+		return hits, searched, failed, nil
 	}
-	wg.Wait()
+	// a machine that was found before is asked about in the networks it was found in first; only when they have nothing is every network asked
+	seenKey := ""
+	if q.Network == "" && CacheOn {
+		seenKey = m.ckey + "|seen|" + strings.Join(boolKeys(names), ",") + "|" + strings.Join(boolKeys(macs), ",") + "|" + strings.Join(boolKeys(users), ",")
+	}
 	var hits []hit
-	searched, failed := 0, 0
-	for i, a := range answers {
-		id := str(nets[i]["id"])
-		switch {
-		case a.failed != "":
-			if failed++; failed <= 3 {
-				notes = append(notes, fmt.Sprintf("network %s could not be searched: %s", id, a.failed))
+	var searched int
+	done := false
+	n0 := len(notes)
+	if seenKey != "" {
+		if v, age, ok := lookups.Get(seenKey); ok {
+			want := map[string]bool{}
+			for _, id := range v.([]string) {
+				want[id] = true
 			}
-		case a.ok:
-			searched++
-			if a.cut {
-				notes = append(notes, fmt.Sprintf("network %s has %d or more clients in the window: the list may be cut; shorten the window", id, merakiClientPerPage))
+			var few []map[string]any
+			for _, n := range nets {
+				if want[str(n["id"])] {
+					few = append(few, n)
+				}
 			}
-			hits = append(hits, a.hits...)
+			if len(few) > 0 && len(few) < len(nets) {
+				if hits, searched, _, err = search(few); err == nil && len(hits) > 0 {
+					done = true
+					notes = append(notes, fmt.Sprintf("searched the %d network(s) it was seen in %d minutes ago, not all %d; ask with a network to look elsewhere", len(few), int(age.Minutes()), len(nets)))
+				} else {
+					hits, searched, notes = nil, 0, notes[:n0]
+				}
+			}
 		}
 	}
-	if failed > 3 {
-		notes = append(notes, fmt.Sprintf("%d networks in all could not be searched", failed))
+	if !done {
+		if hits, searched, _, err = search(nets); err != nil {
+			return nil, err
+		}
 	}
-	if searched == 0 && failed > 0 {
-		return nil, fmt.Errorf("no network could be searched: %s", answers[func() int {
-			for i, a := range answers {
-				if a.failed != "" {
-					return i
-				}
-			}
-			return 0
-		}()].failed)
+	if seenKey != "" && len(hits) > 0 {
+		var ids []string
+		for _, h := range hits {
+			ids = append(ids, h.net)
+		}
+		lookups.Put(seenKey, ids, merakiSeenFor)
 	}
 	out["networks_searched"] = searched
 	if len(hits) == 0 {

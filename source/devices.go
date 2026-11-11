@@ -175,14 +175,40 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(allDevs), op, cmd, to, got)
 		}()
 	}
+	// an assistant often asks the same thing twice: what a device answered a moment ago is given again, with its age (answercache.go)
+	byLocal := map[string]device.Result{}
+	keys := map[string]string{}
+	if answerCacheable(s, op, cmd, q.Get("fresh")) {
+		var miss []device.Device
+		for _, d := range here {
+			c, ok := credByName(creds, d.Credential)
+			if !ok {
+				miss = append(miss, d)
+				continue
+			}
+			k := device.AnswerKey(d, c, answerMode(s), op, cmd)
+			if r, age, hit := device.Answers.Get(k); hit {
+				secs := int(age.Seconds())
+				r.MS, r.Reused, r.CachedSecs = 0, false, &secs
+				byLocal[strings.ToLower(d.Name)] = r
+				continue
+			}
+			keys[strings.ToLower(d.Name)] = k
+			miss = append(miss, d)
+		}
+		here = miss
+	}
 	local := device.FanoutReuse(r.Context(), here, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (v any, err error) {
 		device.RunRaw(s.raw, func() { v, err = runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp && !s.raw) })
 		return v, err
 	})
 	gwg.Wait()
-	byLocal := map[string]device.Result{}
 	for _, x := range local {
-		byLocal[strings.ToLower(x.Device)] = x
+		k := strings.ToLower(x.Device)
+		byLocal[k] = x
+		if ck := keys[k]; ck != "" {
+			device.Answers.Put(ck, x, answerLife)
+		}
 	}
 	res := make([]device.Result, 0, len(picked))
 	for _, p := range picked {
@@ -267,6 +293,7 @@ func mcpDeviceTool(name, title, op, desc string) mcpTool {
 	if op == "show" {
 		props = append(props, mcpProp{name: "command", typ: "string", required: true, desc: "The command, e.g. \"show ip interface brief\"."})
 	}
+	props = append(props, mcpProp{name: "fresh", typ: "boolean", desc: "Ask the devices again even if they answered the same a moment ago (an answer repeated within " + answerLife.String() + " comes from memory and says cached_s, its age)."})
 	return mcpTool{name: name, title: title, noNode: true, idempotent: true,
 		desc:  desc + " Every device is asked at once; each answer has ok, error, data and the time it took.",
 		props: props,
@@ -277,6 +304,9 @@ func mcpDeviceTool(name, title, op, desc string) mcpTool {
 			}
 			if op == "api" {
 				q.Set("path", c.str("path"))
+			}
+			if f, _ := c.flag("fresh"); f {
+				q.Set("fresh", "1")
 			}
 			b, err := c.call("GET", "/api/devices/query?"+q.Encode(), nil, "")
 			return asAny(b), err

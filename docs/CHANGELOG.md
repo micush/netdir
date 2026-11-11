@@ -1,5 +1,28 @@
 # Changelog
 
+## [v126] - 2026-11-10 — Short memory for repeated reads and for tshoot's lookups
+
+### Added
+- **Repeated reads come from memory.** An MCP caller that asks a device the same read again within 30 seconds gets the first answer again, with `"cached_s": N` (its age in seconds) on that device's result and no time spent (`answercache.go`, `device/cache.go`). The key is the device with its login, the question (op and path) and the caller's privilege (read-only or not), so another login, another path or a read-only key never shares an answer. Only what holds no secret and is no search is kept: `facts`, `interfaces`, `neighbors`, `neighbor_details`, `ports`, `routes`, `routing`, `firewall`, `resources`, `vlans`, `api_catalog` and `api` paths that do not name a log, a job or a capture. Never kept: `config` and `show` (secrets, and a CLI command may be anything), log searches, changes, a failed answer, a caller whose privacy level is none, and the GUI (it always asks the device). A device below a Network Director is not kept either.
+- Every read tool has `fresh` (true: ask the devices again, nothing from memory); the HTTP route takes `fresh=1`.
+- **tshoot: the Meraki network list is kept 5 minutes,** so a second run does not list the networks again.
+- **tshoot: where a machine was found is kept 30 minutes.** A repeat for the same host name, MAC or account asks the networks it was found in first; when it is found there, only those were searched and the answer's `notes` say so (`searched the N network(s) it was seen in M minutes ago, not all K`), and `networks_searched` is the number asked. When it is not found there, every network is asked as before. A search with a named network never uses it.
+- **tshoot: the Entra lookups are kept 90 seconds:** who a user is and the devices of the user, and a device name and its users. A failed lookup is not kept.
+- The configuration being loaded empties all of it (a login or a device may have changed). `NETDIR_DEVICE_CACHE=0` in the daemon's environment switches it all off. What is returned from memory is a copy: a caller that changes an answer does not change the kept one.
+
+### Changed
+- `TestDeviceReadsShareOneSignIn` reads with `fresh`, or the second read would be from memory instead of over the kept driver.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`, `sh tools/leaktest.sh`.
+- `TestDeviceAnswerCache`: the first read asks the stub, the repeat does not and says `cached_s`, `fresh` asks again; which operations may be kept (a configuration, `show`, a log path and a job are not) and that the GUI, a raw caller and a fresh read never are.
+- `TestEntraLookupsAreKept`: the repeat does not reach Graph, a caller's change to an answer does not reach the kept one, a flush asks again, a refused name is not kept.
+- `TestMerakiClientMemory`: the list of networks is read once; the repeat of a search asks only the network the client was found in and says so; a wrong memory (the machine is no longer there) falls back to every network without claiming less; a named network ignores the memory.
+
+### Not verified
+- Not run against real devices; no time was measured. Lifetimes (30 s, 90 s, 5 min, 30 min) are guesses at what is safe: a read can be up to 30 seconds old, and a client that moved to another network within 30 minutes is not found by the short search when it is also still seen where it was (the first network answers, the others are not asked): ask with `fresh`-style certainty by naming no network and changing the host spelling, or switch the cache off. A machine that connects to two networks at once is reported only where it was found before.
+- GUI: nothing changed; not opened.
+
 ## [v125] - 2026-11-10 — Reads keep their login; tshoot gets the Wi-Fi
 
 ### Added

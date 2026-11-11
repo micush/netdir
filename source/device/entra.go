@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ type entra struct {
 	id, pw   string
 	rt       string // refresh token of a browser sign-in (the credential's token "rt:...")
 	credName string
+	ckey     string // names this directory and login in the lookup cache
 
 	mu  sync.Mutex
 	tok string
@@ -75,6 +77,7 @@ func newEntra(d Device, c Credential) (Driver, error) {
 		return nil, fmt.Errorf("device %s: option tenant is the directory ID or domain (contoso.onmicrosoft.com)", d.Name)
 	}
 	e.id, e.pw = c.Username, c.Password
+	e.ckey = idKey("entra", d.Address, strconv.Itoa(d.Port), e.tenant, e.credName, c.Username)
 	if d.Address == "" {
 		d.Address = "graph.microsoft.com"
 		e.d = d
@@ -405,6 +408,23 @@ func (e *entra) Close(context.Context) { e.api.close(); e.login.close() }
 
 // UserDevices is UserDeviceLooker: the user and the devices, most recently signed in first (a device that never signed in last).
 func (e *entra) UserDevices(ctx context.Context, who string) (map[string]any, []map[string]any, error) {
+	key := e.ckey + "|user|" + strings.ToLower(strings.TrimSpace(who))
+	if v, _, ok := lookups.Get(key); ok {
+		c := copyAny(v).(map[string]any)
+		devs, _ := c["devices"].([]map[string]any)
+		return c["user"].(map[string]any), devs, nil
+	}
+	u, devs, err := e.userDevicesOf(ctx, who)
+	if err == nil {
+		lookups.Put(key, map[string]any{"user": copyAny(u), "devices": copyAny(devs)}, entraLookupFor)
+	}
+	return u, devs, err
+}
+
+// entraLookupFor is how long who a user or a device is, as the directory said it, is kept.
+const entraLookupFor = 90 * time.Second
+
+func (e *entra) userDevicesOf(ctx context.Context, who string) (map[string]any, []map[string]any, error) {
 	u, err := e.oneUser(ctx, who)
 	if err != nil {
 		return nil, nil, err
@@ -426,6 +446,18 @@ var entraDeviceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$`)
 // DeviceUsers finds the devices of that name (a name may be there more than once: a machine that was set up again) and, for each,
 // the users registered on it and its owners, most recently signed in first.
 func (e *entra) DeviceUsers(ctx context.Context, name string) ([]map[string]any, error) {
+	key := e.ckey + "|host|" + strings.ToLower(strings.TrimSpace(name))
+	if v, _, ok := lookups.Get(key); ok {
+		return copyAny(v).([]map[string]any), nil
+	}
+	out, err := e.deviceUsersOf(ctx, name)
+	if err == nil {
+		lookups.Put(key, copyAny(out), entraLookupFor)
+	}
+	return out, err
+}
+
+func (e *entra) deviceUsersOf(ctx context.Context, name string) ([]map[string]any, error) {
 	name = strings.TrimSpace(name)
 	if !entraDeviceNameRE.MatchString(name) {
 		return nil, errors.New("host: a device name; letters, digits and . _ - only")

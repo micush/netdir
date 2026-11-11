@@ -81,6 +81,8 @@ type Result struct {
 	MS       int64  `json:"ms"`
 	// Reused says that the answer came over a driver kept open from an earlier request (FanoutReuse): no new login.
 	Reused bool `json:"reused,omitempty"`
+	// CachedSecs: the answer is what the device said this many seconds ago (the gateway's short answer cache), not asked just now.
+	CachedSecs *int `json:"cached_s,omitempty"`
 }
 
 // Fanout runs fn against every device in devs, at most par at a time, each with its own time limit, and returns one

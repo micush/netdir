@@ -35,6 +35,7 @@ type meraki struct {
 	api    *apiClient
 	org    string
 	serial string
+	ckey   string // names this device and its key in the lookup cache
 }
 
 var (
@@ -61,6 +62,7 @@ func newMeraki(d Device, c Credential) (Driver, error) {
 		d.Address = "api.meraki.com"
 		m.d = d
 	}
+	m.ckey = idKey("meraki", d.Address, strconv.Itoa(d.Port), m.org, key)
 	api, err := newAPIClient(d, 443)
 	if err != nil {
 		return nil, err
