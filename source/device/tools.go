@@ -42,7 +42,7 @@ func (tools) Interfaces(context.Context) ([]Interface, error) { return nil, ErrU
 func (tools) Neighbors(context.Context) ([]Neighbor, error)   { return nil, ErrUnsupported }
 func (tools) Config(context.Context) (string, error)          { return "", ErrUnsupported }
 func (tools) Show(context.Context, string) (string, error) {
-	return "", errors.New("the tools are used with net_ping, net_mtr, net_dig, net_curl, net_whois and net_scan, naming a gateway they are enabled on")
+	return "", errors.New("the tools are used with net_ping, net_mtr, net_dig, net_curl, net_whois, net_scan, net_port, net_tls, net_arp and net_wake, naming a gateway they are enabled on")
 }
 func (tools) Close(context.Context) {}
 

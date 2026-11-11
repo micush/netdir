@@ -59,13 +59,77 @@ var netJobs = struct {
 // probes per hop, both without name lookups.  mtr runs in its raw mode, which reports every probe as it happens, so the
 // table can grow on screen (its report mode prints only when it is done).
 func netToolSpec(kind string, a netip.Addr) (string, []string, time.Duration, error) {
+	return netToolSpecOpts(kind, a, NetOpts{})
+}
+
+// NetOpts are the choices a caller has beyond the host: for ping the number of pings (1 to 20, default 4), the payload size in
+// bytes (8 to 65500; with Df the largest one that gets through is the path MTU less 28, or 48 for IPv6) and Df (do not fragment);
+// for ping and mtr the family (4 or 6).  Zero is the default.
+type NetOpts struct {
+	Count, Size, Family int
+	Df                  bool
+}
+
+func (o NetOpts) key() string {
+	if o == (NetOpts{}) {
+		return ""
+	}
+	return fmt.Sprintf("|%d|%d|%d|%t", o.Count, o.Size, o.Family, o.Df)
+}
+
+// netOptsParse reads the options as the API carries them (strings); kind says which apply.
+func netOptsParse(kind, count, size, df, family string) (NetOpts, error) {
+	var o NetOpts
+	num := func(name, v string, lo, hi int) (int, error) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return 0, nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < lo || n > hi {
+			return 0, fmt.Errorf("%s: a whole number from %d to %d", name, lo, hi)
+		}
+		return n, nil
+	}
+	var err error
+	if o.Family, err = num("family", family, 4, 6); err != nil || (o.Family != 0 && o.Family != 4 && o.Family != 6) {
+		return o, errors.New("family: 4 or 6")
+	}
+	d := strings.ToLower(strings.TrimSpace(df))
+	o.Df = d == "1" || d == "true"
+	if kind != "ping" {
+		if strings.TrimSpace(count) != "" || strings.TrimSpace(size) != "" || o.Df {
+			return o, errors.New("count, size and df are for ping only")
+		}
+		return o, nil
+	}
+	if o.Count, err = num("count", count, 1, 20); err != nil {
+		return o, err
+	}
+	if o.Size, err = num("size", size, 8, 65500); err != nil {
+		return o, err
+	}
+	return o, nil
+}
+
+func netToolSpecOpts(kind string, a netip.Addr, o NetOpts) (string, []string, time.Duration, error) {
 	switch kind {
 	case "ping":
-		args := []string{"-n", "-c", "4", "-W", "2"}
+		n := o.Count
+		if n == 0 {
+			n = 4
+		}
+		args := []string{"-n", "-c", strconv.Itoa(n), "-W", "2"}
+		if o.Size > 0 {
+			args = append(args, "-s", strconv.Itoa(o.Size))
+		}
+		if o.Df {
+			args = append(args, "-M", "do")
+		}
 		if a.Is6() {
 			args = append(args, "-6")
 		}
-		return "ping", append(args, "--", a.String()), pingTimeout, nil
+		return "ping", append(args, "--", a.String()), pingLimit(n), nil
 	case "trace":
 		args := []string{"-n", "--raw", "-c", "10"}
 		if a.Is6() {
@@ -74,6 +138,14 @@ func netToolSpec(kind string, a netip.Addr) (string, []string, time.Duration, er
 		return "mtr", append(args, "--", a.String()), traceTimeout, nil
 	}
 	return "", nil, 0, fmt.Errorf("unknown tool %q", kind)
+}
+
+// pingLimit is how long n pings may take: one a second, and a reply that does not come is waited for two seconds.
+func pingLimit(n int) time.Duration {
+	if n <= 4 {
+		return pingTimeout
+	}
+	return time.Duration(n+11) * time.Second
 }
 
 // netBuf is the output of a running job: every write goes straight into the job's text.
@@ -120,11 +192,18 @@ func netTarget(s string) (key string, ip netip.Addr, name string, err error) {
 // netToolStart begins ping or traceroute of addr, an address or a host name (or returns the one already running).  A
 // finished one is replaced.
 func netToolStart(kind, addr, actor string) (*NetJob, error) {
+	return netToolStartOpts(kind, addr, actor, NetOpts{})
+}
+
+func netToolStartOpts(kind, addr, actor string, o NetOpts) (*NetJob, error) {
 	key, ip, name, err := netTarget(addr)
 	if err != nil {
 		return nil, err
 	}
-	prog, _, limit, err := netToolSpec(kind, netip.MustParseAddr("127.0.0.1"))
+	if ip.IsValid() && ((o.Family == 4 && !ip.Is4()) || (o.Family == 6 && !ip.Is6())) {
+		return nil, fmt.Errorf("%s is not an IPv%d address", ip, o.Family)
+	}
+	prog, _, limit, err := netToolSpecOpts(kind, netip.MustParseAddr("127.0.0.1"), o)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +212,7 @@ func netToolStart(kind, addr, actor string) (*NetJob, error) {
 		pkg := map[string]string{"ping": "iputils-ping (iputils on the RHEL family)", "mtr": "mtr"}[prog]
 		return nil, fmt.Errorf("%s is not installed on this node (install the %s package)", prog, pkg)
 	}
-	jk := kind + "|" + key
+	jk := kind + "|" + key + o.key()
 	netJobs.mu.Lock()
 	if j := netJobs.jobs[jk]; j != nil && j.State == "running" {
 		c := *j
@@ -175,7 +254,11 @@ func netToolStart(kind, addr, actor string) (*NetJob, error) {
 		title := ""
 		if name != "" { // a name: the first address it has (IPv4 first), looked up here
 			rc, rcancel := context.WithTimeout(ctx, 5*time.Second)
-			ips, err := net.DefaultResolver.LookupNetIP(rc, "ip", name)
+			network := "ip"
+			if o.Family == 4 || o.Family == 6 {
+				network = "ip" + strconv.Itoa(o.Family)
+			}
+			ips, err := net.DefaultResolver.LookupNetIP(rc, network, name)
 			rcancel()
 			ip = netip.Addr{}
 			for _, x := range ips {
@@ -198,11 +281,15 @@ func netToolStart(kind, addr, actor string) (*NetJob, error) {
 			title = name + " (" + ip.String() + ")"
 			if kind == "ping" {
 				netJobs.mu.Lock()
-				j.Text = name + " → " + ip.String() + "\n\n"
+				fam := "IPv4"
+				if ip.Is6() {
+					fam = "IPv6"
+				}
+				j.Text = name + " → " + ip.String() + " (" + fam + ")\n\n"
 				netJobs.mu.Unlock()
 			}
 		}
-		_, args, _, _ := netToolSpec(kind, ip)
+		_, args, _, _ := netToolSpecOpts(kind, ip, o)
 		cmd := exec.CommandContext(ctx, path, args...)
 		cmd.Stdout, cmd.Stderr = netBuf{j}, netBuf{j}
 		var raw *mtrRaw
@@ -239,7 +326,9 @@ func netToolStart(kind, addr, actor string) (*NetJob, error) {
 }
 
 // netToolGet is the state of kind for addr: running, done, error, or none when there never was one.
-func netToolGet(kind, addr string) (*NetJob, error) {
+func netToolGet(kind, addr string) (*NetJob, error) { return netToolGetOpts(kind, addr, NetOpts{}) }
+
+func netToolGetOpts(kind, addr string, o NetOpts) (*NetJob, error) {
 	key, _, _, err := netTarget(addr)
 	if err != nil {
 		return nil, err
@@ -249,7 +338,7 @@ func netToolGet(kind, addr string) (*NetJob, error) {
 	}
 	netJobs.mu.Lock()
 	defer netJobs.mu.Unlock()
-	if j := netJobs.jobs[kind+"|"+key]; j != nil {
+	if j := netJobs.jobs[kind+"|"+key+o.key()]; j != nil {
 		c := *j
 		return &c, nil
 	}

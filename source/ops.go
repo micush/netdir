@@ -71,6 +71,16 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		QOutcome string     `json:"outcome"`
 		QClient  string     `json:"client"`
 		NetKind  string     `json:"kind"`
+		PCount   string     `json:"count"`  // nettool: pings
+		PSize    string     `json:"size"`   // nettool: payload bytes
+		PDF      string     `json:"df"`     // nettool: do not fragment
+		PFam     string     `json:"family"` // nettool, portcheck, tlscheck: 4 or 6
+		PPorts   string     `json:"ports"`
+		PPort    string     `json:"port"`
+		PSNI     string     `json:"sni"`
+		PMAC     string     `json:"mac"`
+		PBcast   string     `json:"broadcast"`
+		PIP      string     `json:"ip"`
 		QType    string     `json:"type"`
 		QMethod  string     `json:"method"`
 		QFollow  string     `json:"follow"`
@@ -325,11 +335,27 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "scan.start":
 		return scanStart(a.QClient, actor)
 	case "nettool.start":
-		return netToolStart(a.NetKind, a.QClient, actor)
+		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
+		if err != nil {
+			return nil, err
+		}
+		return netToolStartOpts(a.NetKind, a.QClient, actor, o)
 	case "scan.get":
 		return scanGet(a.QClient)
 	case "nettool.get":
-		return netToolGet(a.NetKind, a.QClient)
+		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
+		if err != nil {
+			return nil, err
+		}
+		return netToolGetOpts(a.NetKind, a.QClient, o)
+	case "portcheck.get":
+		return portCheck(a.QClient, a.PPorts, a.PFam)
+	case "tlscheck.get":
+		return tlsCheck(a.QClient, a.PPort, a.PSNI, a.PFam)
+	case "arp.get":
+		return arpLookup(a.PIP)
+	case "wake.send":
+		return wakeSend(a.PMAC, a.PBcast, actor)
 	case "host.cluster":
 		from, to, err := hostRange(a.QFrom, a.QTo)
 		if err != nil {

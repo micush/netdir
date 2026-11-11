@@ -94,7 +94,11 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/scan", w.authed(w.op("scan.start", nil)))
 	mux.HandleFunc("GET /api/scan", w.authed(w.op("scan.get", []string{"client"})))
 	mux.HandleFunc("POST /api/nettool", w.authed(w.op("nettool.start", nil)))
-	mux.HandleFunc("GET /api/nettool", w.authed(w.op("nettool.get", []string{"kind", "client"})))
+	mux.HandleFunc("GET /api/nettool", w.authed(w.op("nettool.get", []string{"kind", "client", "count", "size", "df", "family"})))
+	mux.HandleFunc("GET /api/portcheck", w.authed(w.op("portcheck.get", []string{"client", "ports", "family"})))     // MCP net_port (netprobe.go)
+	mux.HandleFunc("GET /api/tlscheck", w.authed(w.op("tlscheck.get", []string{"client", "port", "sni", "family"}))) // MCP net_tls
+	mux.HandleFunc("GET /api/arp", w.authed(w.op("arp.get", []string{"ip"})))                                        // MCP net_arp
+	mux.HandleFunc("POST /api/wake", w.authed(w.op("wake.send", nil)))                                               // MCP net_wake (needs a read-write key)
 	// the whole cluster's numbers added together (not relayable: the node asked does the asking of the others)
 	mux.HandleFunc("GET /api/clusterhost", w.authed(w.op("host.cluster", []string{"gw", "from", "to"})))
 	mux.HandleFunc("GET /api/nodepause", w.authed(w.op("node.status", nil)))

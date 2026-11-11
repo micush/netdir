@@ -103,6 +103,17 @@ func TestScanRun(t *testing.T) {
 	if g.State != "done" || !strings.Contains(g.Text, "-Pn") || !strings.HasSuffix(g.Text, "-- 10.9.9.9") {
 		t.Fatalf("result %+v", g)
 	}
+	nj, err := scanStart("NS1.cush.local.", "tester") // a host name goes to nmap as it is (lower case, no trailing dot)
+	if err != nil {
+		t.Fatalf("name: %v", err)
+	}
+	for i := 0; i < 100 && nj.State == "running"; i++ {
+		time.Sleep(50 * time.Millisecond)
+		nj, _ = scanGet("ns1.cush.local")
+	}
+	if nj.State != "done" || !strings.HasSuffix(nj.Text, "-- ns1.cush.local") {
+		t.Fatalf("name result %+v", nj)
+	}
 	if n, _ := scanGet("10.8.8.8"); n.State != "none" {
 		t.Errorf("never scanned: %+v", n)
 	}

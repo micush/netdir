@@ -1,5 +1,28 @@
 # Changelog
 
+## [v134] - 2026-11-11 — nmap scans accept a host name; ping options, port, TLS, ARP and Wake-on-LAN tools, dig without dig
+
+### Fixed
+- `net_scan` (and `POST /api/scan`, `--scan`) refused a host name such as `ns1.cush.local` ("not an IP address"). The scan takes an address or a host name now; the name is checked label by label (no spaces, no leading `-`, not a range) and nmap looks it up on the node that runs the scan, so it uses that node's DNS. Addresses are checked as before. The job is remembered under the lower-case name.
+
+### Added
+All of these are used with a `gateway` argument as the other `net_*` tools are, run on a node that serves the gateway, and are not offered to a key limited to some devices.
+- **`net_ping` options** `count` (1 to 20, default 4), `size` (payload 8 to 65500) and `df` (don't fragment, `-M do`): find a path's MTU for VPN and tunnel problems (the largest size that passes is the path MTU less 28 bytes, 48 for IPv6). The time allowed grows with the count. A job with options is its own job, not the plain one.
+- **IPv6 / IPv4 choice** `family` (4 or 6) for `net_ping`, `net_mtr`, `net_port` and `net_tls`: a name is looked up for that family only, an address of the other family is refused. A ping to a name now begins with `name → address (IPv4|IPv6)` so the family used is visible.
+- **`net_port`** (`GET /api/portcheck`): TCP connect to up to ten ports, each open, closed (refused) or filtered (no answer in 4 s), with the connect time. Written in Go, no program needed.
+- **`net_tls`** (`GET /api/tlscheck`): TLS handshake with a host and port (optional `sni`): protocol, cipher, ALPN, the chain with subject, issuer, valid from/to, days left, names, key and signature, whether this node's roots trust it for the name (`trusted`, `verify_error`), and a `warning` when it has expired or expires within 30 days. Any certificate is accepted for the look. Go, no program.
+- **`net_arp`** (`GET /api/arp`): the MAC the node has for an IP on its own segment, with the interface and subnet (IPv4 from `/proc/net/arp`, IPv6 from `ip -6 neigh`). An address on a subnet of the node that is not in the table is asked for with one UDP datagram first; an address on another segment is reported as not on a segment of the node.
+- **`net_wake`** (`POST /api/wake`): a Wake-on-LAN magic packet (UDP port 9) to 255.255.255.255 or a given IPv4 broadcast address. It powers a machine on, so unlike the others it is a write tool: a read-only key is refused, and a read-only GUI account cannot POST it.
+- **dig without dig**: when `dig` is not installed, `net_dig` answers an address's name (reverse DNS, PTR) and A, AAAA, MX, NS, TXT, CNAME with the node's resolver (or the given server on port 53), marked with a note; the other types still need dig.
+- Routes `/api/portcheck`, `/api/tlscheck`, `/api/arp`, `/api/wake` are relayable to another node; `POST /api/wake` joins `/api/nettool` and `/api/scan` in the MCP write guard.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+- Tests: a scan of `NS1.cush.local.` with a stand-in `nmap` receives `-- ns1.cush.local`; ping's exact arguments for count, size, df and family (stand-in `ping`, through the MCP tool and the node's API); every bad count, size, family, port, SNI, IP, MAC and broadcast value is refused; the port check against a real listener (open) and a closed port; the TLS check against a Go TLS test server (TLS 1.3, not trusted, no warning) and a plain-text port (handshake error); `net_wake` refused for a read-only key; reverse DNS through the resolver with no `dig` on the PATH.
+
+### Not verified
+- Never run with the real `ping` options (`-M do`, `-s`), `mtr`, `nmap`, `dig` or `curl`, nor across a cluster. Not sent: a Wake-on-LAN packet to a real machine (the sandbox has no peer; only the argument checks and a built packet are covered), and an ARP lookup that finds a neighbour (the sandbox's table is empty) or the IPv6 neighbour read (`ip -6 neigh`, no IPv6 in the sandbox). A TLS chain with an intermediate, and the expiry warning, were not exercised. The GUI has no pages for these tools.
+
 ## [v133] - 2026-11-11 — A "tools" device: ping, mtr, dig, curl, whois and nmap for the assistant
 
 ### Added

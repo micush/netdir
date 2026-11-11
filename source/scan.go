@@ -53,14 +53,29 @@ func scanAddr(s string) (netip.Addr, error) {
 	return a, nil
 }
 
+// scanTarget checks what to scan: one unicast address, or a host name nmap looks up itself.
+func scanTarget(s string) (key string, ip netip.Addr, name string, err error) {
+	if _, e := netip.ParseAddr(strings.TrimSpace(s)); e == nil {
+		a, e := scanAddr(s)
+		if e != nil {
+			return "", ip, "", e
+		}
+		return a.String(), a, "", nil
+	}
+	return netTarget(s)
+}
+
 // scanArgs are nmap's arguments for addr: no ping (hosts that drop it are scanned anyway), the 100 commonest ports,
 // service and OS detection, and a cap on the time.
-func scanArgs(a netip.Addr) []string {
+func scanArgs(a netip.Addr) []string { return scanArgsFor(a.String(), a.Is6()) }
+
+// scanArgsFor is scanArgs for target, an address or a host name nmap looks up itself.
+func scanArgsFor(target string, v6 bool) []string {
 	args := []string{"-Pn", "-T4", "-F", "-sV", "--version-light", "-O", "--osscan-limit", "--max-retries", "1", "--host-timeout", "120s"}
-	if a.Is6() {
+	if v6 {
 		args = append(args, "-6")
 	}
-	return append(args, "--", a.String())
+	return append(args, "--", target)
 }
 
 var scanPortRe = regexp.MustCompile(`^(\d+)/(tcp|udp|sctp)\s+open\s+(\S+)\s*(.*)$`)
@@ -198,9 +213,9 @@ func (l *limitBuf) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// scanStart begins a scan of addr (or returns the one already running for it).
+// scanStart begins a scan of addr (an address or a host name) (or returns the one already running for it).
 func scanStart(addr, actor string) (*ScanJob, error) {
-	a, err := scanAddr(addr)
+	key, ip, _, err := scanTarget(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +223,6 @@ func scanStart(addr, actor string) (*ScanJob, error) {
 	if err != nil {
 		return nil, errors.New("nmap is not installed on this node (install the nmap package)")
 	}
-	key := a.String()
 	scans.mu.Lock()
 	if j := scans.jobs[key]; j != nil && j.State == "running" {
 		c := *j
@@ -240,7 +254,7 @@ func scanStart(addr, actor string) (*ScanJob, error) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, path, scanArgs(a)...)
+		cmd := exec.CommandContext(ctx, path, scanArgsFor(key, ip.Is6())...)
 		out := &limitBuf{max: scanReadMax}
 		cmd.Stdout, cmd.Stderr = out, out
 		err := cmd.Run()
@@ -267,15 +281,15 @@ func scanStart(addr, actor string) (*ScanJob, error) {
 
 // scanGet is the state of the scan of addr: running, done, error, or none when there never was one.
 func scanGet(addr string) (*ScanJob, error) {
-	a, err := scanAddr(addr)
+	key, _, _, err := scanTarget(addr)
 	if err != nil {
 		return nil, err
 	}
 	scans.mu.Lock()
 	defer scans.mu.Unlock()
-	if j := scans.jobs[a.String()]; j != nil {
+	if j := scans.jobs[key]; j != nil {
 		c := *j
 		return &c, nil
 	}
-	return &ScanJob{Addr: a.String(), State: "none"}, nil
+	return &ScanJob{Addr: key, State: "none"}, nil
 }

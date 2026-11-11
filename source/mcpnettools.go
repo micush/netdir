@@ -22,7 +22,7 @@ import (
 // nothing); a key limited to some devices is not offered any.
 func init() {
 	mcpTools = append(mcpTools, mcpNetTools()...)
-	for _, n := range []string{"net_ping", "net_mtr", "net_whois", "net_dig", "net_curl", "net_scan"} {
+	for _, n := range []string{"net_ping", "net_mtr", "net_whois", "net_dig", "net_curl", "net_scan", "net_port", "net_tls", "net_arp", "net_wake"} {
 		scopedOffTools[n] = true
 	}
 }
@@ -144,18 +144,35 @@ func mcpNetTools() []mcpTool {
 	gw := mcpProp{name: "gateway", typ: "string", desc: "The gateway to run from: its label (paris) or number. The tools run on a node that serves it, and only on a gateway that has the network tools device. Left out: the only gateway that has them."}
 	note := " Runs from a node that serves the gateway named in gateway, so it shows the network as seen from there."
 	host := mcpProp{name: "host", typ: "string", required: true, desc: "An IP address or a host name."}
-	netTool := func(name, title, kind, desc string, limit time.Duration) mcpTool {
-		return mcpTool{name: name, title: title, idempotent: true, noNode: true, desc: desc + note, props: []mcpProp{gw, host},
+	family := mcpProp{name: "family", typ: "string", desc: "4 or 6: the address family to use. Left out: IPv4 first for a name that has both (the answer says which was used)."}
+	netTool := func(name, title, kind, desc string, props []mcpProp, limit time.Duration) mcpTool {
+		return mcpTool{name: name, title: title, idempotent: true, noNode: true, desc: desc + note, props: append([]mcpProp{gw, host}, props...),
 			run: func(c *mcpCtx) (any, error) {
 				h := c.str("host")
-				if _, _, _, err := netTarget(h); err != nil {
+				if _, _, _, err := scanTarget(h); err != nil {
+					return nil, err
+				}
+				o, err := netOptsParse(kind, c.str("count"), c.str("size"), c.str("df"), c.str("family"))
+				if err != nil {
 					return nil, err
 				}
 				n, err := c.toolsNode(c.str("gateway"))
 				if err != nil {
 					return nil, err
 				}
-				return c.mcpNetRun(n, "/api/nettool", map[string]any{"kind": kind, "client": h}, "/api/nettool?kind="+kind+"&client="+url.QueryEscape(h), limit)
+				body := map[string]any{"kind": kind, "client": h}
+				q := "/api/nettool?kind=" + kind + "&client=" + url.QueryEscape(h)
+				for _, k := range []string{"count", "size", "df", "family"} {
+					if v := c.str(k); v != "" {
+						body[k] = v // strings, as the API reads them
+						q += "&" + k + "=" + url.QueryEscape(v)
+					}
+				}
+				lim := limit
+				if kind == "ping" {
+					lim = pingLimit(max(o.Count, 4))
+				}
+				return c.mcpNetRun(n, "/api/nettool", body, q, lim)
 			}}
 	}
 	// the tools that answer at once: asked of the node with a GET
@@ -168,8 +185,10 @@ func mcpNetTools() []mcpTool {
 		return asAny(b), err
 	}
 	return []mcpTool{
-		netTool("net_ping", "Ping from a gateway", "ping", "Four pings of a host: replies, loss and times.", pingTimeout),
-		netTool("net_mtr", "Traceroute (mtr) from a gateway", "trace", "mtr of a host, ten probes per hop: each hop's address, name, loss and times. This is the traceroute.", traceTimeout),
+		netTool("net_ping", "Ping from a gateway", "ping", "Pings of a host (four unless count says otherwise): replies, loss and times. size and df find a path's MTU: with df on, a size that is too big is refused with the MTU in the answer; the largest size that passes is the path MTU less 28 bytes (IPv4) or 48 (IPv6).",
+			[]mcpProp{{name: "count", typ: "number", desc: "Number of pings, 1 to 20 (default 4)."}, {name: "size", typ: "number", desc: "Payload bytes, 8 to 65500 (default 56)."},
+				{name: "df", typ: "boolean", desc: "Set the don't-fragment bit."}, family}, pingTimeout),
+		netTool("net_mtr", "Traceroute (mtr) from a gateway", "trace", "mtr of a host, ten probes per hop: each hop's address, name, loss and times. This is the traceroute.", []mcpProp{family}, traceTimeout),
 		{name: "net_whois", title: "Whois from a gateway", idempotent: true, noNode: true,
 			desc:  "Whois of a domain or an IP address (registrar, dates, name servers; owner and network for an address)." + note,
 			props: []mcpProp{gw, {name: "lookup", typ: "string", required: true, desc: "A domain name or an IP address."}},
@@ -205,10 +224,10 @@ func mcpNetTools() []mcpTool {
 			}},
 		{name: "net_scan", title: "nmap scan from a gateway", idempotent: true, noNode: true,
 			desc:  "An nmap scan of one host: the 100 commonest TCP ports, service and OS detection, no ping, at most two minutes. It sends probe traffic to the host, so scan only hosts you may." + note,
-			props: []mcpProp{gw, {name: "host", typ: "string", required: true, desc: "One IP address (not a name or a range)."}},
+			props: []mcpProp{gw, {name: "host", typ: "string", required: true, desc: "One IP address or host name (not a range)."}},
 			run: func(c *mcpCtx) (any, error) {
 				h := strings.TrimSpace(c.str("host"))
-				if _, err := scanAddr(h); err != nil {
+				if _, _, _, err := scanTarget(h); err != nil {
 					return nil, fmt.Errorf("host: %w", err)
 				}
 				n, err := c.toolsNode(c.str("gateway"))
@@ -216,6 +235,35 @@ func mcpNetTools() []mcpTool {
 					return nil, err
 				}
 				return c.mcpNetRun(n, "/api/scan", map[string]any{"client": h}, "/api/scan?client="+url.QueryEscape(h), scanTimeout)
+			}},
+		{name: "net_port", title: "TCP port check from a gateway", idempotent: true, noNode: true,
+			desc:  "Is a TCP port open? Connects to one or more ports (up to ten) of a host and says open, closed (refused) or filtered (no answer in 4 s), with the time to connect. Quick and light: use it instead of net_scan for a port or two." + note,
+			props: []mcpProp{gw, host, {name: "ports", typ: "string", required: true, desc: "One port or a list, e.g. 443 or 22,443,8006."}, family},
+			run: func(c *mcpCtx) (any, error) {
+				return get(c, "/api/portcheck?client="+url.QueryEscape(c.str("host"))+"&ports="+url.QueryEscape(c.str("ports"))+"&family="+url.QueryEscape(c.str("family")))
+			}},
+		{name: "net_tls", title: "TLS certificate check from a gateway", idempotent: true, noNode: true,
+			desc:  "The TLS certificate a host and port present: protocol and cipher negotiated, the chain (subject, issuer, valid from/to, days left, names, key), and whether this node would trust it for the name (trusted, verify_error, and a warning when it has expired or expires within 30 days). Any certificate is accepted for the look, so an expired or self-signed one is shown, not refused. Nothing is sent after the handshake." + note,
+			props: []mcpProp{gw, host, {name: "port", typ: "number", desc: "Port (default 443)."}, {name: "sni", typ: "string", desc: "The server name to ask for, when it differs from host (e.g. host is an address)."}, family},
+			run: func(c *mcpCtx) (any, error) {
+				return get(c, "/api/tlscheck?client="+url.QueryEscape(c.str("host"))+"&port="+url.QueryEscape(c.str("port"))+"&sni="+url.QueryEscape(c.str("sni"))+"&family="+url.QueryEscape(c.str("family")))
+			}},
+		{name: "net_arp", title: "ARP / neighbor lookup from a gateway", idempotent: true, noNode: true,
+			desc:  "The MAC address a node has for an IP address on its own segment, and the interface and subnet it is on (ARP for IPv4, the neighbour table for IPv6). An address on a subnet of the node that is not in the table is asked for once with a single UDP datagram. An address on another segment is not in the table: the answer says so." + note,
+			props: []mcpProp{gw, {name: "ip", typ: "string", required: true, desc: "An IP address."}},
+			run: func(c *mcpCtx) (any, error) {
+				return get(c, "/api/arp?ip="+url.QueryEscape(c.str("ip")))
+			}},
+		{name: "net_wake", title: "Wake-on-LAN from a gateway", write: true, noNode: true,
+			desc:  "Sends a Wake-on-LAN magic packet for a MAC address (UDP port 9 to the broadcast address) from a node that serves the gateway, so the machine must be on that node's segment and have Wake-on-LAN enabled. It powers a machine on, so it needs a read-write key." + note,
+			props: []mcpProp{gw, {name: "mac", typ: "string", required: true, desc: "The machine's MAC address, aa:bb:cc:dd:ee:ff."}, {name: "broadcast", typ: "string", desc: "The IPv4 broadcast address to send to (e.g. 10.1.5.255); 255.255.255.255 when left out."}},
+			run: func(c *mcpCtx) (any, error) {
+				n, err := c.toolsNode(c.str("gateway"))
+				if err != nil {
+					return nil, err
+				}
+				b, err := c.call("POST", "/api/wake", map[string]any{"mac": c.str("mac"), "broadcast": c.str("broadcast")}, n)
+				return asAny(b), err
 			}},
 	}
 }
