@@ -1379,9 +1379,10 @@
         if (inventory().some((x) => x.name.toLowerCase() === v.name.toLowerCase() && x !== d)) return "There is a device called " + v.name + " already.";
         if (!v.address && v.platform === "meraki") v.address = "api.meraki.com";
         if (!v.address && v.platform === "entra") v.address = "graph.microsoft.com";
+        if (!v.address && v.platform === "tools") v.address = "localhost";
         if (!v.address || /[\s/:@]/.test(v.address) && !v.address.includes("::") && v.address.split(":").length < 3) return "Give the address or host name, without a port or a scheme.";
         if (v.port && !(Number(v.port) >= 1 && Number(v.port) <= 65535)) return "The port is 1 to 65535 (default 443).";
-        let cred = v.login;
+        let cred = v.platform === "tools" ? "" : v.login;   // the tools need no login
         if (cred === NEW_LOGIN) {
           if (!v.pass && !v.token && v.platform !== "entra") return "A new login needs a password or a token.";
           if (!v.pass && !v.token) v.token = "rt:";   // Entra: a login with nothing filled in is signed in with a browser (right-click the device)
@@ -2653,7 +2654,7 @@
   // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
   const PLATFORM_LABEL = {
     aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
-    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", ad: "Active Directory", sdwan: "Cisco Catalyst SD-WAN",
+    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",

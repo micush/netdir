@@ -71,6 +71,10 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		QOutcome string     `json:"outcome"`
 		QClient  string     `json:"client"`
 		NetKind  string     `json:"kind"`
+		QType    string     `json:"type"`
+		QMethod  string     `json:"method"`
+		QFollow  string     `json:"follow"`
+		QInsec   string     `json:"insecure"`
 		QServer  string     `json:"server"`
 		QCMatch  string     `json:"cmatch"`
 		QGW      string     `json:"gw"` // host.cluster: only the nodes of this gateway (group number)
@@ -348,6 +352,12 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	// whois of a domain (asked of the registry from this node, only when requested)
 	case "whois.get":
 		return whoisWithAddrs(a.Lookup)
+	// dig of a name, run on this node
+	case "dig.get":
+		return digRun(a.Name, a.QType, a.QServer)
+	// curl of a URL, run on this node
+	case "curl.get":
+		return curlRun(a.Lookup, a.QMethod, a.QFollow == "1" || a.QFollow == "true", a.QInsec == "1" || a.QInsec == "true")
 	// a name for an address (reverse lookup) or an address for a name
 	case "dns.lookup.full":
 		return lookupFull(a.Lookup)

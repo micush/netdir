@@ -199,6 +199,9 @@ func Validate(devs []Device, creds []Credential) error {
 		if d.Address == "" && d.Platform == "rcode0" {
 			d.Address = "my.rcodezero.at" // the RcodeZero API
 		}
+		if d.Address == "" && d.Platform == "tools" {
+			d.Address = "localhost" // the tools run on the netdir node: no address to give
+		}
 		if d.Address == "" && d.Platform == "entra" {
 			d.Address = "graph.microsoft.com" // Microsoft Graph (public cloud)
 		}
@@ -208,7 +211,7 @@ func Validate(devs []Device, creds []Credential) error {
 		if d.Port < 0 || d.Port > 65535 {
 			return fmt.Errorf("device %s: port %d is not a TCP port", d.Name, d.Port)
 		}
-		if !cn[d.Credential] && !(d.Disabled && d.Credential == "") { // a disabled device may have no login yet (an imported one); enabling it asks for one
+		if !cn[d.Credential] && !(d.Disabled && d.Credential == "") && d.Platform != "tools" { // a disabled device may have no login yet (an imported one); enabling it asks for one
 			if d.Credential == "" {
 				return fmt.Errorf("device %s: give it a login before enabling it", d.Name)
 			}

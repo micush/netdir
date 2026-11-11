@@ -1,5 +1,21 @@
 # Changelog
 
+## [v133] - 2026-11-11 — A "tools" device: ping, mtr, dig, curl, whois and nmap for the assistant
+
+### Added
+- **Platform `tools`** (`device/tools.go`): one device, no address and no login (Devices ▸ Add ▸ *Network tools*). Adding it to a gateway's devices enables the network tools for that gateway. Its health shows which of `ping`, `mtr`, `nmap`, `dig`, `curl` are installed on the node.
+- **MCP tools `net_ping`, `net_mtr`, `net_dig`, `net_curl`, `net_whois`, `net_scan`** (`mcpnettools.go`) with a `gateway` argument (label or number): "scan 10.1.1.1 from paris" is `net_scan` with `host` and `gateway` `paris`. The job runs on a netdir node that serves that gateway (this node when it does, otherwise a peer through the cluster relay). `gateway` may be left out when only one gateway has the tools; a gateway without the device is an error that names the ones that have it. Ping 15 s, mtr up to 2 min, nmap up to 2.5 min; a longer job is returned as running with a note.
+- **All six work with a read-only key** (none changes configuration) and none is offered to a key limited to some devices. `POST /api/nettool` and `POST /api/scan` are let through for in-process (MCP and relayed) read-only requests only; a read-only GUI user is still refused every POST.
+- **dig** (`dig.go`, `GET /api/dig`): one query with `+time=3 +tries=1`, no shell; name checked label by label (or an address, asked with `-x`); type one of A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, CAA, DS, DNSKEY, NAPTR, TLSA, SPF (not ANY); optional DNS server address; output cut at 8 KB.
+- **curl** (`curl.go`, `GET /api/curl`): http/https only, no user info in the URL, HEAD (default) or GET, optional follow (at most 3 redirects) and optional skip of certificate checks; 15 s, 1 MB, output cut at 16 KB, timings appended. No shell.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+- `TestMCPNetTools*`: read-only and read-write keys are offered all six, a limited key none; refused hosts, names, types, servers and URLs never reach a program; gateway resolution (only one, none, wrong one); with stand-in programs first in PATH the exact arguments passed to `dig` and `curl` are asserted and a public address in the answer is masked.
+
+### Not verified
+- Not run with the real `ping`, `mtr`, `nmap`, `dig` or `curl` (none installed in the sandbox; only stand-ins), not across a real cluster (the gateway-to-node mapping and the relay of the POSTs), and the GUI was not opened in a browser. dig and curl have no GUI; the Network tools page is unchanged.
+
 ## [v132] - 2026-11-10 — Active Directory lookups under Ask
 
 ### Changed

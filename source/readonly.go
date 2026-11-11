@@ -52,6 +52,13 @@ func readOnlyDenied(r *http.Request) bool {
 	return p == "/api/versions/get" || p == "/api/versions/diff" || p == "/api/versions/download"
 }
 
+// readOnlyJob: the two POSTs that only start a look (ping/mtr, nmap) are let through for a request that came
+// in-process (an MCP caller, or a node relaying one).  A read-only GUI user cannot reach this: the browser path
+// (authed, second branch) still refuses every POST, and /api/proxy refuses non-GET for them.
+func readOnlyJob(r *http.Request) bool {
+	return r.Method == http.MethodPost && (r.URL.Path == "/api/nettool" || r.URL.Path == "/api/scan")
+}
+
 // secretKeys are the configuration keys whose values a read-only account is not shown.
 var secretKeys = map[string]bool{"key": true, "password": true, "register_key": true, "secret": true, "sso_google_client_secret": true, "sso_entra_client_secret": true, "sso_oidc_client_secret": true, "ldap_bind_password": true,
 	"token": true} // token: a device credential's API token (devices.go)

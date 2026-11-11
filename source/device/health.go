@@ -197,14 +197,16 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return Health{Status: "paused", Detail: "disabled: never contacted", Facts: h.Facts, LastOK: h.LastOK}
 	}
 	h.Checked = now.Unix()
-	rctx, cancel := context.WithTimeout(ctx, m.Timeout)
-	conn, err := dialFn(rctx, hostPort(d, DefaultPort(d.Platform)))
-	cancel()
-	if err != nil {
-		h.Status, h.Detail = "bad", "the API port does not answer: "+shortErr(err)
-		return h
+	if d.Platform != "tools" { // the tools are programs on this node: nothing to dial
+		rctx, cancel := context.WithTimeout(ctx, m.Timeout)
+		conn, err := dialFn(rctx, hostPort(d, DefaultPort(d.Platform)))
+		cancel()
+		if err != nil {
+			h.Status, h.Detail = "bad", "the API port does not answer: "+shortErr(err)
+			return h
+		}
+		conn.Close()
 	}
-	conn.Close()
 	wasDown := h.Status != "ok" && h.Status != "warn"
 	_, factsEvery := m.intervals(now)
 	if wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= factsEvery {
@@ -225,7 +227,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 }
 
 func (m *Monitor) facts(ctx context.Context, d Device, c Credential) (Facts, error) {
-	if c.Name == "" {
+	if c.Name == "" && d.Platform != "tools" {
 		return Facts{}, errors.New("its credential " + d.Credential + " is not in the list")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*m.Timeout)

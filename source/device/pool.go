@@ -239,6 +239,9 @@ func oneReuse(ctx context.Context, d Device, cred map[string]Credential, each ti
 		r.MS = time.Since(start).Milliseconds()
 	}()
 	c, ok := cred[d.Credential]
+	if d.Platform == "tools" {
+		ok = true // no login
+	}
 	if !ok {
 		r.Error = fmt.Sprintf("credential %q is not in the credentials list", d.Credential)
 		return r

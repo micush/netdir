@@ -759,7 +759,7 @@ func mcpWriteGuard(method, path string) error {
 	}
 	if method == "POST" {
 		switch p {
-		case "/api/devices/change", "/api/devices/raw", "/api/devices/capture":
+		case "/api/devices/change", "/api/devices/raw", "/api/devices/capture", "/api/nettool", "/api/scan": // the last two: net_ping, net_mtr and net_scan start a job on a node (mcpnettools.go)
 			return nil
 		}
 	}

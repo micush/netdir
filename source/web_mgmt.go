@@ -89,6 +89,8 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/schedule/run", w.authed(w.op("schedule.run", nil)))
 	mux.HandleFunc("GET /api/hostlookup", w.authed(w.op("host.lookup", []string{"lookup"})))
 	mux.HandleFunc("GET /api/whois", w.authed(w.op("whois.get", []string{"lookup"})))
+	mux.HandleFunc("GET /api/curl", w.authed(w.op("curl.get", []string{"lookup", "method", "follow", "insecure"}))) // MCP net_curl (curl.go)
+	mux.HandleFunc("GET /api/dig", w.authed(w.op("dig.get", []string{"name", "type", "server"})))                   // MCP net_dig (dig.go)
 	mux.HandleFunc("POST /api/scan", w.authed(w.op("scan.start", nil)))
 	mux.HandleFunc("GET /api/scan", w.authed(w.op("scan.get", []string{"client"})))
 	mux.HandleFunc("POST /api/nettool", w.authed(w.op("nettool.start", nil)))

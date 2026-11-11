@@ -427,7 +427,7 @@ func (w *WebServer) authedCT(h func(http.ResponseWriter, *http.Request, *session
 		// signed cluster channel and the user was authenticated where they logged
 		// in.  The context value can only be set in-process.
 		if ps, ok := r.Context().Value(proxyCtxKey{}).(*session); ok {
-			if w.ro(ps) && readOnlyDenied(r) {
+			if w.ro(ps) && readOnlyDenied(r) && !readOnlyJob(r) {
 				jsonError(rw, http.StatusForbidden, readOnlyMsg)
 				return
 			}
