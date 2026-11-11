@@ -252,6 +252,7 @@ input[type=file] { margin-top: .5rem; }
 .cv-status { font-size: .85rem; margin-bottom: .5rem; padding-right: 3.5rem; } /* clear of the ? button */
 .cv-status.st-ok { color: var(--ok); } .cv-status.st-warn { color: var(--warn); } .cv-status.st-bad { color: var(--bad); } .cv-status.st-idle, .cv-status.st-paused { color: var(--muted); }
 .cv-status:empty { display: none; }
+.cv-filter { width: 14rem; max-width: 100%; margin-bottom: .5rem; }
 .cv-card { margin-bottom: .75rem; } /* the drawing sits on the page itself: no box around it */
 .cv-wrap { overflow: auto; text-align: center; }
 svg.cv { max-width: none; outline: none; cursor: grab; user-select: none; -webkit-user-select: none; }

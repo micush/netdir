@@ -834,7 +834,10 @@
       const rightX = anys.length ? R + SIDE_GAP + aCols * AW + (aCols - 1) * CG : 0, leftX = nodes.length ? R + SIDE_GAP + nCols * NW + (nCols - 1) * CG : 0;
       const sideBottom = Math.max(anys.length ? anyTop + anyH : 0, nodes.length ? nodeTop + nodeH : 0);
       // the gateway's devices: a row of squares under the circle (and under the nodes and pills when those reach lower)
-      const devs = (g.devices || []).filter((n) => devByName(n)), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
+      // the filter box: only the devices whose name, address, platform or tags hold every word typed are drawn (dragging to reorder is off meanwhile)
+      const words = (cv.filter || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const devMatch = (n) => { const d = devByName(n); const t = [d.name, d.address, platformName(d.platform), ...(d.tags || [])].join(" ").toLowerCase(); return words.every((w) => t.includes(w)); };
+      const devs = (g.devices || []).filter((n) => devByName(n) && devMatch(n)), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
       const SY = Math.max(CY + R, sideBottom) + 70, devRows = Math.ceil(devs.length / DEV_ROW), perRow = Math.min(DEV_ROW, devs.length);
       const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, perRow * COLW + 20), H = devs.length ? SY + devRows * SH + (devRows - 1) * RG + 12 : Math.max(CY + R, sideBottom) + 16;
       const cx = W / 2;
@@ -969,7 +972,7 @@
         lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: y, class: "edge" + (c === "bad" ? " down" : "") }));
         shapes.push(sv("g", { class: "shape drag st-" + c + (sel("dev", name) ? " sel" : ""), "data-col": "dev:" + name, tabindex: "0", role: "button", "aria-label": "Device " + name,
           onclick: pick("dev", name), oncontextmenu: rightClick("dev", name),
-          onpointerdown: dragStart({ axis: "xy", n: devs.length, index: i, pos: { x, y }, slot: devAt, group: "dev:" + name,
+          onpointerdown: dragStart({ axis: "xy", n: words.length ? 1 : devs.length, index: i, pos: { x, y }, slot: devAt, group: "dev:" + name,
             ghost: (k) => sv("rect", { class: "dropslot", x: devAt(k).x, y: devAt(k).y, width: SW, height: SH, rx: 4 }),
             drop: (k) => { reorder(g.devices, i, k); cv.sel = { kind: "dev", addr: name }; commit(); } }),
           onkeydown: (e) => { if (e.key === "Enter") pick("dev", name)(e); } },
@@ -1811,7 +1814,9 @@
             openMenu(e, [["New gateway", () => gatewayForm(null)]].concat(g ? [["Add device", () => deviceForm(g)], pasteItem(g), ["Add anycast address", () => anycastForm(g)]] : [])); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small hidden" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused");
-        main.append(svgHost, legend);
+        const filterIn = h("input", { type: "search", class: "cv-filter", value: cv.filter || "", placeholder: "Filter devices", autocomplete: "off", spellcheck: "false", "aria-label": "Filter devices",
+          oninput: () => { cv.filter = filterIn.value; if (cv.loaded) refresh(); } });
+        main.append(filterIn, svgHost, legend);
         cv.loaded = false;
         load().then(() => {
           cv.loaded = true; refresh(); poll().catch(() => {});

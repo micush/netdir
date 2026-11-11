@@ -1,5 +1,17 @@
 # Changelog
 
+## [v136] - 2026-11-11 — A filter box on the topology map
+
+### Added
+- **Filter devices** box at the top left of the Topology map. Typing hides every device of the gateway that does not match; a device matches when its name, address, platform or a tag holds every word typed (case ignored). Clearing the box shows them all. The text is kept while you move between pages. While a filter is on, devices cannot be dragged to a new place (the order shown is not the saved order). The filter changes only what is drawn: nothing is saved or sent. The help page of Topology says so (`webui/help.js`).
+
+### Verified
+- `node --check webui/app.js` and `help.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+- In headless Chromium (light and dark, API answers mocked, no page errors): five devices; `prod` leaves fw1, `dc1 fw` fw1, `10.0.5` switch1 and ns1, `PROXMOX` the two Proxmox platforms, `zzz` none, and clearing the box brings all five back; the box keeps focus while typing.
+
+### Not verified
+- Not driven against a live daemon, and not with a long list of devices on several rows. Shift-click selection while a filter is on picks from the devices shown.
+
 ## [v135] - 2026-11-11 — The network tools reach a gateway this node does not serve
 
 ### Fixed
