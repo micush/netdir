@@ -56,7 +56,14 @@ func readOnlyDenied(r *http.Request) bool {
 // in-process (an MCP caller, or a node relaying one).  A read-only GUI user cannot reach this: the browser path
 // (authed, second branch) still refuses every POST, and /api/proxy refuses non-GET for them.
 func readOnlyJob(r *http.Request) bool {
-	return r.Method == http.MethodPost && (r.URL.Path == "/api/nettool" || r.URL.Path == "/api/scan")
+	if r.Method != http.MethodPost {
+		return false
+	}
+	p := r.URL.Path
+	if p == "/api/proxy" { // the same job asked of another node: the path it carries is the one that counts
+		p, _, _ = strings.Cut(r.URL.Query().Get("path"), "?")
+	}
+	return p == "/api/nettool" || p == "/api/scan"
 }
 
 // secretKeys are the configuration keys whose values a read-only account is not shown.

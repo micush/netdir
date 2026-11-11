@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,5 +163,52 @@ func TestMCPNetToolsRun(t *testing.T) {
 	txt = call("net_curl", `{"url":"https://example.com/","method":"get","follow":true,"insecure":true}`)
 	if !strings.Contains(txt, "-i") || strings.Contains(txt, " -I") || !strings.Contains(txt, "-L --max-redirs 3") || !strings.Contains(txt, "-k") {
 		t.Errorf("net_curl GET: %s", txt)
+	}
+}
+
+// Where a gateway's tools run: here when this node serves it, otherwise on a reachable node that does (the one the Topology page asks).
+func TestToolsNodeFor(t *testing.T) {
+	n := func(addr, gw string, self bool) CanvasNode {
+		return CanvasNode{Addr: addr, Gw: gw, Self: self, Reachable: true}
+	}
+	g := func(nodes ...CanvasNode) CanvasGateway { return CanvasGateway{GroupID: 162, Name: "phx", Nodes: nodes} }
+	for _, c := range []struct {
+		name, want string
+		gw         CanvasGateway
+		fail       bool
+	}{
+		{"served here", "", g(n("a", "ok", true), n("b", "ok", false)), false},
+		{"degraded here", "", g(n("a", "degraded", true), n("b", "ok", false)), false},
+		{"served by a peer", "b", g(n("a", "notserving", true), n("c", "degraded", false), n("b", "ok", false)), false},
+		{"paused here", "b", g(n("a", "paused", true), n("b", "ok", false)), false},
+		{"nobody", "", g(n("a", "notserving", true), n("b", "notserving", false), n("c", "down", false)), true},
+		{"a single node", "", g(), false},
+	} {
+		got, err := toolsNodeFor(c.gw)
+		if (err != nil) != c.fail || got != c.want {
+			t.Errorf("%s: %q %v", c.name, got, err)
+		}
+	}
+}
+
+// A read-only caller may start the look jobs, here or through /api/proxy on another node, and nothing else.
+func TestReadOnlyJob(t *testing.T) {
+	req := func(method, target string) *http.Request { return httptest.NewRequest(method, target, nil) }
+	for target, want := range map[string]bool{
+		"/api/nettool": true, "/api/scan": true,
+		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fnettool": true,
+		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fscan":    true,
+		"/api/wake": false, "/api/proxy?node=10.0.0.2&path=%2Fapi%2Fwake": false,
+		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fconfig":                false,
+		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fdevices%2Fchange":      false,
+		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fnettool%2F..%2Fconfig": false,
+		"/api/devices/change": false,
+	} {
+		if got := readOnlyJob(req("POST", target)); got != want {
+			t.Errorf("POST %s: %v, want %v", target, got, want)
+		}
+	}
+	if readOnlyJob(req("PUT", "/api/nettool")) {
+		t.Error("a PUT was let through")
 	}
 }

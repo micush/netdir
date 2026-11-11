@@ -76,37 +76,32 @@ func (c *mcpCtx) toolsNode(gateway string) (string, error) {
 			return "", fmt.Errorf("the network tools are not enabled on gateway %q; they are on: %s", gateway, strings.Join(names, ", "))
 		}
 	}
-	peers := c.peers()
-	if len(peers) <= 1 { // no cluster: this node is the only one
+	if peers := c.peers(); len(peers) <= 1 { // no cluster: this node is the only one
 		return "", nil
 	}
-	if !gw.Excluded && gw.Status != "idle" && gw.Status != "bad" && len(gw.Members) > 0 { // this node serves it
-		for _, m := range gw.Members {
-			if m.Local {
-				return "", nil
-			}
+	return toolsNodeFor(*gw)
+}
+
+// toolsNodeFor is the node to run on for gateway g: "" when this node serves it (its own view says so), else the cluster address of
+// a reachable node that serves it well, then one that serves it degraded: the same choice the Topology page makes (servingPeers).
+func toolsNodeFor(g CanvasGateway) (string, error) {
+	var self *CanvasNode
+	for i := range g.Nodes {
+		if g.Nodes[i].Self {
+			self = &g.Nodes[i]
 		}
 	}
-	// another node: the gateway's members are known by the address they use in the gateway protocol
-	for _, m := range gw.Members {
-		if m.Local {
-			continue
-		}
-		for _, p := range peers {
-			if !p.Reachable {
-				continue
-			}
-			for _, ip := range append(append([]string{}, p.GwIPs...), p.IPs...) {
-				if ip == m.IP {
-					if p.Self {
-						return "", nil
-					}
-					return p.Addr, nil
-				}
-			}
-		}
+	if self == nil {
+		return "", nil // no node list: a single node
 	}
-	return "", fmt.Errorf("no node that serves gateway %s can be reached", gwLabel(*gw))
+	switch self.Gw {
+	case "notserving", "paused", "removed":
+		if l := servingPeers(g); len(l) > 0 {
+			return l[0].Addr, nil
+		}
+		return "", fmt.Errorf("no node that serves gateway %s can be reached (it is not served by this node, and no other node reports it as running)", gwLabel(g))
+	}
+	return "", nil
 }
 
 // mcpNetRun starts a job on the node and waits for it: poll is the GET that reads it.

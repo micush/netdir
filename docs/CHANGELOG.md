@@ -1,5 +1,17 @@
 # Changelog
 
+## [v135] - 2026-11-11 — The network tools reach a gateway this node does not serve
+
+### Fixed
+- `net_ping`, `net_mtr`, `net_scan` and the other tools failed with "no node that serves gateway … can be reached" for every gateway this node does not serve; only the gateways it serves worked. Two causes: the node was looked for by matching the gateway's member addresses against the cluster nodes' addresses, which this node's own view of such a gateway does not carry, and a read-only key's POST through `/api/proxy` was refused as a change. The node is now chosen as the Topology page chooses it (`servingPeers`: a reachable node that serves the gateway well, then one that serves it degraded) and the node's own cluster address is used. When no other node reports the gateway as running, the error says so.
+- A read-only caller (an MCP key or a node relaying one) may start the two look jobs (`/api/nettool`, `/api/scan`) through `/api/proxy` too, judged by the path it carries; every other relayed POST is still refused for it, and so is a read-only GUI user.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. New tests: `TestToolsNodeFor` (served here, degraded here, by a peer, paused here, nobody, single node) and `TestReadOnlyJob` (the allowed and refused paths, direct and through the proxy).
+
+### Not verified
+- Not run on a real cluster: the relay of a job to a second node, and the polling of its result through it, were not exercised end to end (the sandbox has one node). The choice of node is tested on node lists, not on a live cluster.
+
 ## [v134] - 2026-11-11 — nmap scans accept a host name; ping options, port, TLS, ARP and Wake-on-LAN tools, dig without dig
 
 ### Fixed
