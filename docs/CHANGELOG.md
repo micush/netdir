@@ -1,5 +1,17 @@
 # Changelog
 
+## [v131] - 2026-11-10 — Active Directory fills in port 636; the port hint is gone
+
+### Changed
+- Picking **Active Directory** in the device form fills the port with 636 (LDAPS), as the other platforms fill theirs; a port typed by hand is kept, and 636 is the default so it is not written to the configuration.
+- The line under the Port field ("Default 443 (Proxmox VE 8006).") is removed; the defaults are in `webui/help.js`.
+
+### Verified
+- `node --check webui/app.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+
+### Not verified
+- Not opened in a browser. With the option `starttls=true` the driver uses 389 when no port is written, so a StartTLS device must have its port set to 389 by hand (the form fills 636 for the platform).
+
 ## [v130] - 2026-11-10 — Active Directory in tshoot, and searches for accounts that need a look
 
 ### Added

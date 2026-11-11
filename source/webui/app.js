@@ -1361,7 +1361,7 @@
           if (!pc || Object.values(PORT_DEF).concat("443").includes(pc)) els.port.value = pd;   // a port typed by hand is kept
         } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
-        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443", hint: "Default 443 (Proxmox VE 8006)." },
+        { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443" },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
         { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core" },
         { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip: self-signed certificate." },
@@ -2232,7 +2232,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
