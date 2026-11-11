@@ -1,5 +1,19 @@
 # Changelog
 
+## [v137] - 2026-11-11 — The topology filter: in the top bar, and no longer matching tags by a plain word
+
+### Changed
+- The Topology filter box is in the top bar, at the left, level with the Node picker, and has the same look and height as it (the box and the picker are both 2.3 rem high on every page that has the bar). It was above the drawing. Its text is kept while you move between pages.
+
+### Fixed
+- Typing `observ` in the filter left every imported device on the map: an imported device carries the tag `source=observium` (the name of the server it came from), and the filter searched tags. The filter now looks at the name, address and platform only. A tag is searched with `tag:` before the word (`tag:env=prod`, `tag:source=observ`); every word must still match. The help text says so. The cluster's nodes and the anycast addresses are not devices and are always drawn.
+
+### Verified
+- `node --check webui/app.js` and `help.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. In headless Chromium (light and dark, mocked API, two nodes): the filter and the picker are the same height and on one line, the filter is in the bar and not on the page, with two devices tagged `source=observium` `observ` shows none of them and `tag:source=observ` exactly those two, and the name, address, platform and `tag:` words work together; the box keeps focus while typing.
+
+### Not verified
+- Not driven against a live daemon with the real imported devices, and not on a narrow window (the bar's layout there was not looked at).
+
 ## [v136] - 2026-11-11 — A filter box on the topology map
 
 ### Added

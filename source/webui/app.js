@@ -613,6 +613,11 @@
     bar.dataset.view = JSON.stringify(view);
     clear(bar);
     const rows = [];
+    if (state.tab === "topology") {   // the filter of the Topology map sits at the left of the bar, level with the node picker
+      const fin = h("input", { type: "text", class: "cv-filter", value: state.topoFilter || "", placeholder: "Filter devices", autocomplete: "off", spellcheck: "false", "aria-label": "Filter devices",
+        oninput: () => { state.topoFilter = fin.value; if (state.onTopoFilter) state.onTopoFilter(); } });
+      rows.push(h("div", { class: "tbrow tbfilter" }, fin));
+    }
     if (state.nodes.length >= 2) {
       const sel = h("select", { id: "node-pick", "aria-label": "Node to configure and monitor", onchange: (e) => setTarget(e.target.value || null) });
       const self = selfNode();
@@ -834,9 +839,13 @@
       const rightX = anys.length ? R + SIDE_GAP + aCols * AW + (aCols - 1) * CG : 0, leftX = nodes.length ? R + SIDE_GAP + nCols * NW + (nCols - 1) * CG : 0;
       const sideBottom = Math.max(anys.length ? anyTop + anyH : 0, nodes.length ? nodeTop + nodeH : 0);
       // the gateway's devices: a row of squares under the circle (and under the nodes and pills when those reach lower)
-      // the filter box: only the devices whose name, address, platform or tags hold every word typed are drawn (dragging to reorder is off meanwhile)
-      const words = (cv.filter || "").toLowerCase().split(/\s+/).filter(Boolean);
-      const devMatch = (n) => { const d = devByName(n); const t = [d.name, d.address, platformName(d.platform), ...(d.tags || [])].join(" ").toLowerCase(); return words.every((w) => t.includes(w)); };
+      // the filter box: only the devices whose name, address or platform holds every word typed are drawn; `tag:` before a word asks the tags instead
+      // (an imported device carries source=SERVER, so tags are never searched by a plain word).  Dragging to reorder is off meanwhile.
+      const words = (state.topoFilter || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const devMatch = (n) => {
+        const d = devByName(n), t = [d.name, d.address, platformName(d.platform)].join(" ").toLowerCase();
+        return words.every((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w)));
+      };
       const devs = (g.devices || []).filter((n) => devByName(n) && devMatch(n)), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
       const SY = Math.max(CY + R, sideBottom) + 70, devRows = Math.ceil(devs.length / DEV_ROW), perRow = Math.min(DEV_ROW, devs.length);
       const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, perRow * COLW + 20), H = devs.length ? SY + devRows * SH + (devRows - 1) * RG + 12 : Math.max(CY + R, sideBottom) + 16;
@@ -1814,9 +1823,8 @@
             openMenu(e, [["New gateway", () => gatewayForm(null)]].concat(g ? [["Add device", () => deviceForm(g)], pasteItem(g), ["Add anycast address", () => anycastForm(g)]] : [])); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small hidden" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused");
-        const filterIn = h("input", { type: "search", class: "cv-filter", value: cv.filter || "", placeholder: "Filter devices", autocomplete: "off", spellcheck: "false", "aria-label": "Filter devices",
-          oninput: () => { cv.filter = filterIn.value; if (cv.loaded) refresh(); } });
-        main.append(filterIn, svgHost, legend);
+        state.onTopoFilter = () => { if (cv.loaded) refresh(); };
+        main.append(svgHost, legend);
         cv.loaded = false;
         load().then(() => {
           cv.loaded = true; refresh(); poll().catch(() => {});
