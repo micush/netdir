@@ -83,6 +83,8 @@ type Result struct {
 	Reused bool `json:"reused,omitempty"`
 	// CachedSecs: the answer is what the device said this many seconds ago (the gateway's short answer cache), not asked just now.
 	CachedSecs *int `json:"cached_s,omitempty"`
+	// FromMonitor: the facts are those the health monitor collected in the background, not asked for this read.
+	FromMonitor bool `json:"from_monitor,omitempty"`
 }
 
 // Fanout runs fn against every device in devs, at most par at a time, each with its own time limit, and returns one

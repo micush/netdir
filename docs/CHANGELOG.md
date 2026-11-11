@@ -1,5 +1,19 @@
 # Changelog
 
+## [v127] - 2026-11-10 — device_facts from the health monitor
+
+### Added
+- **A facts read can come from the health monitor.** The monitor already asks every device for its facts in the background (every 5 minutes while someone is looking). When an MCP caller asks `device_facts` and the monitor's copy is at most 5 minutes old and good, that copy is the answer: no login, no request, instant. The result says `"from_monitor": true` and `"cached_s"` (the age), and the uptime is advanced by the age. A copy that is older, a facts request that failed last time, a device that is down or paused, and a device the monitor has not asked yet are asked live, as before. `fresh: true` asks the device, as for every read; the GUI always asks the device; `NETDIR_DEVICE_CACHE=0` switches it off. On a replica the primary's copy is used.
+
+### Verified
+- `gofmt -l .`, `go vet ./...`, `go test -race -count=1 ./...`, no-cgo suite, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+- `TestFactsFromMonitor`: a recent good copy is the answer, with the uptime advanced and the monitor's own copy untouched; an old copy, a failed facts request, a down or paused device, a device never asked and no data at all are not.
+
+### Not verified
+- Not run against real devices, and the monitor's timing was not watched live; a facts read of a device the monitor does not watch (idle for hours) is asked live, since its copy can be six hours old.
+- Only the unit test covers the route: the HTTP path was not driven with a seeded monitor.
+- GUI: nothing changed; not opened.
+
 ## [v126] - 2026-11-10 — Short memory for repeated reads and for tshoot's lookups
 
 ### Added

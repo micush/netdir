@@ -180,7 +180,15 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 	keys := map[string]string{}
 	if answerCacheable(s, op, cmd, q.Get("fresh")) {
 		var miss []device.Device
+		var hs map[string]device.Health
+		if op == "facts" {
+			hs = deviceHealth(false)
+		}
 		for _, d := range here {
+			if r, ok := factsFromMonitor(d, hs); ok {
+				byLocal[strings.ToLower(d.Name)] = r
+				continue
+			}
 			c, ok := credByName(creds, d.Credential)
 			if !ok {
 				miss = append(miss, d)
