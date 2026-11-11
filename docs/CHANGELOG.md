@@ -1,5 +1,16 @@
 # Changelog
 
+## [v139] - 2026-11-11 — Login suggestions in the Devices table
+
+### Added
+- In Configure ▸ Devices, the **Login** column of the Devices table lists the matching logins as you type (the browser's own list under the box; it filters as you type and picks with a click or the arrow keys). The names are read from the Logins table below it when the box gets the focus, so a login you have just added and not saved yet is offered too. Any name can still be typed. Help text added.
+
+### Verified
+- `node --check webui/app.js` and `help.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. In headless Chromium with a mocked API: the Login box is attached to a list holding exactly the three logins of the Logins table.
+
+### Not verified
+- The dropdown itself was not looked at (the browser draws it outside the page, so a screenshot does not show it), and the case of a login added in the Logins table and not yet saved was not driven. The same mocked page raises an error in the alert-rules table (`rules` undefined) that comes from the mock, not from this change.
+
 ## [v138] - 2026-11-11 — A stale page can no longer overwrite the configuration (imported devices disappearing)
 
 ### Fixed

@@ -2555,6 +2555,10 @@
           if (!row.v[i] && c.def) row.v[i] = c.def;   // the default shown as the value, not left empty
           inp.value = row.v[i] || "";
           inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
+          if (c.list) {   // a column that offers a list of names while typing (the datalist is filled when the box gets the focus: the names may be unsaved)
+            inp.setAttribute("list", c.list);
+            inp.addEventListener("focus", () => { if (spec.onList) spec.onList(c.list); });
+          }
         }
         tr.append(h("td", {}, inp));
       });
@@ -2705,7 +2709,7 @@
     devices: {
       key: "devices", empty: "No devices.", wide: true,
       cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: PLATFORMS }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443", def: "443" },
-        { name: "Login", ph: "a login's name" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
+        { name: "Login", ph: "a login's name", list: "device-logins" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
       parse: (d) => {
         if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || PLATFORMS[0], f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }
         return [d.name || "", d.platform || PLATFORMS[0], d.address || "", d.port ? String(d.port) : portDef(d.platform), d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
@@ -3494,6 +3498,9 @@
       devExtra = Object.fromEntries((set.devices || []).map((d) => { const { options, ca_pem, disabled } = d; return [d.name, { ...(options ? { options } : {}), ...(ca_pem ? { ca_pem } : {}), ...(disabled ? { disabled } : {}) }]; }));
       const devices = fieldset(DEVICE_FIELDS, { devices: set.devices });
       const devcreds = fieldset(DEVCRED_FIELDS, { device_credentials: set.device_credentials });
+      // the Login column of the devices table offers the names in the Logins table below it, as they stand now (unsaved rows too)
+      const loginList = h("datalist", { id: "device-logins" });
+      ROW_TABLES.devices.onList = () => { let names = []; try { names = (devcreds.get().device_credentials || []).map((c) => c.name).filter(Boolean); } catch (_) { /* a row that is not finished */ } loginList.replaceChildren(...[...new Set(names)].sort().map((n) => h("option", { value: n }))); };
       const devcheck = fieldset(DEVCHECK_FIELDS, { device_check_s: set.device_check_s, device_facts_min: set.device_facts_min, device_live_check_s: set.device_live_check_s, device_live_facts_min: set.device_live_facts_min });
       const devcheckShared = () => { const c = devcheck.get(), o = {}; for (const k of ["device_live_check_s", "device_live_facts_min", "device_check_s", "device_facts_min"]) if (c[k] > 0) o[k] = c[k]; return o; };
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
@@ -3692,7 +3699,7 @@
       const panels = [
         ["general", "Settings", settingsTabs()],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
-        ["devices", "Devices", h("div", {}, section("Devices", devices.el), section("Logins", devcreds.el), section("Checks", devcheck.el))],
+        ["devices", "Devices", h("div", {}, section("Devices", devices.el, loginList), section("Logins", devcreds.el), section("Checks", devcheck.el))],
         ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
         ["sso", "SSO", section("Single sign-on",
           sso.el)],

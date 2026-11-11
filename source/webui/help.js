@@ -101,7 +101,7 @@ const NETDIR_HELP = {
       "The switches and firewalls the gateway manages, and the logins it reaches them with. Both are shared by the cluster, so any node can answer for any device.",
       "Every change is saved and applied as you leave a row. There is no Apply button.",
       ["h", "What you can do here"],
-      ["ul", ["Add, change and remove devices.", "Add, change and remove the logins they use.", "Group devices with tags, so one request can ask a site or a role."]],
+      ["ul", ["Add, change and remove devices.", "Add, change and remove the logins they use.", "In the **Login** column of the Devices table, typing a few letters lists the logins whose name matches, including ones you have just added below and not saved yet.", "Group devices with tags, so one request can ask a site or a role."]],
       ["h", "Add a device"],
       ["ol", ["Under **Logins**, right-click ▸ Add row: give the login a name, then a user name and password (Catalyst, Nexus, Arista, Aruba CX, Infoblox, Technitium, Observium) or an API token (FortiGate, Palo Alto, Technitium, Observium, IP Fabric).", "Under **Devices**, right-click ▸ Add row: its name, platform, management address, and the name of the login.", "Ask it for its facts on Monitor ▸ Devices."]],
       ["h", "What each platform needs"],
