@@ -917,7 +917,7 @@ func (w *WebServer) handleGetConfig(rw http.ResponseWriter, r *http.Request, s *
 		out = redactSecrets(dc) // a read-only account sees the settings, not the keys and passwords in them
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{
-		"ok": true, "path": w.confPath, "exists": statErr == nil, "config": out,
+		"ok": true, "path": w.confPath, "exists": statErr == nil, "config": out, "base": configBase(dc),
 	})
 }
 
@@ -925,6 +925,7 @@ func (w *WebServer) handlePutConfig(rw http.ResponseWriter, r *http.Request, s *
 	var req struct {
 		Config json.RawMessage `json:"config"`
 		Note   string          `json:"note"`
+		Base   string          `json:"base"` // what the page read the configuration as (GET /api/config): refused when the shared settings have changed since
 	}
 	if !readJSON(rw, r, maxBody, &req) {
 		return
@@ -949,11 +950,20 @@ func (w *WebServer) handlePutConfig(rw http.ResponseWriter, r *http.Request, s *
 
 	infof("web: %q saving %s (from %s)", s.user, w.confPath, clientIP(r))
 	w.mg.keepNodePaused(dc) // the page's copy may be older than the last pause or resume of this node
-	if err := w.mg.PutConfig(dc, s.user, req.Note); err != nil {
+	if err := w.mg.PutConfigBase(dc, s.user, req.Note, req.Base); err != nil {
+		if errors.Is(err, ErrConfigChanged) {
+			warnf("web: %q save refused: the configuration changed since their page read it (from %s)", s.user, clientIP(r))
+			jsonError(rw, http.StatusConflict, err.Error())
+			return
+		}
 		jsonError(rw, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc})
+	base := configBase(dc)
+	if saved, _, err := w.mg.LiveConfig(); err == nil {
+		base = configBase(saved)
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc, "base": base})
 }
 
 // logLockedOut records a login attempt that was refused because the address or the name is locked out: once a

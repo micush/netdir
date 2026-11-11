@@ -19,7 +19,7 @@ const NETDIR_HELP = {
     title: "Topology",
     body: [
       "This page draws each gateway as a picture: the shared address an assistant connects to, the cluster nodes that serve it, its anycast addresses and the switches and firewalls it manages. It is the main place to build and change a gateway, and to work with its devices.",
-      "Every change you make here is saved and applied at once. There is no Apply button.",
+      "Every change you make here is saved and applied at once. There is no Apply button. If the saved configuration is newer than the copy this page holds (devices were imported, someone else or another node changed it), the change is refused so nothing is overwritten, and the page shows what is saved: make the change again.",
       ["h", "What you can do here"],
       ["ul", ["See at a glance whether a gateway, its nodes and its devices are working.", "Add devices to a gateway, ask them for their facts, interfaces, neighbors, configuration or a show command, and copy a device onto another gateway.", "Create, rename and delete gateways.", "Add, edit, pause and remove anycast addresses.", "Take a node out of a gateway, or put it back.", "Check that virtual MAC addresses work on your network."]],
       ["h", "The sidebar"],

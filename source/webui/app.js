@@ -1754,7 +1754,8 @@
     // Every change is saved as soon as it is made.  If the daemon refuses it, the
     // picture goes back to what is saved and the reason is shown.
     function setGid(id) { cv.gid = id; state.topo.gid = id; }
-    const fresh = (cfg) => {
+    const fresh = (cfg, base) => {
+      cv.base = base || cv.base;   // what the daemon says the saved configuration is: a save made from an older one is refused
       cv.orig = JSON.parse(JSON.stringify(cfg));
       if (pending === 0) { cv.cfg = cfg; cv.sel = cv.sel && curGroup() ? cv.sel : null; }
       if (!groups().some((g) => g.group_id === cv.gid)) setGid(groups().length ? groups()[0].group_id : null);
@@ -1762,12 +1763,14 @@
     async function save() {
       const sent = JSON.stringify(groups().map((g) => g.group_id));
       try {
-        const r = await api("PUT", "/api/config", { config: cv.cfg, note: "Topology" });
-        pending--; fresh(r.config);
+        const r = await api("PUT", "/api/config", { config: cv.cfg, note: "Topology", base: cv.base });
+        pending--; fresh(r.config, r.base);
       } catch (ex) {
         pending--;
         if (ex.message === "unauthenticated") return;
-        if (ex.status) { // refused: show what is really saved
+        if (ex.status === 409) { // the saved configuration is newer than this page's copy (an import, another page, another node): take it, nothing was overwritten
+          try { const r = await api("GET", "/api/config"); cv.cfg = r.config; cv.orig = JSON.parse(JSON.stringify(r.config)); cv.base = r.base; cv.sel = null; cv.multi = null; if (!curGroup()) setGid(groups().length ? groups()[0].group_id : null); } catch (_) { /* the next load reads it */ }
+        } else if (ex.status) { // refused: show what is really saved
           if (pending === 0) { cv.cfg = JSON.parse(JSON.stringify(cv.orig)); cv.sel = null; if (!curGroup()) setGid(groups().length ? groups()[0].group_id : null); }
         } else {
           // The connection dropped (a gateway change can briefly reset the network).
@@ -1789,7 +1792,7 @@
 
     async function load() {
       const r = await api("GET", "/api/config");
-      cv.cfg = r.config; cv.orig = JSON.parse(JSON.stringify(r.config));
+      cv.cfg = r.config; cv.orig = JSON.parse(JSON.stringify(r.config)); cv.base = r.base;
       cv.loaded = true;
       cv.gid = state.topo.gid;
       if (!groups().some((g) => g.group_id === cv.gid)) setGid(groups().length ? groups()[0].group_id : null);
@@ -3719,6 +3722,7 @@
       const r = await api("GET", "/api/config");
       state.cfg = r.config;
       state.cfgInfo = r;
+      state.cfgBase = r.base;
       clear(status);
       if (!r.exists) say("info", "No config file at " + r.path + " yet — the first change creates it.");
       draw();
@@ -3743,8 +3747,9 @@
         return;
       }
       try {
-        const r = await api("PUT", "/api/config", { config: cfg });
+        const r = await api("PUT", "/api/config", { config: cfg, base: state.cfgBase });
         state.cfg = r.config;
+        state.cfgBase = r.base;
         clear(status);
         state.cfgInfo.exists = true;
         setTimeout(() => refreshSNMP(), 1500);   // snmpd was (re)started by the save

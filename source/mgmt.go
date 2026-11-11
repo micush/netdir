@@ -159,6 +159,20 @@ func (m *Mgmt) keepNodePaused(dc *DaemonConfig) {
 // PutConfig validates dc and makes it the node's configuration.  On a replica,
 // a change to the shared settings is first accepted by the primary.
 func (m *Mgmt) PutConfig(dc *DaemonConfig, actor, note string) error {
+	return m.PutConfigBase(dc, actor, note, "")
+}
+
+// ErrConfigChanged is a save refused because the shared settings changed after the copy it was made from was read.
+var ErrConfigChanged = errors.New("the configuration changed after this page loaded it (another page, another user, an import or another node): it was not saved, so nothing is overwritten; the page now shows what is saved, make the change again")
+
+// configBase is the token a page keeps with the configuration it read: it changes whenever the shared settings do (the devices, the
+// gateways, the keys, everything every node shares), and not for what is only this node's own.
+func configBase(dc *DaemonConfig) string { return sharedOf(dc).hash() }
+
+// PutConfigBase is PutConfig for a page that read the configuration earlier: base is the token it got with it (configBase).  When the
+// shared settings are not the ones it read, nothing is saved (ErrConfigChanged): a page that is hours old must not write its old
+// copy over the devices somebody imported since.  An empty base (the CLI, the API, an import file) saves as before.
+func (m *Mgmt) PutConfigBase(dc *DaemonConfig, actor, note, base string) error {
 	if err := dc.Validate(); err != nil {
 		return err
 	}
@@ -167,6 +181,9 @@ func (m *Mgmt) PutConfig(dc *DaemonConfig, actor, note string) error {
 	cur, _, err := m.LiveConfig()
 	if err != nil {
 		return err
+	}
+	if base != "" && base != configBase(cur) {
+		return ErrConfigChanged
 	}
 	if err := checkVIPsNotNodes(cur, dc, m.cl); err != nil {
 		return err

@@ -1,5 +1,19 @@
 # Changelog
 
+## [v138] - 2026-11-11 — A stale page can no longer overwrite the configuration (imported devices disappearing)
+
+### Fixed
+- **Imported devices disappeared.** The GUI saves the whole configuration, from the copy the page read when it was opened. A Topology page opened before an import therefore wrote its old copy back at its next change and removed the imported devices with it: in a tshoot bundle the import added 257 devices at 22:17 and a Topology save made from a page opened hours earlier removed 259 devices (the imports and `network_tools`) at 22:20.
+- `GET /api/config` now returns `base`, a token of the shared settings it read, and `PUT /api/config` takes it back as `base`. When the shared settings are not the ones the page read, the save is refused with **409** and nothing is written (`Mgmt.PutConfigBase`, under the same lock as the save, so two saves cannot both pass). A save with no `base` (the CLI, the API, a config import, a restore) works as before. The reply to a successful save carries the new `base`.
+- The **Topology** page keeps the token, sends it with every change, and after a 409 reads the saved configuration again and shows it (your change is dropped, and the next one goes through). The **Configure** pages send it too and show the 409 as "Not saved: …".
+- Limits: a replica compares with its own copy of the shared settings, which the primary updates within seconds, not with the primary's at that instant; and a page that is refused loses the change it was making (it is shown the saved state, nothing is merged).
+
+### Verified
+- `node --check webui/app.js` and `help.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. New test `TestWebConfigSaveRefusesStaleBase`: GET has a base; a save with it works and returns a new one; a save with the old one is 409 and leaves the devices as they were; the new one works; a save with none works. In headless Chromium with a mocked API: the Topology page sends its base, reads the configuration again after a 409 and sends the new base with the next change.
+
+### Not verified
+- Not run on a real cluster, so the replica path (a save on a replica refused because the primary's change had not arrived yet, and the forward to the primary) was not exercised. The Configure pages were not driven in a browser. Devices that were already removed are not brought back by this: run the import again (it adds only the ones missing).
+
 ## [v137] - 2026-11-11 — The topology filter: in the top bar, and no longer matching tags by a plain word
 
 ### Changed
