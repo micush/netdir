@@ -60,7 +60,7 @@ var mcpRoutes = []apiRoute{
 	{Method: "POST", Path: "/api/devices/raw"},
 	{Method: "POST", Path: "/api/devices/signin"},
 	{Method: "POST", Path: "/api/devices/signin/poll"},
-	{Method: "GET", Path: "/api/devices/troubleshoot", Query: []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama"}},
+	{Method: "GET", Path: "/api/devices/troubleshoot", Query: []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad"}},
 	{Method: "GET", Path: "/api/dnslookup/full", Query: []string{"lookup"}},
 	{Method: "GET", Path: "/api/gateways"},
 	{Method: "GET", Path: "/api/host", Query: []string{"from", "to"}},

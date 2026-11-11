@@ -1,5 +1,58 @@
 # Changelog
 
+## [v130] - 2026-11-10 — Active Directory in tshoot, and searches for accounts that need a look
+
+### Added
+- **tshoot adds the Active Directory account.** With an `ad` device in the inventory, `tshoot user` (and `device_troubleshoot_user`) adds `directory`: the account the name matches (sign-in name, mail address or display name; the account name Entra gave is tried when the name as typed finds nothing; up to 3, best match first) with enabled, locked out, when the password last changed, last sign-in, groups, manager, title. `tshoot host` adds the computer account (DNS name, operating system, last sign-in, manager). `directory_device` names the device. No device is not an error and adds no note; no match is a note; `ad=NAME` (MCP `ad`, GUI right-click ▸ Troubleshoot user or host on an Active Directory device) picks one when there are several, and a name that is not there is an error. It reports the account, not where the user is signed in: the directory does not hold that.
+- **Active Directory searches** (Show on an `ad` device): `show locked` (users with a lockout time; one older than the lockout duration has expired), `show disabled` (disabled users that are still members of groups), `show stale users|computers [DAYS]` (enabled accounts with no sign-in for DAYS days, 1 to 3650, default 90, or never, created before that). Up to 50 lines, the longest without a sign-in first, and a line when there are more. The LDAP filter got `not`, `>=`, `<=` and the bit-and matching rule for this.
+- `device.DirectoryLooker` (`DirUsers`, `DirComputers`) is the interface the troubleshooting asks.
+
+### Changed
+- Skipping the LDAPS certificate check needed nothing new: an Active Directory device takes the same **Certificate: skip check** (`insecure`) or CA PEM as every device; README says so under the driver.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`; `node --check` on `app.js` and `help.js`.
+- `TestADLookups` (the test directory now evaluates `not`, `>=`, `<=` and bit-and): `show locked`, `show disabled` (one without groups is not listed), `show stale computers` and `users 30` (an old account is listed; a recent, a disabled and a brand-new one are not), refused day counts, and the records `DirUsers` and `DirComputers` give.
+- `TestTroubleshootWithActiveDirectory`: no `ad` device means no `directory`; with one, a user's record (disabled, locked out, groups) and a host's computer record are added next to Entra and Meraki, which are still asked; a named device that does not exist is an error.
+
+### Not verified
+- Not run against a real domain controller: the bit-and rule and the time filters follow Active Directory's documentation but only the test directory has answered them. `lastLogonTimestamp` is replicated every 9 to 14 days, so "stale" means at least that long; accounts are not checked against the lockout duration. A search that matches more than the controller's size limit is cut and says so; the order inside a cut result is the controller's.
+- GUI: the new menu item was not opened in a browser.
+
+## [v129] - 2026-11-10 — Active Directory device: look up users, computers and groups
+
+### Added
+- **Platform `ad` (Microsoft Active Directory)**, `device/ad.go`, standard library only (a small LDAP client: BER from `snmp.go`, RFC 4511). The device is a domain controller; the login is `user@domain`, `DOMAIN\user` or a DN with its password. Always TLS: LDAPS on 636, or StartTLS on 389 with the option `starttls=true`; there is no clear-text bind, and a login without a password is refused (no anonymous bind). Certificate as for every device (skip check or CA PEM). Option `base` is the search base, by default the controller's `defaultNamingContext`.
+- **Show:** `show user NAME`, `show computer NAME`, `show group NAME` (up to 10, in detail; exact match first), `show users NAME` and `show computers NAME` (up to 50, one line each), `show domain`. NAME is a sign-in name (`jsmith`, `CORP\jsmith`, `jsmith@corp.example.com`), a mail address, a display name or a computer name or DNS name, or the start of one. The answer is plain text. A user: name, account, sign-in name, mail, enabled, locked out, title, department, company, office, phone, manager, employee ID, when the password was last changed (labelled "Sign-in changed", because the secret-word filter hides any line that says "password"), whether it never expires, last sign-in, bad sign-ins, expiry, groups. A computer: DNS name, enabled, operating system, last sign-in, location, manager, groups. A group: members (count and the first 30). Facts are the controller's DNS name and the domain level.
+- GUI: right-click an Active Directory device ▸ **Look up user**, **Look up computer**, **Look up group** (a name box; the answer is the text popup). The platform is named "Active Directory". README, `webui/help.js` and `main.go` usage updated.
+- It is also the answer to every device read tool (`device_show` with the commands above, `device_facts`).
+
+### Security
+- The filter is built as a structure (BER: equality, prefix, and, or), never as text, so a name cannot add to it; names are also limited to letters, digits and a few punctuation marks (no `*`, `(`-filters, `|`, `;`).
+- Only a fixed list of attributes is asked for. Passwords and hashes (`unicodePwd`, `userPassword`), LAPS (`ms-Mcs-AdmPwd`, `msLAPS-*`), security descriptors and SIDs are not on it, so the controller cannot return them; the test checks that no search asks for one. Show output also goes through the usual secret filter, and over MCP the usual masking (a mail address shows its name part only).
+- Nothing is changed: `device_change_raw` on an Active Directory device is refused.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`; `node --check` on `app.js` and `help.js`.
+- `TestADLookups` (against an LDAP directory written from RFC 4511 over TLS, that evaluates the filters it receives; once with LDAPS and once with StartTLS): facts; a user with its groups and manager, an exact match before a prefix match, `DOMAIN\name`, a disabled and locked-out user, the list form, a computer by DNS name and by account name, a group and its members, `show domain`, no match, names that are refused do not reach the directory, no secret attribute is asked for and none is shown, one bind per driver, a change is refused. `TestADLogin`: no password is refused, a wrong one is a clean error without the password, and a directory that does not speak TLS gets no password.
+
+### Not verified
+- Not run against a real domain controller: the LDAP messages follow RFC 4511 and the attribute names are Active Directory's schema, but only the test directory has answered. Paged results are not used: a search is cut at the controller's or the driver's limit (the answer says there are more matches). Referrals to other domains are not followed, so a user of a child domain is found only when its domain controller is added as a device.
+- "Last sign-in" is `lastLogonTimestamp`, which Active Directory replicates only every 9 to 14 days; "locked out" is the lockout time being set, not checked against the lockout duration. Nested group membership is not expanded.
+- `tshoot` does not use it: Active Directory has no record of which computer a user is on, so it is a lookup device only.
+- GUI: the menu items and the form were not opened in a browser.
+
+## [v128] - 2026-11-10 — Right-click ▸ Ask shows text, not JSON
+
+### Changed
+- The answers of a device's right-click **Ask** menu (and the text card of Monitor ▸ Devices) that came as JSON are now plain text: **Ports**, **Routes** and **VLANs** are aligned tables like Interfaces and Neighbors already were; **LLDP and CDP details**, **Routing protocols**, **Firewall**, **API catalog** and the troubleshooting answer are laid out by one function (`plainText` in `webui/app.js`): a list of records is a table with a header, a record is `Name  value` lines, a nested part is indented, empty values are left out. **Configuration** and **Show** were text already. Copy and Download give the same text.
+
+### Verified
+- `node --check webui/app.js`; `plainText` run in node on a list of records, a nested record and an empty list; `gofmt -l .`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+
+### Not verified
+- Not opened in a browser (light or dark) and no jsdom run of the popup; no real device answer was formatted, only made-up ones, so a platform whose answer is deeply nested may still read long. Nothing else in the GUI changed.
+
 ## [v127] - 2026-11-10 — device_facts from the health monitor
 
 ### Added

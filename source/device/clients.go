@@ -43,3 +43,10 @@ type DeviceUserLooker interface {
 type LogSearcher interface {
 	LogSearch(ctx context.Context, logType, query string, n int) ([]map[string]any, error)
 }
+
+// DirectoryLooker is a directory that says who a name is and what state the account is in (Active Directory): the users, or the
+// computers, a name matches, as records.
+type DirectoryLooker interface {
+	DirUsers(ctx context.Context, who string) ([]map[string]any, error)
+	DirComputers(ctx context.Context, name string) ([]map[string]any, error)
+}

@@ -117,7 +117,7 @@ const (
 
 func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error) {
 	var a struct {
-		User, Host, Hours, Devices, Network, Entra, Meraki, Panorama string
+		User, Host, Hours, Devices, Network, Entra, Meraki, Panorama, AD string
 	}
 	var in map[string]any
 	if err := json.Unmarshal(raw, &in); err != nil {
@@ -132,7 +132,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		}
 		return ""
 	}
-	a.User, a.Host, a.Hours, a.Devices, a.Network, a.Entra, a.Meraki, a.Panorama = get("user"), get("host"), get("hours"), get("devices"), get("network"), get("entra"), get("meraki"), get("panorama")
+	a.User, a.Host, a.Hours, a.Devices, a.Network, a.Entra, a.Meraki, a.Panorama, a.AD = get("user"), get("host"), get("hours"), get("devices"), get("network"), get("entra"), get("meraki"), get("panorama"), get("ad")
 	switch {
 	case a.User == "" && a.Host == "":
 		return nil, errors.New("user: a sign-in name, an object ID or a name (or host: a machine's name)")
@@ -174,6 +174,10 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	note := func(f string, x ...any) { notes = append(notes, fmt.Sprintf(f, x...)) }
 	ed, eerr := pickDevice(devs, a.Entra, "entra", nil)
 	ld, lerr := pickLogDevice(devs, a.Panorama)
+	adv, aerr := pickDevice(devs, a.AD, "ad", nil)
+	if a.AD != "" && aerr != nil {
+		return nil, aerr
+	}
 	md, merr := pickDevice(devs, a.Meraki, "meraki", func(d device.Device) bool { return d.Options["serial"] == "" })
 	if a.Entra != "" && eerr != nil {
 		return nil, eerr
@@ -292,6 +296,46 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				if len(eds) > 1 {
 					note("Entra has %d devices named %s; the one signed in most recently is shown", len(eds), a.Host)
 				}
+			}
+		}
+	}
+
+	// ---- the account's state in Active Directory (when there is such a device; no machine is found this way) ----
+	if aerr == nil {
+		names := []string{a.User}
+		if a.Host != "" {
+			names = []string{a.Host}
+		} else if short != "" && short != a.User {
+			names = append(names, short)
+		}
+		var recs []map[string]any
+		var err error
+		for _, n := range names {
+			var v any
+			v, err = ask(adv, deviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
+				l, ok := d.(device.DirectoryLooker)
+				if !ok {
+					return nil, errors.New("this device cannot look up accounts")
+				}
+				if a.Host != "" {
+					return l.DirComputers(ctx, n)
+				}
+				return l.DirUsers(ctx, n)
+			})
+			if recs, _ = v.([]map[string]any); err != nil || len(recs) > 0 {
+				break
+			}
+		}
+		out["directory_device"] = adv.Name
+		switch {
+		case err != nil:
+			note("%s: %v", adv.Name, err)
+		case len(recs) == 0:
+			note("Active Directory has no account for %s", strings.Join(names, " or "))
+		default:
+			out["directory"] = recs
+			if len(recs) > 1 {
+				note("Active Directory has %d accounts that match; the best match is first", len(recs))
 			}
 		}
 	}
@@ -479,7 +523,8 @@ func mcpDeviceTroubleshootTool() mcpTool {
 			"Then, for each machine found: find it on the Meraki network by its name (and, for a user, also every client that signed in to the network with the account, such as a phone on the Wi-Fi) and return what helps when someone cannot get online or is slow, for the last few hours (not only now): the Meraki client (IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage), its usage history and device policy; " +
 			"for a wireless client its Wi-Fi now (SSID, AP, RSSI and SNR), its signal quality, data rate and latency over the window, its connection statistics, connectivity events and failed connections; for a wired one its switch port's status (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. " +
 			"Last, the firewall's newest traffic and threat log entries for the addresses found (the VPN address, the address on the network). " +
-			"The answer has: user or host and last_user, devices (each with entra and network), vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
+			"When there is an Active Directory device the account (or the computer's account) is added as directory: enabled, locked out, when the password last changed, last sign-in, groups. " +
+			"The answer has: user or host and last_user, devices (each with entra and network), directory, vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
 			"The firewall logs are those of the Panorama in the inventory (or of the one PAN-OS firewall); a system that is not configured is left out with a note. The systems are matched by name (case and domain ignored); a phone often has a different host name, so a device may be reported as not seen. Read only.",
 		props: []mcpProp{
 			{name: "user", typ: "string", desc: "The user: a sign-in name (joe.smith@contoso.com), an account name (msmith), an object ID or a name. A name that matches several users is refused with the candidates listed. Give this or host."},
@@ -490,11 +535,12 @@ func mcpDeviceTroubleshootTool() mcpTool {
 			{name: "entra", typ: "string", desc: "The Entra device's name in list_devices, when there are several."},
 			{name: "meraki", typ: "string", desc: "The Meraki organization device's name in list_devices, when there are several."},
 			{name: "panorama", typ: "string", desc: "The Panorama's or firewall's name in list_devices, when there are several."},
+			{name: "ad", typ: "string", desc: "The Active Directory device's name in list_devices, when there are several."},
 		},
 		run: func(c *mcpCtx) (any, error) {
 			q := "/api/devices/troubleshoot?"
 			sep := ""
-			for _, k := range []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama"} {
+			for _, k := range []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad"} {
 				if v := c.str(k); v != "" {
 					q += sep + k + "=" + urlQ(v)
 					sep = "&"

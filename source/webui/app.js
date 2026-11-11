@@ -1238,7 +1238,10 @@
       const yn = (b) => (b == null ? "" : b ? "up" : "down");
       if (op === "interfaces") return pad([["Interface", "Admin", "Link", "Speed", "Address", "Description"]].concat((x || []).map((i) => [i.name, yn(i.admin_up), yn(i.oper_up), i.speed_mbps ? i.speed_mbps + " Mb/s" : "", (i.addresses || []).join(","), i.description || ""])));
       if (op === "neighbors") return (x || []).length ? pad([["Local port", "Neighbor", "Its port", "Its address"]].concat(x.map((n) => [n.local_port, n.remote_name || "", n.remote_port || "", n.remote_addr || ""]))) : "No neighbors.";
-      return typeof x === "string" ? x : JSON.stringify(x, null, 2);
+      if (op === "ports") return pad([["Port", "Link", "In octets", "In errors", "Out octets", "Out errors", "Flaps"]].concat((x || []).map((i) => { const c = i.counters || {}; return [i.name, yn(i.oper_up), c.in_octets || 0, c.in_errors || 0, c.out_octets || 0, c.out_errors || 0, c.flaps || 0]; })));
+      if (op === "routes") return (x || []).length ? pad([["Prefix", "Protocol", "Next hop", "Interface", "Distance", "Metric", "VRF"]].concat(x.map((r) => [r.prefix, r.protocol || "", r.next_hop || "", r.interface || "", r.distance || "", r.metric || "", r.vrf || ""]))) : "No routes.";
+      if (op === "vlans") return (x || []).length ? pad([["VLAN", "Name", "Status", "Ports"]].concat(x.map((v) => [v.id, v.name || "", v.status || "", (v.ports || []).join(",")]))) : "No VLANs.";
+      return typeof x === "string" ? x : plainText(x);
     };
     const OPWORD = { facts: "Facts", interfaces: "Interfaces", ports: "Ports", neighbors: "Neighbors", neighbor_details: "LLDP and CDP details", routes: "Routes", routing: "Routing protocols", firewall: "Firewall", resources: "CPU, memory and power", vlans: "VLANs", api_catalog: "API catalog", api: "API path", config: "Configuration", show: "Show" };
     function devAsk(name, op, cmd) {
@@ -1289,10 +1292,19 @@
         if (v.user) state.lastUser = v.user;
         setTimeout(() => textPopup("Troubleshoot " + (v.user || v.host), async (put) => {
           const q = new URLSearchParams({ ...(v.user ? { user: v.user } : { host: v.host }), hours: v.hours || "6", [key]: name });
-          put(JSON.stringify((await api("GET", "/api/devices/troubleshoot?" + q.toString())).data, null, 2));
+          put(plainText((await api("GET", "/api/devices/troubleshoot?" + q.toString())).data));
         }), 0);
         return "";
       }, "Run", true);
+    }
+    // Active Directory: a user, computer or group by name, shown as text
+    function lookupForm(name, kind) {
+      form("Look up " + kind + " — " + name, [{ k: "who", l: kind === "computer" ? "Computer" : kind === "group" ? "Group" : "User", v: kind === "user" ? state.lastUser || "" : "", ph: kind === "computer" ? "PC-123" : kind === "group" ? "Domain Admins" : "jsmith" }], (v) => {
+        if (!v.who.trim()) return "Give a name.";
+        if (kind === "user") state.lastUser = v.who.trim();
+        setTimeout(() => devAsk(name, "show", "show " + kind + " " + v.who.trim()), 0);
+        return "";
+      }, "Look up", true);
     }
     function showForm(name) {
       form("Show command — " + name, [{ k: "cmd", l: "Command", v: state.lastShow || "", ph: "show version" }], (v) => {
@@ -1319,6 +1331,7 @@
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
+        ...(d.platform === "ad" ? [["Look up user", () => lookupForm(name, "user")], ["Look up computer", () => lookupForm(name, "computer")], ["Look up group", () => lookupForm(name, "group")], ["Troubleshoot user or host", () => troubleForm(name, "ad")]] : []),
         [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes
@@ -2023,7 +2036,7 @@
           h("tbody", {}, r.data.map((n) => h("tr", {}, h("td", { class: "mono" }, n.local_port), h("td", {}, n.remote_name || ""), h("td", { class: "mono" }, n.remote_port || ""), h("td", { class: "mono" }, n.remote_addr || ""), h("td", { class: "wrap muted" }, n.remote_desc || ""))))))
           : h("p", { class: "muted" }, "No neighbors.");
         else {
-          const text = typeof r.data === "string" ? r.data : JSON.stringify(r.data, null, 2);
+          const text = typeof r.data === "string" ? r.data : plainText(r.data);
           body = h("div", {}, h("div", { class: "toolbar" }, copyBtn(() => text),
             h("button", { class: "btn small", type: "button", onclick: () => saveText(r.device + (d.op === "config" ? ".conf" : ".txt"), text) }, "Download")),
             h("pre", { class: "devtext" }, text));
@@ -2640,7 +2653,7 @@
   // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
   const PLATFORM_LABEL = {
     aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
-    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", sdwan: "Cisco Catalyst SD-WAN",
+    ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", ad: "Active Directory", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
@@ -3842,6 +3855,42 @@
       rd.onload = () => { target.value = String(rd.result); };
       rd.readAsText(f);
     });
+  }
+  // Any answer as plain text instead of JSON: a list of flat records is a table, a record is "name  value" lines, a nested one is indented.
+  function plainText(v) {
+    const scalar = (x) => x == null || typeof x !== "object";
+    const word = (k) => { k = String(k).replace(/[_-]+/g, " "); return k.charAt(0).toUpperCase() + k.slice(1); };
+    const cell = (x) => (x == null ? "" : Array.isArray(x) ? x.map(cell).join(", ") : typeof x === "object" ? Object.entries(x).map((e) => e[0] + "=" + cell(e[1])).join(" ") : String(x));
+    const table = (rows, cols) => {
+      const grid = [cols.map(word)].concat(rows.map((r) => cols.map((c) => cell(r[c]))));
+      const w = cols.map((_, i) => Math.max(...grid.map((r) => r[i].length)));
+      return grid.map((r) => r.map((c, i) => c.padEnd(w[i])).join("  ").trimEnd()).join("\n");
+    };
+    const flat = (o) => o && typeof o === "object" && !Array.isArray(o) && Object.values(o).every((x) => scalar(x) || (Array.isArray(x) && x.every(scalar)));
+    const ind = (t, p) => t.split("\n").map((l) => (l ? p + l : l)).join("\n");
+    function go(x) {
+      if (x == null) return "";
+      if (scalar(x)) return String(x);
+      if (Array.isArray(x)) {
+        if (!x.length) return "None.";
+        if (x.every(scalar)) return x.join("\n");
+        if (x.every(flat)) {
+          const cols = [];
+          x.forEach((r) => Object.keys(r).forEach((k) => { if (!cols.includes(k)) cols.push(k); }));
+          return table(x, cols);
+        }
+        return x.map(go).join("\n\n");
+      }
+      const keys = Object.keys(x).filter((k) => x[k] != null && x[k] !== "");
+      if (!keys.length) return "None.";
+      const w = Math.max(...keys.filter((k) => scalar(x[k]) || (Array.isArray(x[k]) && x[k].every(scalar))).map((k) => word(k).length), 0) + 2;
+      return keys.map((k) => {
+        const e = x[k];
+        if (scalar(e) || (Array.isArray(e) && e.every(scalar))) return word(k).padEnd(w) + cell(e);
+        return word(k) + "\n" + ind(go(e), "  ");
+      }).join("\n");
+    }
+    return go(v);
   }
   function saveText(name, text) {
     const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: name });
