@@ -1326,12 +1326,12 @@
       const d = devByName(name);
       return [["Ask", null, "", [["Facts", () => devAsk(name, "facts")], ["Interfaces", () => devAsk(name, "interfaces")], ["Ports", () => devAsk(name, "ports")], ["Neighbors", () => devAsk(name, "neighbors")],
         ["LLDP and CDP details", () => devAsk(name, "neighbor_details")], ["Routes", () => devAsk(name, "routes")], ["Routing protocols", () => devAsk(name, "routing")], ["Firewall", () => devAsk(name, "firewall")], ["CPU, memory and power", () => devAsk(name, "resources")], ["VLANs", () => devAsk(name, "vlans")], ["API catalog", () => devAsk(name, "api_catalog")],
-        ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)]]],
+        ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)],
+        ...(d.platform === "ad" ? [["Look up user", () => lookupForm(name, "user")], ["Look up computer", () => lookupForm(name, "computer")], ["Look up group", () => lookupForm(name, "group")]] : [])]],
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
-        ...(d.platform === "ad" ? [["Look up user", () => lookupForm(name, "user")], ["Look up computer", () => lookupForm(name, "computer")], ["Look up group", () => lookupForm(name, "group")], ["Troubleshoot user or host", () => troubleForm(name, "ad")]] : []),
         [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes

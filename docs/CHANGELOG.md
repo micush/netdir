@@ -1,5 +1,16 @@
 # Changelog
 
+## [v132] - 2026-11-10 — Active Directory lookups under Ask
+
+### Changed
+- On an Active Directory device the right-click menu has **Ask ▸ Look up user / Look up computer / Look up group** (they were beside Ask), and **Troubleshoot user or host** is gone from that device's menu. The troubleshooting itself is unchanged (it still adds the directory record when an Active Directory device exists; it is started from the Entra or Panorama device, the CLI, or MCP).
+
+### Verified
+- `node --check webui/app.js` and `help.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+
+### Not verified
+- Not opened in a browser.
+
 ## [v131] - 2026-11-10 — Active Directory fills in port 636; the port hint is gone
 
 ### Changed
