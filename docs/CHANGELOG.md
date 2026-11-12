@@ -1,5 +1,16 @@
 # Changelog
 
+## [v145] - 2026-11-12 — The Meraki lookup cache no longer hashes the API key (CodeQL alert 4)
+
+### Changed
+- The key of the Meraki lookup cache (`device/meraki.go`, `idKey`) was a SHA-256 of the device's address, port, organization and the dashboard **API key**. It stayed in memory and was never stored, shown or compared, but a fast hash of a secret is what the code scanner flags. It is now made from the login's **name** and the device's name instead, so no secret goes into it; the cache is already emptied whenever the configuration changes (`mgmt.go`), so a changed key under the same login name cannot return an old answer. Entra's cache key already held no secret.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. New test `TestMerakiCacheKeyDoesNotUseTheKey`: the same login with another key gives the same cache key, another login gives another.
+
+### Not verified
+- Whether the CodeQL alert clears is known only after the next scan on GitHub. Alerts 3 and 6 were not changed (a protocol requirement and a deliberate diagnostic) and are for dismissal in GitHub.
+
 ## [v144] - 2026-11-12 — Add device ▸ Devices from inventory lists only devices that have a login
 
 ### Changed

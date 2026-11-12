@@ -95,3 +95,21 @@ func TestMerakiClientMemory(t *testing.T) {
 		t.Errorf("a named network: %v %v", err, rep["networks_searched"])
 	}
 }
+
+// The Meraki cache key names the login, never the API key: the key is not hashed, and two logins do not share entries.
+func TestMerakiCacheKeyDoesNotUseTheKey(t *testing.T) {
+	d := Device{Name: "m1", Platform: "meraki"}
+	mk := func(name, key string) string {
+		drv, err := newMeraki(d, Credential{Name: name, Token: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bareDriver(drv).(*meraki).ckey
+	}
+	if mk("a", "key-one") != mk("a", "key-two") {
+		t.Error("the cache key depends on the API key")
+	}
+	if mk("a", "key-one") == mk("b", "key-one") {
+		t.Error("two logins share a cache key")
+	}
+}
