@@ -1348,10 +1348,10 @@
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes
     // the device everywhere it is drawn.
-    const NEW_DEV = "＋ new device", FROM_INV = "Devices of the inventory", NEW_LOGIN = "＋ new login";
+    const NEW_DEV = "＋ new device", FROM_INV = "Devices from inventory", NEW_LOGIN = "＋ new login";
     function deviceForm(g, edit) {
       const d = edit ? devByName(edit) : null;
-      const others = inventory().map((x) => x.name).filter((n) => !(g.devices || []).includes(n));
+      const others = inventory().filter((x) => (x.credential || x.platform === "tools") && !(g.devices || []).includes(x.name)).map((x) => x.name);   // only devices that have a login (the network tools need none)
       const ls = logins().map((c) => c.name);
       const show = (els) => {
         const fresh = !els.pick || els.pick.value === NEW_DEV, newLogin = els.login.value === NEW_LOGIN;

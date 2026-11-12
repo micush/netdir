@@ -1,5 +1,16 @@
 # Changelog
 
+## [v144] - 2026-11-12 — Add device ▸ Devices from inventory lists only devices that have a login
+
+### Changed
+- On the Topology page, Add device ▸ *Devices from inventory* (renamed from *Devices of the inventory*) now lists only the devices that have a login (and the network-tools device, which needs none). Devices still without one, such as freshly imported ones, are left out until a login is given in Configure ▸ Devices.
+
+### Verified
+- `node --check webui/app.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+
+### Not verified
+- The dialog itself was not driven in a browser; the change is one filter on the list it is built from.
+
 ## [v143] - 2026-11-12 — The Configure page no longer drops devices that have no login (the real cause of the imported devices disappearing)
 
 ### Fixed
