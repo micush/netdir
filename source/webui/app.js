@@ -2655,8 +2655,8 @@
     render();
     return {
       el: box,
-      get: () => (spec.obj ? data.filter((r) => !spec.mark(cells(r))).map((r) => spec.obj(cells(r)))
-        : data.flatMap((r) => (spec.mark(cells(r)) ? [] : spec.format(cells(r)).map((x) => (r.off ? x + " disabled" : x))))),
+      get: () => (spec.obj ? data.filter((r) => !(spec.drop || spec.mark)(cells(r))).map((r) => spec.obj(cells(r)))
+        : data.flatMap((r) => ((spec.drop || spec.mark)(cells(r)) ? [] : spec.format(cells(r)).map((x) => (r.off ? x + " disabled" : x))))),
     };
   }
 
@@ -2726,6 +2726,7 @@
         return [x];
       },
       mark: (c) => !c[0] || (!c[2] && !SERVICE_ADDR[c[1]]) || !c[4],
+      drop: (c) => !c[0] || (!c[2] && !SERVICE_ADDR[c[1]]),   // a device with no login is marked, but it is saved (an imported one has none yet)
     },
     // the logins the devices use: a user name and password, or an API token (FortiOS, PAN-OS, Technitium, Observium, IP Fabric, Centreon)
     devcreds: {

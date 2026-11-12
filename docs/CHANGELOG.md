@@ -1,5 +1,17 @@
 # Changelog
 
+## [v143] - 2026-11-12 — The Configure page no longer drops devices that have no login (the real cause of the imported devices disappearing)
+
+### Fixed
+- **Imported devices disappeared whenever anything was saved on a Configure page.** The Devices table marks a row red when it has no login, and the page left every marked row out of what it saved, so the first save of any Configure field (they save when you leave a field) wrote the configuration without every device that had no login. Imported devices have none until you give them one, and devices you gave a login kept their place, which is why the 50-odd devices with logins stayed. The history of the cluster shows it: each removal is a save by the GUI user with an empty note (the Configure page), 35 to 60 seconds after an import, with a valid check token, so it was not a stale page. A device is now left out only when it has no name or no address; one with no login stays, still marked red.
+- Earlier fixes in v138, v140 and v141 (the check token, refusing a save without it, the primary's check of a replica's save) are real protection against stale pages but were not the cause of this.
+
+### Verified
+- `node --check webui/app.js`, `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. In headless Chromium with a mocked API holding two devices with no login (and one with): leaving the Address field saved all of them; with the previous page code the same action saved only the one with a login.
+
+### Not verified
+- Not run against the real cluster. The same mocked page raises an error in the alert-rules table that comes from the mock. The other tables of Configure (logins, access lists) still leave out their incomplete rows when saving; only Devices was changed.
+
 ## [v142] - 2026-11-12 — Picked rows in a list stay coloured when the list loses the focus
 
 ### Fixed
