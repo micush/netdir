@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"netdir/device"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1010,6 +1011,30 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 		t.Fatal("the stale replica save changed the primary")
 	}
 	b.sync()
+	// devices imported (added to the inventory, on no gateway) and then one assigned to a gateway, from the replica: all stay
+	{
+		bc = b.cfg()
+		for _, n := range []string{"imp1", "imp2", "imp3"} {
+			bc.Settings.Devices = append(bc.Settings.Devices, device.Device{Name: n, Platform: "tools", Address: "localhost", Disabled: true})
+		}
+		if err := b.mg.PutConfigBase(bc, "bob", "import", configBase(b.cfg())); err != nil {
+			t.Fatal(err)
+		}
+		a.sync()
+		b.sync()
+		bc = b.cfg()
+		bc.Groups[0].Devices = []string{"imp1"}
+		if err := b.mg.PutConfigBase(bc, "bob", "Topology", configBase(b.cfg())); err != nil {
+			t.Fatal(err)
+		}
+		a.sync()
+		b.sync()
+		for _, n := range []*tnode{a, b} {
+			if got := len(n.cfg().Settings.Devices); got != 3 {
+				t.Errorf("%s has %d devices after assigning one, want 3", n.name, got)
+			}
+		}
+	}
 	// an invalid shared change is refused by the primary and leaves B untouched
 	bc = b.cfg()
 	bc.Groups[0].HelloMS = 400

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v142] - 2026-11-12 — Picked rows in a list stay coloured when the list loses the focus
+
+### Fixed
+- In a multi-pick list (Add device ▸ Devices of the inventory, and every other list where several rows can be picked), the picked rows turned black as soon as something else got the focus, for example ticking Enable. They now keep the accent colour, light and dark (`select[multiple] option:checked` in `style.css`).
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. In headless Chromium (light and dark), with two rows picked and a checkbox ticked: the picked rows stay in the accent colour.
+
+### Not verified
+- Not looked at in Firefox or Safari.
+- A report that the imported devices disappear when some are assigned to a gateway was not reproduced: a cluster test (import on a replica, then assign one device to a gateway from the replica) keeps all devices on both nodes. A case in the cluster test now keeps that path covered.
+
 ## [v141] - 2026-11-12 — A replica's save can no longer overwrite what the primary has (imported devices disappearing, again)
 
 ### Fixed

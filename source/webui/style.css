@@ -181,6 +181,8 @@ input[type=text], input[type=password], input[type=number], input[type=time], in
 }
 textarea { font-family: var(--mono); font-size: .86rem; resize: vertical; }
 textarea.json { min-height: 28rem; }
+/* the picked rows keep the accent colour when the list loses the focus (the browser would turn them black) */
+select[multiple] option:checked { background: var(--accent) linear-gradient(var(--accent), var(--accent)); color: var(--accent-text); }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .85rem 1rem; align-items: start; }
 .grid .wide { grid-column: 1 / -1; }
