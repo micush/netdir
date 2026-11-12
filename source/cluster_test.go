@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -992,6 +993,23 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 	if a.cfg().Groups[0].Priority != 200 {
 		t.Fatal("a replica's local field must not leak to the primary")
 	}
+	// a replica whose copy is behind the primary's (an import made on the primary, not yet synced) must not overwrite it: the primary
+	// checks the page's base too
+	stale := configBase(b.cfg())
+	pc := a.cfg()
+	pc.Groups[0].HelloMS = 450
+	if err := a.mg.PutConfig(pc, "carol", "import"); err != nil {
+		t.Fatal(err)
+	}
+	bc = b.cfg()
+	bc.Groups[0].HelloMS = 500
+	if err := b.mg.PutConfigBase(bc, "bob", "", stale); !errors.Is(err, ErrConfigChanged) {
+		t.Fatalf("a replica's save over a newer primary: %v", err)
+	}
+	if a.cfg().Groups[0].HelloMS != 450 {
+		t.Fatal("the stale replica save changed the primary")
+	}
+	b.sync()
 	// an invalid shared change is refused by the primary and leaves B untouched
 	bc = b.cfg()
 	bc.Groups[0].HelloMS = 400

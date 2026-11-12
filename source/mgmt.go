@@ -189,9 +189,12 @@ func (m *Mgmt) PutConfigBase(dc *DaemonConfig, actor, note, base string) error {
 		return err
 	}
 	if m.cl.Enabled() && m.cl.Snapshot().Role == RoleReplica && sharedOf(dc).hash() != sharedOf(cur).hash() {
-		payload := adminSharedConfig{Shared: sharedOf(dc), Seeds: seedsOf(dc)}
+		payload := adminSharedConfig{Shared: sharedOf(dc), Seeds: seedsOf(dc), Base: base}
 		out, err := m.cl.forwardAdmin("shared-config", actor, payload)
 		if err != nil {
+			if strings.Contains(err.Error(), ErrConfigChanged.Error()) {
+				return ErrConfigChanged // the primary has settings the page never read
+			}
 			return fmt.Errorf("this node is a replica: the change to the shared settings must be accepted by the primary (%s), and that failed: %w",
 				m.cl.Snapshot().PrimaryAddr, err)
 		}
@@ -511,6 +514,7 @@ func (m *Mgmt) runOnPrimary(op, by string, payload any) (json.RawMessage, error)
 type adminSharedConfig struct {
 	Shared SharedConfig `json:"shared"`
 	Seeds  []GroupSeed  `json:"seeds"`
+	Base   string       `json:"base,omitempty"` // what the page read (configBase): the primary refuses when its own settings are not those
 }
 
 // execAdminOp runs a write on this node, which must be the primary.
@@ -530,6 +534,11 @@ func (m *Mgmt) execAdminOp(op, by string, payload json.RawMessage) (json.RawMess
 		cur, _, err := m.LiveConfig()
 		if err != nil {
 			return nil, err
+		}
+		// The replica checked the page's base against its own copy, which can be behind the primary's (an import made on the primary a
+		// moment ago): only the primary knows what is really saved, so it checks too, or the replica's old copy overwrites it.
+		if p.Base != "" && p.Base != configBase(cur) {
+			return nil, ErrConfigChanged
 		}
 		if _, err := mergeShared(cur, p.Shared, p.Seeds); err != nil {
 			return nil, err

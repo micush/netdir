@@ -1,5 +1,16 @@
 # Changelog
 
+## [v141] - 2026-11-12 — A replica's save can no longer overwrite what the primary has (imported devices disappearing, again)
+
+### Fixed
+- **Imported devices disappeared a fourth time, with every node on v140.** In the tshoot bundle the import (256 devices) was applied on the primary at 00:13:24 and removed again at 00:14:00, originating on the primary. A save made on a **replica** was checked against the replica's own copy of the settings, which can be a moment behind the primary's, and was then forwarded to the primary, which applied it without any check. A page on a replica that had not yet seen the import therefore wrote its old device list over it. The page's `base` now travels with the forwarded save and the primary refuses it (409, nothing written) when its own settings are not the ones the page read; the replica passes the refusal on, and the page shows what is saved.
+
+### Verified
+- `gofmt -l .`, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`. New case in the cluster test: the primary changes, a replica still on the old copy saves with the old base: refused, the primary keeps its change.
+
+### Not verified
+- Not run on the real cluster, and not with live daemons. The bundle holds only the replica's view (history entries say "cluster sync"), so which node and page made the 00:14:00 save is inferred from the code path, not read from a log of the primary.
+
 ## [v140] - 2026-11-11 — Imported devices can no longer be wiped by an old page; SNMP (ios) devices are no longer reported unreachable
 
 ### Fixed
