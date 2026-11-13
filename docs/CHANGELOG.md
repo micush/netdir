@@ -1,5 +1,18 @@
 # Changelog
 
+## [v147] - 2026-11-13 — Device42 and Micro Focus SMAX drivers, and a content log for the MCP endpoint
+
+### Added
+- **`device42`** (`device/device42.go`): Device42 over its REST API (`/api/1.0`, `/api/2.0`), user name and password. Facts, interfaces, `show devices|device|ips|subnets|vlans|racks|buildings|macs|hardwares|vendors|customers`, `device_api_get`, and `device_change_raw` (POST/PUT/PATCH/DELETE, form fields or JSON; passwords, users, keys, tokens and authentication are refused). Also an **import source** (Import ▸ Devices).
+- **`smax`** (`device/smax.go`): Micro Focus (OpenText) Service Management Automation X over its REST API, option `tenant`, user name and password of an integration or database-authenticated user. `show requests|incidents|changes|problems`, `show request ID`, `device_api_get` below `/ems/{Request,Incident,Change,Problem}`, and `device_change_raw` as `POST /ems/bulk` (CREATE or UPDATE only; no deletes, no people, groups, roles or settings).
+- **MCP content log** (`contentlog.go`): with `settings.mcp_log` on (Configure ▸ MCP ▸ Content log), everything that goes into and out of the MCP endpoint is written, one JSON line per request, to `mcp-content.log` in each node's state directory. Size limit `mcp_log_mb` (1 to 1000, default 50, two files of half), per-entry limit `mcp_log_entry_kb` (1 to 8192, default 256). Off by default. Replies are written as the caller got them; secrets in requests are hidden; the `Authorization` header is never written; refused requests are logged without a body.
+
+### Verified
+- `go vet` and `go test -race -count=1 ./device` (new stub tests for both drivers, including write guards, session renewal and import), `CGO_ENABLED=0 go test` of the main package for the content log, help and hint tests.
+
+### Not verified
+- Neither driver has been run against a real Device42 or SMAX; both were written from the vendors' documentation and a test stub. `TestUpdateBuildApplyAndRollbackGuard` could not run where PAM headers are missing. `sh tools/leaktest.sh` was not run (it needs the cgo build).
+
 ## [v145] - 2026-11-12 — The Meraki lookup cache no longer hashes the API key (CodeQL alert 4)
 
 ### Changed
