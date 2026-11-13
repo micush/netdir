@@ -1,5 +1,16 @@
 # Changelog
 
+## [v148] - 2026-11-13 — Configure ▸ MCP: a wider card, and notes on allowed sources and keys
+
+### Added
+- A **Notes** column on the allowed sources and on the keys (Configure ▸ MCP). A note is up to 200 characters on one line and changes nothing. For a key it is `mcp_keys[].notes`. For a source it is written after a `#` at the end of the entry (`"10.0.0.20 rw # mike's laptop"`); every reader of an entry (`aclBody` in `mcp.go`) ignores it, so a word in a note such as `rw`, `disabled`, `until=` or `devices=` is only text, and entries of one address that are merged keep their notes joined with `; `. Tests: `mcpnotes_test.go`.
+
+### Changed
+- The Configure ▸ MCP card is wider: the page may be up to 1600 px instead of 1150 px, and its tables use the whole card instead of stopping at 63 rem (`style.css`, `.mcpcard`).
+
+### Not verified
+- The wider layout and the Notes columns were not looked at in a browser, only checked as code and by the Go tests. The browser rule uses `:has()`, which older browsers lack (they keep the old width).
+
 ## [v147] - 2026-11-13 — Device42 and Micro Focus SMAX drivers, and a content log for the MCP endpoint
 
 ### Added

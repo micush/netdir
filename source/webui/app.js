@@ -2690,17 +2690,18 @@
     // MCP access: "10.1.0.0/24" (read-only), "10.1.1.50 rw", "10.1.0.0/24 strict" (an address or network, ro or rw, a privacy level)
     mcpacl: {
       key: "mcpacl", wide: true, empty: "No sources allowed without a key.",
-      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }, { name: "Devices", pills: true }, { name: "Expires (UTC)", ph: "never, 2026-12-31 or 2026-12-31 17:00" }],
+      cols: [{ name: "Address or network", ph: "10.1.1.50, 10.1.0.0/24" }, { name: "Access", opts: ["ro", "rw"] }, { name: "Privacy", opts: ["default", "none", "standard", "strict"] }, { name: "Devices", pills: true }, { name: "Expires (UTC)", ph: "never, 2026-12-31 or 2026-12-31 17:00" }, { name: "Notes", ph: "what this source is for", note: true }],
       parse: (line) => {
-        const w = String(line).trim().split(/\s+/), f = w.map((x) => x.toLowerCase());
+        const [body, ...nt] = String(line).split("#");   // "10.1.1.50 rw # laptop": what it says, and its note
+        const w = body.trim().split(/\s+/), f = w.map((x) => x.toLowerCase());
         const lv = f.slice(1).find((x) => ["none", "standard", "strict"].includes(x));
         const dv = w.slice(1).find((x) => x.toLowerCase().startsWith("devices="));
         const un = w.slice(1).find((x) => x.toLowerCase().startsWith("until="));
-        return [w[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default", dv ? dv.slice(8) : "", un ? un.slice(6).replace("T", " ").replace(/Z$/, "") : ""];
+        return [w[0] || "", f.slice(1).includes("rw") ? "rw" : "ro", lv || "default", dv ? dv.slice(8) : "", un ? un.slice(6).replace("T", " ").replace(/Z$/, "") : "", nt.join("#").trim()];
       },
-      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "") + (c[3] ? " devices=" + c[3] : "") + (c[4] && c[4].trim() ? " until=" + c[4].trim().replace(/\s+/, "T") : "")),
+      format: (c) => c[0].split(/[\s,]+/).filter(Boolean).map((a) => a + (c[1] === "rw" ? " rw" : "") + (c[2] && c[2] !== "default" ? " " + c[2] : "") + (c[3] ? " devices=" + c[3] : "") + (c[4] && c[4].trim() ? " until=" + c[4].trim().replace(/\s+/, "T") : "") + ((c[5] || "").replace(/[#\r\n]/g, " ").trim() ? " # " + c[5].replace(/[#\r\n]/g, " ").trim() : "")),
       mark: (c) => !c[0],
-      isOff: (l) => /\sdisabled\s*$/i.test(String(l)),   // a row switched off with right-click ▸ Disable stays in the list but allows nothing
+      isOff: (l) => /\sdisabled\s*$/i.test(String(l).split("#")[0]),   // a row switched off with right-click ▸ Disable stays in the list but allows nothing
     },
     neighbors: oneCol("neighbors", "Neighbor IP address", "10.0.0.2", "No neighbors: multicast."),
     morevip4: oneCol("morevip4", "IPv4 address", "10.0.0.11", "No more IPv4 addresses."),
@@ -2905,6 +2906,9 @@
           if (t) k.expires = t; else delete k.expires;
           changed();
         });
+        const notes = h("input", { type: "text", autocomplete: "off", spellcheck: "false", maxlength: "200", "aria-label": "Notes for " + k.name, value: k.notes || "", placeholder: "what this key is for",
+          title: "A note for yourself: what the key is for. It changes nothing." });
+        notes.addEventListener("input", () => { const n = notes.value.replace(/[\r\n]+/g, " ").trim(); if (n) k.notes = n; else delete k.notes; });
         const devs = devicePicker(k.devices, (l) => { if (l.length) k.devices = l; else delete k.devices; });
         const tr = h("tr", { class: k.disabled || expired(k) ? "off" : "", title: expired(k) ? "Expired " + when(k.expires) + " UTC: refused" : "" },
           h("td", { class: "grip" }, h("span", { class: "rownum" }, String(i + 1))),
@@ -2914,6 +2918,7 @@
           h("td", {}, devs),
           h("td", { class: "ctext" }, day(k.created)),
           h("td", {}, exp),
+          h("td", {}, notes),
           h("td", {}, keyIn));
         tr.addEventListener("contextmenu", rowMenu([
           ["Add key", addKey],
@@ -2925,7 +2930,7 @@
         return tr;
       }));
       const tbl = h("table", { class: "policy zones rows mcpkeytab" },
-        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Devices"), h("th", {}, "Added"), h("th", {}, "Expires (UTC)"), h("th", {}, "Key"))), tbody);
+        h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Name"), h("th", {}, "Access"), h("th", {}, "Privacy"), h("th", {}, "Devices"), h("th", {}, "Added"), h("th", {}, "Expires (UTC)"), h("th", {}, "Notes"), h("th", {}, "Key"))), tbody);
       const empty = h("div", { class: "policy-empty" }, "No keys: only the sources above may use /mcp. Right-click here ▸ Add key.");
       empty.hidden = keys.length > 0;
       const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2954,7 +2959,7 @@
       name.focus();
     }
     draw();
-    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.devices && k.devices.length ? { devices: k.devices } : {}), ...(k.disabled ? { disabled: true } : {}), ...(k.expires ? { expires: k.expires } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
+    return { el, get: () => keys.map((k) => ({ name: k.name, access: k.access || "ro", ...(k.privacy ? { privacy: k.privacy } : {}), ...(k.devices && k.devices.length ? { devices: k.devices } : {}), ...(k.disabled ? { disabled: true } : {}), ...(k.expires ? { expires: k.expires } : {}), ...(k.notes ? { notes: k.notes } : {}), ...(k.key ? { key: k.key } : { hash: k.hash }), created: k.created })) };
   }
 
   // the range under a number field, with its default, on one line: "10 to 600 s. Default 30."
@@ -3708,7 +3713,7 @@
         ["sso", "SSO", section("Single sign-on",
           sso.el)],
         ["ldap", "LDAP", section("LDAP sign-in", ldap.el)],
-        ["mcp", "MCP", section("MCP", mcp.el, h("p", { class: "muted small mono" }, mcpURL()))],
+        ["mcp", "MCP", (() => { const c = section("MCP", mcp.el, h("p", { class: "muted small mono" }, mcpURL())); c.classList.add("mcpcard"); return c; })()],
         ["privacy", "Privacy", priv.el],
         ["monitoring", "Monitoring", monitoringTabs()],
         ["alerts", "Alerts", section("Alerts", alerts.el)],

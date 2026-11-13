@@ -45,6 +45,8 @@ type MCPKey struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// Expires is the unix time from which the key does nothing (0: never).  It stays in the list, shown as expired, until it is deleted.
 	Expires int64 `json:"expires,omitempty"`
+	// Notes says what the key is for ("claude on Mike's laptop, for the Axway audit"): up to mcpNoteMax characters, one line.  It changes nothing.
+	Notes string `json:"notes,omitempty"`
 }
 
 // mcpNow is the clock of the expiry checks (a variable for the tests).
@@ -100,6 +102,10 @@ func normMCPKeys(list []MCPKey) ([]MCPKey, error) {
 			k.Access = "rw"
 		default:
 			return nil, fmt.Errorf("mcp: key %q: the access is ro or rw", k.Name)
+		}
+		k.Notes = strings.Join(strings.Fields(k.Notes), " ")
+		if err := checkNote(k.Notes); err != nil {
+			return nil, fmt.Errorf("mcp: key %q: %w", k.Name, err)
 		}
 		var derr error
 		if k.Devices, derr = normDevices(k.Devices); derr != nil {

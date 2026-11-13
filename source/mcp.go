@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -48,10 +49,15 @@ var mcpProtocols = map[string]bool{"2024-11-05": true, "2025-03-26": true, "2025
 // "10.1.0.0/24 strict", "10.1.1.50 rw none": an address or network, then ro or rw, then a privacy level (mcpprivacy.go).  The word
 // "disabled" at the end ("10.1.1.50 rw disabled") keeps the entry in the list and gives it no access (right-click ▸ Disable); a
 // disabled entry is not merged with the others of its address.
+//
+// An entry may end in a note, "# laptop of the network team" (up to mcpNoteMax characters, no control characters): it says what
+// the entry is for and changes nothing; aclBody takes it off wherever an entry is read.  Entries of one address that are merged keep
+// their notes, joined with "; ".
 func normMCPACL(list []string) ([]string, error) {
 	if len(list) > 64 {
 		return nil, errors.New("mcp: at most 64 entries in the access list")
 	}
+	notes := map[string][]string{} // the notes of the entries merged under an address
 	type ent struct {
 		t   string // the address (an enabled entry) or the whole text of the entry (a disabled one)
 		off bool
@@ -61,6 +67,10 @@ func normMCPACL(list []string) ([]string, error) {
 	var order []ent
 	seenOff := map[string]bool{}
 	for _, s := range list {
+		s, note, err := splitACLNote(s)
+		if err != nil {
+			return nil, err
+		}
 		f := strings.Fields(s)
 		if len(f) == 0 {
 			continue
@@ -137,6 +147,9 @@ func normMCPACL(list []string) ([]string, error) {
 			if off {
 				text += " disabled"
 			}
+			if note != "" {
+				text += " # " + note
+			}
 			if !seenOff[text] {
 				seenOff[text] = true
 				order = append(order, ent{t: text, off: true})
@@ -150,6 +163,15 @@ func normMCPACL(list []string) ([]string, error) {
 			mode[t] = map[bool]string{true: "rw", false: "ro"}[rw || mode[t] == "rw"]
 		}
 		level[t] = strictestLevel(level[t], lvl)
+		if note != "" {
+			dup := false
+			for _, x := range notes[t] {
+				dup = dup || x == note
+			}
+			if !dup {
+				notes[t] = append(notes[t], note)
+			}
+		}
 		if len(dl) == 0 {
 			allDevs[t] = true
 		} else if dl[0] != "none" {
@@ -178,14 +200,46 @@ func normMCPACL(list []string) ([]string, error) {
 			}
 			t += " devices=" + strings.Join(d, ",")
 		}
+		if n := strings.Join(notes[t0(e.t)], "; "); n != "" {
+			t += " # " + n
+		}
 		out = append(out, t)
 	}
 	return out, nil
 }
 
+const mcpNoteMax = 200
+
+// splitACLNote splits an entry into what it says and its note ("10.1.1.50 rw # laptop" is "10.1.1.50 rw" and "laptop").
+func splitACLNote(e string) (body, note string, err error) {
+	body, note, _ = strings.Cut(e, "#")
+	note = strings.Join(strings.Fields(note), " ")
+	if err := checkNote(note); err != nil {
+		return "", "", fmt.Errorf("mcp: access list: %w", err)
+	}
+	return strings.TrimSpace(body), note, nil
+}
+
+// checkNote checks a note: short, one line, no control characters.
+func checkNote(n string) error {
+	if utf8.RuneCountInString(n) > mcpNoteMax {
+		return fmt.Errorf("a note is at most %d characters", mcpNoteMax)
+	}
+	if strings.IndexFunc(n, unicode.IsControl) >= 0 {
+		return errors.New("a note is one line of text, without control characters")
+	}
+	return nil
+}
+
+// aclBody is an entry of the access list without its note: what every reader of an entry must look at.
+func aclBody(e string) string {
+	b, _, _ := strings.Cut(e, "#")
+	return strings.TrimSpace(b)
+}
+
 // aclOff says that an entry of the access list is disabled (it stays in the list and allows nothing).
 func aclOff(e string) bool {
-	f := strings.Fields(e)
+	f := strings.Fields(aclBody(e))
 	return len(f) > 1 && strings.EqualFold(f[len(f)-1], "disabled")
 }
 
@@ -207,7 +261,7 @@ func parseUntil(s string) (time.Time, error) {
 
 // aclExpired says that an entry of the access list has an until= time that has passed.
 func aclExpired(e string) bool {
-	for _, w := range strings.Fields(e)[1:] {
+	for _, w := range strings.Fields(aclBody(e))[1:] {
 		if v, ok := strings.CutPrefix(strings.ToLower(w), "until="); ok {
 			t, err := parseUntil(v)
 			return err != nil || !mcpNow().Before(t)
@@ -217,7 +271,7 @@ func aclExpired(e string) bool {
 }
 
 // t0 is the address of an entry written "ADDRESS [rw]".
-func t0(e string) string { f := strings.Fields(e); return f[0] }
+func t0(e string) string { f := strings.Fields(aclBody(e)); return f[0] }
 
 var mcpACLCache struct {
 	sync.Mutex
@@ -319,7 +373,7 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 			if aclOff(e) || aclExpired(e) {
 				continue
 			}
-			f := strings.Fields(e)
+			f := strings.Fields(aclBody(e))
 			if len(f) > 1 && f[1] == "rw" {
 				rw = append(rw, f[0])
 			} else {
@@ -337,12 +391,12 @@ func (s *Supervisor) mcpAccessLevel(from netip.Addr) (access, level string) {
 				continue
 			}
 			var dl []string
-			for _, w := range strings.Fields(e)[1:] {
+			for _, w := range strings.Fields(aclBody(e))[1:] {
 				if v, ok := strings.CutPrefix(w, "devices="); ok {
 					dl = strings.Split(v, ",")
 				}
 			}
-			c.devs = append(c.devs, aclDevs{nets: expandACL([]string{strings.Fields(e)[0]}), devs: dl})
+			c.devs = append(c.devs, aclDevs{nets: expandACL([]string{strings.Fields(aclBody(e))[0]}), devs: dl})
 		}
 		c.lvl = map[string][]netip.Prefix{}
 		for l, nets := range lv {

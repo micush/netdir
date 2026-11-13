@@ -504,10 +504,10 @@ A platform is one file in `source/device/`. It implements `device.Driver` (Facts
 ## Connecting an assistant
 
 1. **Allow the caller.**
-   - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change devices (rw is for single addresses only). A privacy level may follow: `"10.0.0.0/24 strict"` (see [Privacy levels](#privacy-levels)).
+   - By address: add it to `settings.mcp_acl`. `"10.0.0.0/24"` may read; `"10.0.0.20 rw"` may also change devices (rw is for single addresses only). A privacy level may follow: `"10.0.0.0/24 strict"` (see [Privacy levels](#privacy-levels)). An entry may end in a note after a `#` (`"10.0.0.20 rw # mike's laptop"`, up to 200 characters, one line): it says what the entry is for and changes nothing, and a word in it such as `rw` or `disabled` is only text.
    - An entry (or a key) can be switched off without deleting it: right-click ▸ **Disable**. In the file an address then ends with `disabled` (`"10.0.0.20 rw disabled"`) and a key has `"disabled": true`; it allows nothing until enabled.
    - **Which devices.** A key (`"devices": ["sw1", "tag:site=dc1"]`) or an allowed source (`"10.0.0.20 rw devices=sw1,tag:site=dc1"`) can be limited to some devices: device names, `tag:TAG`, `all` (the default) or `none`, or a gateway (`gateway:3`, shown by its name in the GUI: the gateway and every device on it, now and later; a caller with only device entries sees no gateway). A caller with both a key and a source may use only what both allow. The devices outside the list are not shown and are refused like devices that do not exist; `all` and tags reach only the ones it may use; a change or a capture that picks one it may not use is refused whole. A limited caller is not offered `get_config` or `device_troubleshoot_user`, and `/api/config`, versions and sign-in routes are refused to it, since those hold every device and every key. `get_topology` and `get_gateways` show it only the gateways it was given, and `get_alerts` only the alerts about them and its devices; the log is not filtered.
-   - Or with a key that works from any address: Configure ▸ MCP ▸ Keys ▸ right-click ▸ **Add key** makes one and shows it once. In the file, `{"name": "laptop", "access": "rw", "key": "<at least 32 random characters>"}` in `settings.mcp_keys` does the same. Only a SHA-256 hash of the key is kept. Both a key (`"expires": <unix time>`) and an address-list entry (`10.1.1.50 rw until=2026-12-31T17:00Z`) can have an expiry, in UTC; after it the key is refused as expired and the entry allows nothing, and the row stays in the list.
+   - Or with a key that works from any address: Configure ▸ MCP ▸ Keys ▸ right-click ▸ **Add key** makes one and shows it once. In the file, `{"name": "laptop", "access": "rw", "key": "<at least 32 random characters>"}` in `settings.mcp_keys` does the same. Only a SHA-256 hash of the key is kept. Both a key (`"expires": <unix time>`) and an address-list entry (`10.1.1.50 rw until=2026-12-31T17:00Z`) can have an expiry, in UTC; after it the key is refused as expired and the entry allows nothing, and the row stays in the list. A key may have `"notes"` (up to 200 characters, one line) saying what it is for; Configure ▸ MCP shows it in a Notes column beside the key.
 2. **Give the gateway a certificate the client trusts.** The GUI starts with a self-signed one; install yours with `netdir --tls-install --cert-file F --key-file F`. The primary's certificate is copied to every node.
 3. **Point the client at the VIP.** For Claude Code:
 
@@ -595,8 +595,8 @@ In the file:
 
 ```json
 "settings": {
-  "mcp_acl": ["10.0.0.20 rw strict", "10.0.0.0/24 none"],
-  "mcp_keys": [{"name": "laptop", "access": "ro", "privacy": "strict", "key": "…"}],
+  "mcp_acl": ["10.0.0.20 rw strict # mike's laptop", "10.0.0.0/24 none"],
+  "mcp_keys": [{"name": "laptop", "access": "ro", "privacy": "strict", "notes": "for the audit", "key": "…"}],
   "privacy": {"default": "standard", "strict": {"public_ips": true, "private_ips": true, "ip_keep": -2,
     "public_asns": true, "private_asns": true, "serials": "hide", "macs": "nic", "emails": true,
     "contacts": true, "words": ["contoso", "lab-edge"]}}
