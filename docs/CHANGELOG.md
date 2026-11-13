@@ -1,5 +1,22 @@
 # Changelog
 
+## [v149] - 2026-11-13 — MCP page text fixed, the content log's path is stated, and the checks the process asks for were run
+
+### Fixed
+- The content log's fields on Configure ▸ MCP had labels that were not plain English and one of them wrapped, so the fields were out of line. They are now **Log all MCP requests and replies**, **Log size limit** (1 to 1000 MB) and **Entry size limit** (1 to 8192 KB). The hint I had added under the switch is gone (the notes in CLAUDE.md allow a few words of hint only when asked for).
+- Nothing said where the content log is. `webui/help.js` (the MCP topic), the README and `netdir --help` now give the path, `/var/lib/netdir/mcp-content.log` (the state directory, `--state-dir`; the older half is `mcp-content.log.1`).
+- The Notes column of the allowed sources is wider (`style.css`), so a longer note is not cut off.
+
+### Added
+- `netdir --help` lists the three `mcp_log*` settings and the `#` note of an `mcp_acl` entry. `webui/help.js` describes the `device42` and `smax` drivers in the device list.
+
+### Verified
+- `gofmt -l .` (nothing), `go build`, `go vet ./...`, `go test -race -count=1 ./...` (all three packages pass, including the update build test, now that the PAM headers are installed), `CGO_ENABLED=0 go vet ./...`, `sh tools/leaktest.sh` (34 platforms, 1339 recorded answers, no leak), and cross-compiles for `linux/amd64`, `arm64`, `arm`, `386` and `riscv64`.
+- A live check: the daemon built with PAM, a real PAM user in a `netdir` group, signed in with Chromium (`playwright`) in light and dark, Configure ▸ MCP drawn with its content log fields, a source with a note, a disabled source and a key with a note. The card is 1520 px wide, the fields line up and no script error appeared. A request to `/mcp` with a key wrote a line to `mcp-content.log` (mode 0600) that holds the request and reply and not the key, and a request with a wrong key was logged with status 401.
+
+### Not verified
+- The two new drivers (`device42`, `smax`) have still not been run against a real Device42 or SMAX; they come from the vendors' documentation and a TLS stub. The content log was not checked on a cluster of several nodes. The IPv6 and multi-node checks that CLAUDE.md lists for other areas were not needed for this change and were not run.
+
 ## [v148] - 2026-11-13 — Configure ▸ MCP: a wider card, and notes on allowed sources and keys
 
 ### Added

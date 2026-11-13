@@ -483,15 +483,15 @@ The property names are the tenant's own and can be customized; SMAX refuses a la
 
 ### The MCP content log
 
-Everything that goes into the MCP endpoint and everything that comes out of it can be written to one log: **Configure ▸ MCP ▸ Content log** (or `settings.mcp_log` in the configuration). It is **off** by default. It is one log for the whole endpoint, not one per device.
+Everything that goes into the MCP endpoint and everything that comes out of it can be written to one log: **Configure ▸ MCP ▸ Log all MCP requests and replies** (or `settings.mcp_log` in the configuration). It is **off** by default. It is one log for the whole endpoint, not one per device.
 
 | Setting | Meaning |
 |---|---|
 | `mcp_log` | `true` or `false` (default `false`). Turn it off and writing stops; the files stay until you delete them. |
-| `mcp_log_mb` | The most disk the log may use, 1 to 1000 MB (default 50). At half of it the file becomes `mcp-content.log.1` and the older `.1` is deleted, so the oldest entries go first. |
+| `mcp_log_mb` | The most disk the log may use, 1 to 1000 MB (default 50). At half of it `/var/lib/netdir/mcp-content.log` becomes `mcp-content.log.1` and the older `.1` is deleted, so the oldest entries go first. |
 | `mcp_log_entry_kb` | The most of one request, and of one reply, that is written, 1 to 8192 KB (default 256); the rest is cut and the line's `note` says how much. |
 
-The log is `mcp-content.log` in each node's state directory, one JSON line per HTTP request: `t`, `from` (the caller's address), `who` (key name and address), `access` (`ro` or `rw`), `method`, `status`, `ms`, `request` (the JSON-RPC message as sent) and `reply` (the answer as sent). Both are embedded as JSON, so `jq` reads into them: `jq 'select(.request.params.name=="device_change_raw")' mcp-content.log`. The reply is written **exactly as the caller got it**, so it is already masked to that caller's privacy level; a secret in a request (a password in a change) is hidden by name; the `Authorization` header and so any key is never written. A request that is refused (no key, an address that is not allowed) is logged too, with its status and reply but no request. The file is mode 0600 and holds what callers asked and were told, so it is for the person who runs the gateway. Each node writes its own file: the log is not shared across a cluster and is not part of a backup.
+The log is `/var/lib/netdir/mcp-content.log` on each node (the state directory, `--state-dir`), one JSON line per HTTP request: `t`, `from` (the caller's address), `who` (key name and address), `access` (`ro` or `rw`), `method`, `status`, `ms`, `request` (the JSON-RPC message as sent) and `reply` (the answer as sent). Both are embedded as JSON, so `jq` reads into them: `jq 'select(.request.params.name=="device_change_raw")' mcp-content.log`. The reply is written **exactly as the caller got it**, so it is already masked to that caller's privacy level; a secret in a request (a password in a change) is hidden by name; the `Authorization` header and so any key is never written. A request that is refused (no key, an address that is not allowed) is logged too, with its status and reply but no request. The file is mode 0600 and holds what callers asked and were told, so it is for the person who runs the gateway. Each node writes its own file: the log is not shared across a cluster and is not part of a backup.
 
 ### How often the devices are looked at
 

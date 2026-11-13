@@ -777,3 +777,4 @@ table.policy td .devpick input[type=text] { flex: 1 1 7rem; width: auto; min-wid
 main:has(.card.mcpcard:not([hidden])) { max-width: 1600px; }
 .mcpcard .policy-box.rows.wide { max-width: none; }
 .mcpcard table.policy.rows td input[aria-label=Notes], .mcpcard table.policy.rows td input[aria-label^="Notes for"] { min-width: 14rem; }
+.mcpcard table.policy.rows:not(.mcpkeytab) th:nth-child(7) { width: 24rem; }   /* the notes of the allowed sources */

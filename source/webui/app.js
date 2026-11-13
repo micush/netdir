@@ -2395,9 +2395,9 @@
   const MCP_FIELDS = [
     { shared: true, k: "mcp_port", l: "Port", t: "int", min: 1, max: 65535, def: 443 },
     { shared: true, k: "mcp_max_result_mb", l: "Largest answer (MB)", t: "int", min: 1, max: 8, def: 1 },
-    { shared: true, k: "mcp_log", l: "Content log: write everything that goes in and out", t: "bool", hint: "Off by default. Keys are never written." },
-    { shared: true, k: "mcp_log_mb", unit: "MB", l: "Content log: most disk used", t: "int", min: 1, max: 1000, def: 50 },
-    { shared: true, k: "mcp_log_entry_kb", unit: "KB", l: "Content log: most of one request or reply", t: "int", min: 1, max: 8192, def: 256 },
+    { shared: true, k: "mcp_log", l: "Log all MCP requests and replies", t: "bool" },
+    { shared: true, k: "mcp_log_mb", unit: "MB", l: "Log size limit", t: "int", min: 1, max: 1000, def: 50 },
+    { shared: true, k: "mcp_log_entry_kb", unit: "KB", l: "Entry size limit", t: "int", min: 1, max: 8192, def: 256 },
     { shared: true, k: "mcp_acl", l: "Allowed sources", t: "rows", rows: "mcpacl", wide: true },
     { shared: true, k: "mcp_keys", l: "Keys", t: "mcpkeys", wide: true },
   ];
