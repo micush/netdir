@@ -99,22 +99,17 @@ func TestMCPReadOnly(t *testing.T) {
 	}
 	_, m = post(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	names := strings.Join(toolNames(t, m), " ")
-	if !strings.Contains(names, "api_get") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") || strings.Contains(names, "api_request") || strings.Contains(names, "edit_config") {
+	if !strings.Contains(names, "list_devices") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") || strings.Contains(names, "api_request") || strings.Contains(names, "edit_config") {
 		t.Fatalf("read-only tools: %s", names)
 	}
 	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("list_nodes", `{}`)); return m }()); isErr || !strings.Contains(txt, `"this_node":true`) {
 		t.Fatalf("list_nodes: %s", txt)
 	}
-	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("get_alerts", `{"node":"all"}`)); return m }()); isErr || !strings.Contains(txt, `"alerts"`) {
-		t.Fatalf("get_alerts: %s", txt)
-	}
+	requireGateTools(t, post)
 	// a write is refused, whatever the client sends
 	_, m = post(mcpCall("set_node_paused", `{"node":"this","paused":true}`))
 	if m["error"] == nil {
 		t.Fatalf("a tool that changes netdir is gone, yet it answered: %v", m)
-	}
-	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("api_get", `{"path":"/api/config"}`)); return m }()); isErr && strings.Contains(txt, "cannot be changed") {
-		t.Fatalf("a read was refused: %s", txt)
 	}
 	_, m = post(mcpCall("no_such_tool", `{}`))
 	if m["error"] == nil {
@@ -198,5 +193,43 @@ func TestDeviceCheckSettings(t *testing.T) {
 	dc.Settings.DeviceCheckSec, dc.Settings.DeviceFactsMin, dc.Settings.DeviceLiveCheckSec, dc.Settings.DeviceLiveFactsMin = 30, 1440, 10, 60
 	if err := dc.Validate(); err != nil {
 		t.Errorf("the limits themselves: %v", err)
+	}
+}
+
+// mcpClusterGone are the tools an MCP caller no longer has: anything about netdir's own cluster, configuration, alerts, schedules,
+// updates or host, and the raw route of the GUI's API.  What is left is the devices, the device list and status, the cluster
+// status (list_nodes, get_topology) and the network tools.
+var mcpClusterGone = []string{"get_gateways", "get_alerts", "get_lldp", "get_host_stats", "get_schedule", "get_updates", "get_node_status", "get_config", "list_api", "api_get", "get_log"}
+
+// requireGateTools checks that the tool list has the device and status tools and none of mcpClusterGone, that each of those
+// answers "unknown tool", and that a node cannot be picked.
+func requireGateTools(t *testing.T, post func(string, ...string) (int, map[string]any), hdr ...string) {
+	t.Helper()
+	_, m := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, hdr...)
+	have := toolNames(t, m)
+	for _, want := range []string{"list_nodes", "get_topology", "list_devices", "device_facts", "device_show"} {
+		if !containsStr(have, want) {
+			t.Errorf("%s is not offered: %v", want, have)
+		}
+	}
+	for _, gone := range mcpClusterGone {
+		if containsStr(have, gone) {
+			t.Errorf("%s is offered", gone)
+		}
+		if _, m := post(mcpCall(gone, `{}`), hdr...); m["error"] == nil {
+			t.Errorf("%s answered: %v", gone, m)
+		}
+	}
+	for _, name := range have {
+		if strings.HasPrefix(name, "device_") || strings.HasPrefix(name, "net_") || name == "list_nodes" || name == "get_topology" || name == "list_devices" {
+			continue
+		}
+		t.Errorf("unexpected tool %s", name)
+	}
+	for _, name := range []string{"list_nodes", "get_topology", "device_facts"} {
+		_, m := post(mcpCall(name, `{"node":"other","target":"all"}`), hdr...)
+		if txt, isErr := toolResult(t, m); !isErr || !strings.Contains(txt, "no node argument") {
+			t.Errorf("%s with a node: %v %s", name, isErr, txt)
+		}
 	}
 }

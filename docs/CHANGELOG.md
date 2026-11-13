@@ -1,5 +1,23 @@
 # Changelog
 
+## [v152] - 2026-11-13 — An MCP caller can only ask the gateway about its devices
+
+### Changed
+- The MCP tools are now the device tools (`device_*`, including `device_change`, `device_change_raw`, `device_capture` and `device_troubleshoot_user`), `list_devices` (the device list and each device's health), the network tools (`net_*`) and the cluster status (`list_nodes`, `get_topology`). Nothing else about netdir itself can be asked.
+- Removed: `get_gateways`, `get_alerts`, `get_lldp`, `get_host_stats`, `get_schedule`, `get_updates`, `get_node_status`, `get_config`, `list_api` and `api_get`. `api_get` and `get_config` were the way to any route of the GUI's API (configuration, versions, cluster, BGP, users ...); with them gone an MCP caller has no way to read a route other than the ones the remaining tools make.
+- No tool takes a `node` any more (`get_topology` was the last): the node that serves the endpoint answers, and a call with a `node` argument is refused ("tools take no node argument"). Device tools already ran on the serving node only.
+- A caller limited to some devices lost nothing it had before except the removed tools; `scopedOffTools` is now `device_troubleshoot_user` and the network tools.
+- Dead code removed with the tools: `apiRequest`, `apiRequestOn`, `restoreHidden`, `apiroutes.go` (the generated route list) and its test.
+- The GUI, the CLI and the GUI's API are unchanged: an administrator still reads and changes all of it there. README, the MCP help topic and the server instructions say the same.
+
+### Verified
+- `gofmt -l .` clean, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`, and the cross-compiles of the release list.
+- `requireGateTools` (`mcp_test.go`), used by the read-only, rw, limited-key and barred-route tests: the tool list has the device, list and status tools and nothing else, each removed tool answers "unknown tool", and a `node` argument is refused on `list_nodes`, `get_topology` and a device tool. The tests that used `get_config`, `api_get`, `get_lldp` or `get_alerts` now check that those are gone and that no device secret, key or gateway secret reaches a caller through the tools that remain.
+
+### Not verified
+- Not run against a real MCP client; an assistant configured with the old tool names will get "unknown tool" for the removed ones.
+- `tools/leaktest.sh` was not run (no driver or masking change).
+
 ## [v151] - 2026-11-13 — An MCP caller cannot read logs, accounts or keys
 
 ### Changed

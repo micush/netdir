@@ -92,17 +92,14 @@ func TestMCPNeverShowsSecretsEvenToRW(t *testing.T) {
 	if err != nil || len(dc.Groups) != 2 {
 		t.Fatalf("not saved: %v", err)
 	}
-	cfgText, isErr := call("get_config", `{}`)
-	if isErr || strings.Contains(cfgText, "gateway-secret") || !strings.Contains(cfgText, `"key":"(hidden)"`) {
-		t.Fatalf("get_config: %s", cfgText)
-	}
-	if txt, isErr := call("api_get", `{"path":"/api/config"}`); isErr || strings.Contains(txt, "gateway-secret") {
-		t.Fatalf("api_get /api/config: %s", txt)
-	}
-	for _, p := range []string{"/api/versions/get?id=1", "/api/versions/diff?a=1&b=2", "/api/versions/download"} {
-		if txt, isErr := call("api_get", `{"path":"`+p+`"}`); !isErr || !strings.Contains(txt, "not available over MCP") {
-			t.Fatalf("%s: %s", p, txt)
+	for _, name := range []string{"get_config", "api_get"} {
+		if _, m := post(mcpCall(name, `{"path":"/api/config"}`)); m["error"] == nil {
+			t.Fatalf("%s still answers: %v", name, m)
 		}
+	}
+	list, _ := call("list_devices", `{}`)
+	if strings.Contains(list, "gateway-secret") {
+		t.Fatalf("list_devices: %s", list)
 	}
 	// and nothing sent over MCP can change the configuration, the secrets included
 	for _, name := range []string{"edit_config", "api_request"} {

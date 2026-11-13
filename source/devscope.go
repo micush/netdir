@@ -220,8 +220,8 @@ func scopeOf(s *session) *devScope {
 	return s.devs
 }
 
-// scopedOffTools are the tools a caller limited to some devices is not offered: they read or change the whole configuration or any API route.
-var scopedOffTools = map[string]bool{"get_config": true, "device_troubleshoot_user": true}
+// scopedOffTools are the tools a caller limited to some devices is not offered: it reaches every device and the signed-in users.
+var scopedOffTools = map[string]bool{"device_troubleshoot_user": true}
 
 // scopeRefusedPrefixes are the API routes a limited caller may not use: they hold the whole inventory or the keys.
 var scopeRefusedPrefixes = []string{"/api/config", "/api/versions", "/api/canvas/edit", "/api/devices/troubleshoot", "/api/devices/signin"}

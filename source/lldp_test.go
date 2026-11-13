@@ -199,13 +199,8 @@ func TestLLDPOverTheAPIAndMCP(t *testing.T) {
 	f := newLLDPFake(t)
 	f.cli, _ = os.ReadFile("testdata/lldp_neighbors_json0.json")
 	e, post := mcpEnv(t, "127.0.0.1 rw")
-	call := func(name, args string) (string, bool) {
-		t.Helper()
-		_, m := post(mcpCall(name, args))
-		return toolResult(t, m)
-	}
-	if txt, isErr := call("get_lldp", `{}`); isErr || !strings.Contains(txt, `"enabled":false`) || !strings.Contains(txt, `"neighbors":[]`) {
-		t.Fatalf("off: %s", txt)
+	if _, m := post(mcpCall("get_lldp", `{}`)); m["error"] == nil {
+		t.Fatalf("get_lldp is not an MCP tool any more: %v", m)
 	}
 	if err := e.mg.LLDPSet(true, "test"); err != nil {
 		t.Fatal(err)
@@ -214,11 +209,8 @@ func TestLLDPOverTheAPIAndMCP(t *testing.T) {
 		t.Fatalf("not saved: %v", err)
 	}
 	f.active = true
-	if txt, isErr := call("get_lldp", `{}`); isErr || !strings.Contains(txt, `"enabled":true`) || !strings.Contains(txt, `"system_name":"core-a"`) {
-		t.Fatalf("on: %s", txt)
-	}
-	if txt, isErr := call("api_get", `{"path":"/api/lldp"}`); isErr || !strings.Contains(txt, `"port_descr":"GigabitEthernet1/0/7"`) {
-		t.Fatalf("api_get: %s", txt)
+	if _, m := post(mcpCall("api_get", `{"path":"/api/lldp"}`)); m["error"] == nil {
+		t.Fatalf("api_get is not an MCP tool any more: %v", m)
 	}
 	// the Settings page saves it with the rest of the ntp block
 	guiEditConfig(t, e, `{"settings":{"lldp":false}}`)

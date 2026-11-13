@@ -81,9 +81,8 @@ func TestMCPMasksPublicAddresses(t *testing.T) {
 	if strings.Contains(txt, "8.8.8.8") || !strings.Contains(txt, "x.x.x.x") {
 		t.Errorf("list_devices: %s", txt)
 	}
-	_, m = post2(mcpCall("get_config", `{}`))
-	if txt, _ = toolResult(t, m); strings.Contains(txt, "8.8.8.8") {
-		t.Errorf("get_config: %s", txt)
+	if _, m = post2(mcpCall("get_config", `{}`)); m["error"] == nil {
+		t.Errorf("get_config answered: %v", m)
 	}
 }
 

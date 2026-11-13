@@ -65,7 +65,7 @@ func TestMCPDeviceTools(t *testing.T) {
 	if !strings.Contains(names, "device_config") {
 		t.Error("device_config is not an MCP tool")
 	}
-	for _, c := range []string{mcpCall("device_config", `{"target":"sw1"}`), mcpCall("api_get", `{"path":"/api/devices/query?target=sw1&op=config"}`)} {
+	for _, c := range []string{mcpCall("device_config", `{"target":"sw1"}`)} {
 		_, m = post(c)
 		if txt, isErr = toolResult(t, m); isErr || strings.Contains(txt, "$9$xyz") || !strings.Contains(txt, "(hidden)") || !strings.Contains(txt, "enable") {
 			t.Errorf("config, read-only: %s", txt)
@@ -81,10 +81,10 @@ func TestMCPDeviceTools(t *testing.T) {
 	if _, isErr = toolResult(t, m); !isErr {
 		t.Error("an unknown target was not refused")
 	}
-	// the credentials never reach the caller through the configuration either
+	// there is no tool that reads netdir's own configuration, so the credentials cannot reach the caller that way
 	_, m = post(mcpCall("get_config", `{}`))
-	if txt, _ = toolResult(t, m); strings.Contains(txt, "sw-secret-pw") {
-		t.Error("get_config showed a device password")
+	if m["error"] == nil {
+		t.Error("get_config answered")
 	}
 }
 
@@ -96,15 +96,16 @@ func TestMCPNeverGetsDeviceSecrets(t *testing.T) {
 		t.Errorf("device_config, read-write: %s", txt)
 	}
 	for _, path := range []string{
-		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native",
-		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native/snmp-server",
-		"/api/devices/query?target=sw1&op=api&path=/restconf/data/Cisco-IOS-XE-native:native/username"} {
-		_, m := post(mcpCall("api_get", `{"path":"`+path+`"}`))
-		if txt, isErr := toolResult(t, m); !isErr && !strings.Contains(txt, `"ok": false`) && !strings.Contains(txt, `"ok":false`) {
-			t.Errorf("%s was answered: %s", path, txt)
+		"/restconf/data/Cisco-IOS-XE-native:native",
+		"/restconf/data/Cisco-IOS-XE-native:native/snmp-server",
+		"/restconf/data/Cisco-IOS-XE-native:native/username"} {
+		_, m := post(mcpCall("device_api_get", `{"target":"sw1","path":"`+path+`"}`))
+		if txt, _ := toolResult(t, m); strings.Contains(txt, "$9$xyz") || strings.Contains(txt, "sw-secret-pw") {
+			t.Errorf("%s gave a secret: %s", path, txt)
 		}
 	}
-	_, m := post(mcpCall("api_get", `{"path":"/api/devices/query?target=sw1&op=config","node":"somenode"}`))
+	// a device query cannot be sent through another node
+	_, m := post(mcpCall("device_config", `{"target":"sw1","node":"somenode"}`))
 	if _, isErr := toolResult(t, m); !isErr {
 		t.Error("a device query went through another node")
 	}
@@ -246,8 +247,8 @@ func TestMCPPrivacyNoneGivesDeviceAnswersAsTheyAre(t *testing.T) {
 		t.Errorf("device_config at none: %s", txt)
 	}
 	_, m = post(mcpCall("get_config", `{}`))
-	if txt, _ := toolResult(t, m); strings.Contains(txt, "sw-secret-pw") {
-		t.Error("get_config showed a device login at none")
+	if m["error"] == nil {
+		t.Error("get_config answered at none")
 	}
 	_, m = post(mcpCall("list_devices", `{}`))
 	if txt, _ := toolResult(t, m); strings.Contains(txt, "sw-secret-pw") {

@@ -162,22 +162,18 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	// the tools and routes that hold every device and every key are not for it
 	_, m := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, auth(k1)...)
 	have := strings.Join(toolNames(t, m), ",")
-	for _, gone := range []string{"get_config", "device_troubleshoot_user"} {
+	for _, gone := range []string{"device_troubleshoot_user"} {
 		if strings.Contains(have, gone) {
 			t.Errorf("%s is offered to a limited key", gone)
 		}
 	}
-	if _, m := post(mcpCall("get_config", `{}`), auth(k1)...); m["error"] == nil {
-		t.Errorf("get_config was called: %v", m)
+	if _, m := post(mcpCall("device_troubleshoot_user", `{}`), auth(k1)...); m["error"] == nil {
+		t.Errorf("device_troubleshoot_user was called: %v", m)
 	}
-	for _, path := range []string{"/api/config", "/api/versions", "/api/proxy?node=x&path=/api/config"} {
-		if txt, isErr := call(k1, "api_get", `{"path":"`+path+`"}`); !isErr || strings.Contains(txt, "mcp_keys") {
-			t.Errorf("%s: %v %s", path, isErr, txt)
-		}
-	}
+	requireGateTools(t, post, auth(k1)...)
 	// the key with no limit has all of it
 	_, m = post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, auth(k4)...)
-	if have = strings.Join(toolNames(t, m), ","); !strings.Contains(have, "get_config") || !strings.Contains(have, "device_troubleshoot_user") {
+	if have = strings.Join(toolNames(t, m), ","); !strings.Contains(have, "device_troubleshoot_user") {
 		t.Errorf("an unlimited key lost tools: %s", have)
 	}
 	// a source with its own limit narrows a key that has none: the stricter wins
@@ -249,9 +245,9 @@ func TestMCPGatewaysFollowTheScope(t *testing.T) {
 	for _, tc := range []struct {
 		key  string
 		tool string
-		want bool // gateway 7 is shown (get_gateways lists what the cluster reports, and a test cluster reports none)
+		want bool // gateway 7 is shown
 		not8 bool
-	}{{k1, "get_topology", true, true}, {k1, "get_gateways", false, true}, {k2, "get_topology", false, true}, {k2, "get_gateways", false, true}} {
+	}{{k1, "get_topology", true, true}, {k2, "get_topology", false, true}} {
 		_, m := post(mcpCall(tc.tool, `{}`), "Authorization", "Bearer "+tc.key)
 		txt, isErr := toolResult(t, m)
 		if isErr {

@@ -73,7 +73,7 @@ func TestMCPKeyOpensFromAnyAddress(t *testing.T) {
 	}
 	// read-only key: the read tools only, and a write is refused
 	code, m := post(list, "Authorization", "Bearer "+roKey)
-	if code != 200 || containsStr(toolNames(t, m), "device_change") || !containsStr(toolNames(t, m), "get_config") {
+	if code != 200 || containsStr(toolNames(t, m), "device_change") || !containsStr(toolNames(t, m), "list_devices") {
 		t.Fatalf("ro key: %d %v", code, m)
 	}
 	// read-write key: the device tools that change, and still nothing that edits netdir
@@ -111,9 +111,12 @@ func TestMCPKeyIsKeptAndHidden(t *testing.T) {
 		t.Error("the key is not kept in the configuration, so it could not be shown again")
 	}
 	// but no MCP caller is shown it, and neither is a read-only account
-	_, m = post(mcpCall("get_config", `{}`))
+	_, m = post(mcpCall("list_devices", `{}`))
 	if txt, _ := toolResult(t, m); strings.Contains(txt, k) {
-		t.Fatalf("get_config shows the key: %s", txt)
+		t.Fatalf("list_devices shows the key: %s", txt)
+	}
+	if _, m = post(mcpCall("get_config", `{}`)); m["error"] == nil {
+		t.Fatalf("get_config answered: %v", m)
 	}
 	// and it opens the endpoint, once the daemon has the configuration
 	sup := e.ws.status.sup
