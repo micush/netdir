@@ -21,7 +21,7 @@ type Skipped struct {
 }
 
 // ImportSources are the platforms a device can be imported from.
-var ImportSources = map[string]bool{"observium": true, "ipfabric": true, "centreon": true, "panorama": true, "pdm": true, "afc": true, "unimus": true}
+var ImportSources = map[string]bool{"observium": true, "ipfabric": true, "centreon": true, "panorama": true, "pdm": true, "afc": true, "unimus": true, "device42": true}
 
 // impRow is one device as a source describes it.
 type impRow struct {
@@ -83,6 +83,8 @@ func ImportDevices(ctx context.Context, d Device, c Credential, existing []Devic
 		rows, err = afcImportRead(ctx, d, c)
 	case "unimus":
 		rows, err = uniImportRead(ctx, d, c)
+	case "device42":
+		rows, err = d42ImportRead(ctx, d, c)
 	default:
 		return nil, nil, fmt.Errorf("device %s: devices are imported from Observium, IP Fabric and Centreon, not %s", d.Name, d.Platform)
 	}

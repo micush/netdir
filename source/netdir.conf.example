@@ -35,6 +35,8 @@
       {"name": "vcenter", "platform": "vcenter", "address": "10.0.0.30", "credential": "vcenterlogin", "insecure": true, "tags": ["role=virtualization"]},
       {"name": "ns1", "platform": "nsone", "address": "api.nsone.net", "credential": "ns1key", "tags": ["role=dns"]},
       {"name": "rcode0", "platform": "rcode0", "address": "my.rcodezero.at", "credential": "rc0token", "tags": ["role=dns"]},
+      {"name": "d42", "platform": "device42", "address": "10.0.0.20", "credential": "d42ro", "insecure": true, "options": {"content_log": "on", "content_log_mb": "50"}},
+      {"name": "smax", "platform": "smax", "address": "tenant.saas.microfocus.com", "credential": "smaxuser", "options": {"tenant": "123456789"}},
       {"name": "centreon", "platform": "centreon", "address": "10.0.0.18", "credential": "centkey", "insecure": true, "tags": ["site=home", "role=monitor"]},
       {"name": "mx204", "platform": "junos", "address": "10.0.0.19", "credential": "lab", "insecure": true, "tags": ["site=home", "role=router"]},
       {"name": "observium", "platform": "observium", "address": "10.0.0.15", "credential": "obskey", "insecure": true, "tags": ["site=home", "role=monitor"]},
