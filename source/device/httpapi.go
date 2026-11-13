@@ -26,7 +26,6 @@ type apiClient struct {
 	base string // "https://host:port"
 	hc   *http.Client
 	hdr  http.Header // sent with every request
-	clog *contentLog // the content log of the device (contentlog.go); nil when it is off
 }
 
 func newAPIClient(d Device, defPort int) (*apiClient, error) {
@@ -48,8 +47,7 @@ func newAPIClient(d Device, defPort int) (*apiClient, error) {
 		base: "https://" + hostPort(d, defPort),
 		hc: &http.Client{Transport: tr, Jar: jar,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		hdr:  http.Header{},
-		clog: contentLogFor(d),
+		hdr: http.Header{},
 	}, nil
 }
 
@@ -72,34 +70,9 @@ func (e *statusError) Error() string {
 
 // do sends one request and returns the body of a 2xx answer.  body is sent as is when it is []byte or string, else as
 // JSON.
+// do sends one request and returns the body of a 2xx answer.  body is sent as is when it is []byte or string, else as
+// JSON.
 func (c *apiClient) do(ctx context.Context, method, path string, body any, hdr http.Header) ([]byte, error) {
-	if c.clog == nil {
-		out, _, err := c.send(ctx, method, path, body, hdr)
-		return out, err
-	}
-	start := time.Now()
-	out, st, err := c.send(ctx, method, path, body, hdr)
-	var req []byte
-	switch b := body.(type) {
-	case nil:
-	case []byte:
-		req = b
-	case string:
-		req = []byte(b)
-	default:
-		req, _ = json.Marshal(b)
-	}
-	reply := out
-	var se *statusError
-	if errors.As(err, &se) {
-		st, reply = se.Code, []byte(se.Body)
-	}
-	c.clog.record(start, method, path, req, st, reply, err)
-	return out, err
-}
-
-// send is do without the content log: the answer, its HTTP status (0 when there was none) and the error.
-func (c *apiClient) send(ctx context.Context, method, path string, body any, hdr http.Header) ([]byte, int, error) {
 	var rd io.Reader
 	ct := ""
 	switch b := body.(type) {
@@ -111,25 +84,25 @@ func (c *apiClient) send(ctx context.Context, method, path string, body any, hdr
 	default:
 		j, err := json.Marshal(b)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		rd, ct = bytes.NewReader(j), "application/json"
 	}
 	// The request goes to the device's own address (c.base) whatever the path is: the path and the query are put into the
 	// request's URL as such, never joined to the address as text (a path such as "@other.example/x" cannot change the host).
 	if path != "" && path[0] != '/' {
-		return nil, 0, fmt.Errorf("the path of a request to the device starts with /, not %q", path)
+		return nil, fmt.Errorf("the path of a request to the device starts with /, not %q", path)
 	}
 	p, q, _ := strings.Cut(path, "?")
 	p, _, _ = strings.Cut(p, "#")
 	q, _, _ = strings.Cut(q, "#")
 	dec, err := url.PathUnescape(p)
 	if err != nil {
-		return nil, 0, fmt.Errorf("the path of a request to the device is not valid: %v", err)
+		return nil, fmt.Errorf("the path of a request to the device is not valid: %v", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base, rd)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	req.URL.Path, req.URL.RawPath, req.URL.RawQuery = dec, p, q
 	for k, v := range c.hdr {
@@ -146,20 +119,20 @@ func (c *apiClient) send(ctx context.Context, method, path string, body any, hdr
 	}
 	res, err := c.hc.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer res.Body.Close()
 	out, err := io.ReadAll(io.LimitReader(res.Body, maxAnswer+1))
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if len(out) > maxAnswer {
-		return nil, 0, errors.New("the device's answer is larger than 32 MB")
+		return nil, errors.New("the device's answer is larger than 32 MB")
 	}
 	if res.StatusCode < 200 || res.StatusCode > 299 {
-		return nil, res.StatusCode, &statusError{res.StatusCode, string(out)}
+		return nil, &statusError{res.StatusCode, string(out)}
 	}
-	return out, res.StatusCode, nil
+	return out, nil
 }
 
 func (c *apiClient) getJSON(ctx context.Context, path string, v any) error {

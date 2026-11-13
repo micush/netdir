@@ -388,13 +388,23 @@ type mcpResp struct {
 	Error   *mcpErr         `json:"error,omitempty"`
 }
 
-func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
+func (w *WebServer) handleMCP(rw0 http.ResponseWriter, r *http.Request) {
+	rw := rw0
+	lq := &mcpLogReq{from: r.RemoteAddr}
+	if cfg := w.status.sup.config(); cfg != nil && cfg.Settings.MCPLog { // the content log (contentlog.go): all that comes in and goes out
+		_, kb := cfg.Settings.mcpLogLimits()
+		cp := &mcpCapture{ResponseWriter: rw0, limit: kb << 10}
+		rw = cp
+		started, set := time.Now(), cfg.Settings
+		defer func() { cp.record(set, r, started, lq) }()
+	}
 	ap, err := netip.ParseAddrPort(r.RemoteAddr)
 	if err != nil {
 		http.NotFound(rw, r)
 		return
 	}
 	from := ap.Addr().Unmap().String()
+	lq.from = from
 	access, alevel := w.status.sup.mcpAccessLevel(ap.Addr())
 	who, level := from, alevel
 	var keyDevs []string // the devices the key may use (nil: all)
@@ -422,6 +432,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		level = strictestLevel(level, mcpKeyPrivacy(w.status.sup.mcpKeys(), name))
 		keyDevs = mcpKeyDevices(w.status.sup.mcpKeys(), name)
 	}
+	lq.who, lq.access = who, access
 	devs := newDevScope(w.status.sup.mcpSourceDevices(ap.Addr()), keyDevs) // the devices this caller may use (devscope.go)
 	devs.bind(w.status.sup.config)
 	if access == "" {
@@ -449,6 +460,7 @@ func (w *WebServer) handleMCP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body = bytes.TrimSpace(body)
+	lq.body = body
 	if len(body) > 0 && body[0] == '[' { // a batch (protocol 2025-03-26)
 		var reqs []mcpReq
 		if json.Unmarshal(body, &reqs) != nil {

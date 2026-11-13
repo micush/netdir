@@ -481,17 +481,17 @@ Service Management Automation X, the service desk behind the Anywhere Service Po
 
 The property names are the tenant's own and can be customized; SMAX refuses a layout with a name it does not know (HTTP 400), and the driver then asks again with a short layout. Secrets found by name in an answer are hidden. Written against the documentation only; never run against a real tenant. SMAX holds tickets, not network devices, so there is no import.
 
-### The content log
+### The MCP content log
 
-Any REST device can log every request sent to it and every reply, for troubleshooting or an audit of what an assistant did. It is **off** unless the device's options say so (Configure ▸ Devices ▸ options):
+Everything that goes into the MCP endpoint and everything that comes out of it can be written to one log: **Configure ▸ MCP ▸ Content log** (or `settings.mcp_log` in the configuration). It is **off** by default. It is one log for the whole endpoint, not one per device.
 
-| Option | Meaning |
+| Setting | Meaning |
 |---|---|
-| `content_log` | `on` or `off` (default `off`). Turn it off again and writing stops; the files stay until you delete them. |
-| `content_log_mb` | The most disk this device's log may use, 1 to 1000 MB (default 20). At half of it the file becomes `NAME.log.1` and the older `.log.1` is deleted, so the oldest entries go first. |
-| `content_log_entry_kb` | The most of one request body or one reply that is written, 1 to 1024 KB (default 64); the rest is cut and the cut is marked. |
+| `mcp_log` | `true` or `false` (default `false`). Turn it off and writing stops; the files stay until you delete them. |
+| `mcp_log_mb` | The most disk the log may use, 1 to 1000 MB (default 50). At half of it the file becomes `mcp-content.log.1` and the older `.1` is deleted, so the oldest entries go first. |
+| `mcp_log_entry_kb` | The most of one request, and of one reply, that is written, 1 to 8192 KB (default 256); the rest is cut and the line's `note` says how much. |
 
-The log is `<state dir>/content/NAME.log`, one JSON line per request: `t`, `device`, `method`, `path` (with its query), `status`, `ms`, `request`, `reply` and `error`. Read it with `tail -f` or `jq`. The headers are never logged (no password, token or session cookie), and the bodies of anything that signs in or out are replaced by `(not logged: sign-in)`. JSON bodies have secrets hidden by name and are written again compactly. Everything else is as the device sent it, **not masked by the privacy level**, so the file is mode 0600 in a 0700 directory and is for the person who runs the gateway. Only the REST drivers are logged (not SNMP or LDAP), the log is not part of a backup, and it is not shared across a cluster: each node logs the requests it sent.
+The log is `mcp-content.log` in each node's state directory, one JSON line per HTTP request: `t`, `from` (the caller's address), `who` (key name and address), `access` (`ro` or `rw`), `method`, `status`, `ms`, `request` (the JSON-RPC message as sent) and `reply` (the answer as sent). Both are embedded as JSON, so `jq` reads into them: `jq 'select(.request.params.name=="device_change_raw")' mcp-content.log`. The reply is written **exactly as the caller got it**, so it is already masked to that caller's privacy level; a secret in a request (a password in a change) is hidden by name; the `Authorization` header and so any key is never written. A request that is refused (no key, an address that is not allowed) is logged too, with its status and reply but no request. The file is mode 0600 and holds what callers asked and were told, so it is for the person who runs the gateway. Each node writes its own file: the log is not shared across a cluster and is not part of a backup.
 
 ### How often the devices are looked at
 

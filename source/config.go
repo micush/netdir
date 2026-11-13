@@ -468,6 +468,12 @@ type Settings struct {
 	// MCPMaxResultMB is the most one MCP answer may be, in megabytes (1 to 8; 0 is the default, 1).  A longer answer is cut.  It is
 	// capped at what the cluster relay carries between nodes.
 	MCPMaxResultMB int `json:"mcp_max_result_mb,omitempty"`
+	// MCPLog turns on the content log of the MCP endpoint (contentlog.go): everything that goes in and out, one JSON line per request,
+	// in the state directory of each node.  MCPLogMB is the most disk it may use (1 to 1000; 0 is the default, 50) and MCPLogEntryKB the
+	// most of one request or reply that is written (1 to 8192; 0 is the default, 256).
+	MCPLog        bool `json:"mcp_log,omitempty"`
+	MCPLogMB      int  `json:"mcp_log_mb,omitempty"`
+	MCPLogEntryKB int  `json:"mcp_log_entry_kb,omitempty"`
 	// DeviceCheckSec and DeviceFactsMin are how often each node looks at the devices while nobody is looking at them (device.Monitor):
 	// a TCP connect every DeviceCheckSec seconds (30 to 3600; 0 is the default, 180) and the facts every DeviceFactsMin minutes (5 to
 	// 1440; 0 is the default, 360).  While someone has the Devices or Topology page open, or asks a device over MCP, it is every 30 s
@@ -719,6 +725,18 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if dc.Settings.MCPMaxResultMB == 1 {
 			dc.Settings.MCPMaxResultMB = 0 // the default is not written
+		}
+		if n := dc.Settings.MCPLogMB; n < 0 || n > mcpLogMaxMB {
+			return fmt.Errorf("mcp: the content log may use 1 to %d MB", mcpLogMaxMB)
+		}
+		if n := dc.Settings.MCPLogEntryKB; n < 0 || n > mcpLogMaxKB {
+			return fmt.Errorf("mcp: one logged request or reply may be 1 to %d KB", mcpLogMaxKB)
+		}
+		if dc.Settings.MCPLogMB == mcpLogDefaultMB {
+			dc.Settings.MCPLogMB = 0 // the default is not written
+		}
+		if dc.Settings.MCPLogEntryKB == mcpLogDefaultKB {
+			dc.Settings.MCPLogEntryKB = 0
 		}
 		if p := dc.Settings.MCPPort; p < 0 || p > 65535 {
 			return errors.New("mcp: the port must be 1-65535")
