@@ -1,5 +1,16 @@
 # Changelog
 
+## [v155] - 2026-11-13 — Version bump to test the primary role returning home
+
+### Changed
+- Nothing but `VERSION`: a higher version to push through a cluster update, to check that the primary role goes back to the node that had it (v154).
+
+### Verified
+- `go build`, `go vet ./...`, `TestVersionIsPlainInteger` and the primary-return tests; gofmt clean.
+
+### Not verified
+- The return itself on real daemons: that is what this version is for.
+
 ## [v154] - 2026-11-13 — After a cluster update the primary role is back where it was
 
 ### Changed
