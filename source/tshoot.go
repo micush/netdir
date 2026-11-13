@@ -291,6 +291,18 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		b.putText("netdir/log.txt", sb.String())
 	})
 
+	do(func() { // what callers asked the MCP endpoint and were told (contentlog.go): the newest entries, cleaned
+		on := false
+		if dc, _, err := m.LiveConfig(); err == nil {
+			on = dc.Settings.MCPLog
+		}
+		data, n := tshootContentLog(m.stateDir, on)
+		b.mu.Lock()
+		b.removed += n
+		b.mu.Unlock()
+		b.put("netdir/mcp-content.log", data)
+	})
+
 	// the machine
 	do(func() {
 		var sb strings.Builder
@@ -421,7 +433,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	files := b.files
 	b.mu.Unlock()
 
-	// the peer channel carries only so much: a log that is too long loses its oldest lines
+	// the peer channel carries only so much: the larger of the log and the content log loses its oldest half until it fits
 	for {
 		tgz, err := tarFiles(files, "")
 		if err != nil {
@@ -430,11 +442,19 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		if len(tgz) <= tshootNodeMax {
 			return tgz, nil
 		}
-		lg := files["netdir/log.txt"]
-		if len(lg) < 64<<10 {
+		name := "netdir/log.txt"
+		if len(files["netdir/mcp-content.log"]) > len(files[name]) {
+			name = "netdir/mcp-content.log"
+		}
+		cur := files[name]
+		if len(cur) < 64<<10 {
 			return nil, fmt.Errorf("the bundle is %d bytes, more than the %d the cluster channel carries", len(tgz), tshootNodeMax)
 		}
-		files["netdir/log.txt"] = append([]byte("(older lines cut to fit)\n"), lg[len(lg)/2:]...)
+		if name == "netdir/log.txt" {
+			files[name] = append([]byte("(older lines cut to fit)\n"), cur[len(cur)/2:]...)
+		} else {
+			files[name] = tshootHalve(cur)
+		}
 	}
 }
 

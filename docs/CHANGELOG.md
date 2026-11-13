@@ -1,5 +1,19 @@
 # Changelog
 
+## [v150] - 2026-11-13 — The troubleshooting bundle includes the MCP content log
+
+### Added
+- `netdir --tshoot` and the Node menu's tshoot download now always include the MCP content log of each node as `netdir/mcp-content.log` (`tshootcontent.go`): the newest entries of `mcp-content.log` and `mcp-content.log.1`, up to 4 MB, oldest first, whole lines only. Requests and replies are in it as the callers were given them (secrets hidden and the caller's privacy level applied by the endpoint); the bundle then removes secrets again over every key (`redactJSON`) and every string, including the text of a reply (`redactText`), and counts them in the README's "secrets were removed" line. A note line says when the log is off or has no entries yet; entries kept from before it was turned off are still included. There is no switch: it is always in.
+- When the bundle is still too large for the cluster channel (3 MB compressed per node), the larger of `netdir/log.txt` and `netdir/mcp-content.log` loses its older half, until it fits; the content log then starts with a line that says older entries were cut.
+- `webui/help.js` (the tshoot topic), `netdir --help` and the README say so.
+
+### Verified
+- `gofmt -l .` (nothing), `go vet ./...`, `go test -race -count=1 ./...` (all packages pass, with the PAM headers), `CGO_ENABLED=0 go vet ./...`, `sh tools/leaktest.sh`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386` and `riscv64`. New tests in `tshootcontent_test.go`: secrets in keys, in nested replies and in non-JSON lines are removed while the rest stays; the off, empty and old-entries states; the newest entries are kept within the cap and no line is cut in the middle; halving; and a real `TshootNode` bundle that holds the log and lists it in its README.
+- A live run: the daemon built with PAM, a request to `/mcp` with a key and a `password` argument, then `netdir --tshoot --tshoot-file`: the bundle held `netdir/mcp-content.log` with the request and reply and neither the password nor the key.
+
+### Not verified
+- A cluster of several nodes (each node's own log in its own folder) was not run live; the cluster bundle test covers the folder per node for the other files. The size cut was tested on the helper, not with a real 3 MB bundle. `device42` was confirmed against a real server by the owner; `smax` has not been run against a real tenant.
+
 ## [v149] - 2026-11-13 — MCP page text fixed, the content log's path is stated, and the checks the process asks for were run
 
 ### Fixed

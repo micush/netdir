@@ -88,7 +88,7 @@ the web GUI):
                                          by every running node while it is serving, for BGP or OSPF; - clears)
                                         [--real-macs on|off]   (run without virtual MACs on every node)
                    --tshoot [--all-nodes] [--tshoot-file F.tgz]
-                                         (a troubleshooting bundle for support: logs, configuration, gateway, BGP and
+                                         (a troubleshooting bundle for support: logs, the MCP content log, configuration, gateway, BGP and
                                          anycast state, addresses, routes, neighbors, firewall, FRR, service status, host
                                          numbers, 8 s of ARP / neighbor-discovery traffic per gateway interface, a goroutine dump — of
                                          this node, or of every node with --all-nodes. Passwords, the gateway key, tokens
