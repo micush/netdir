@@ -235,7 +235,7 @@ func (m *director) Resources(ctx context.Context) (Resources, error) {
 // ---- show <name>: the director's read tools ----
 
 var directorShow = map[string]string{
-	"nodes": "list_nodes", "topology": "get_topology", "gateways": "get_gateways", "alerts": "get_alerts", "log": "get_log",
+	"nodes": "list_nodes", "topology": "get_topology", "gateways": "get_gateways", "alerts": "get_alerts",
 	"query-stats": "get_query_stats", "host-stats": "get_host_stats", "server-stats": "get_server_stats", "schedule": "get_schedule",
 	"updates": "get_updates", "node-status": "get_node_status", "lldp": "get_lldp",
 	"dns": "get_dns", "ntp": "get_ntp", "time": "get_time", "devices": "list_devices",
@@ -260,7 +260,7 @@ func hasTool(kind, tool string) bool {
 var directorShowArgs = map[string]string{"node": "s", "range": "s", "top": "i", "gateway": "i", "transport": "s", "lines": "i", "level": "s"}
 
 // Show takes "show NAME [key=value ...]": NAME is one of the director's read tools without its get_ (show nodes, show topology,
-// show gateways, show alerts, show log, show query-stats, show host-stats, show server-stats, show schedule, show updates,
+// show gateways, show alerts, show query-stats, show host-stats, show server-stats, show schedule, show updates,
 // show node-status, show lldp, and show dns, show time, show ntp or show devices for the product that has them), and the keys node, range,
 // top, gateway, transport, lines and level are the tool's arguments.
 func (m *director) Show(ctx context.Context, cmd string) (string, error) {

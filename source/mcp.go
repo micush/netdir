@@ -647,9 +647,9 @@ func (w *WebServer) mcpOne(ctx context.Context, q mcpReq, access, from, who, lev
 		var b []byte
 		if raw && strings.HasPrefix(tool.name, "device_") { // what a device says; netdir's own settings (get_config, api_get) stay hidden
 			infof("mcp: %s was given %s unfiltered (privacy none)", who, tool.name)
-			b, _ = json.Marshal(v)
+			b, _ = json.Marshal(mcpDropAccounts(mcpAsAny(v)))
 		} else {
-			b, _ = json.Marshal(mcpRedact(v)) // no caller is shown a secret, rw included (mcpsecrets.go)
+			b, _ = json.Marshal(mcpDropAccounts(mcpRedact(v))) // no caller is shown a secret, rw included (mcpsecrets.go)
 		}
 		text := string(mask.json(b)) // nor what the caller's privacy level hides: public addresses and AS numbers, e-mail addresses, serial numbers ... (mcpmask.go)
 		if limit := w.status.sup.mcpResultLimit(); len(text) > limit {
@@ -819,6 +819,9 @@ func mcpWriteGuard(method, path string) error {
 	}
 	if u, err := url.Parse(p); err == nil {
 		p = u.Path
+	}
+	if mcpRouteBarred(p) {
+		return errors.New("logs, accounts and keys are not available over MCP: use the GUI")
 	}
 	if method == "GET" || method == "" {
 		return nil
@@ -1039,31 +1042,6 @@ func init() {
 				}
 				return map[string]any{"alerts": l}, err
 			}},
-		{name: "get_log", title: "Log",
-			desc: "The daemon's log of a node, newest last, filtered by level, words (a line must contain every word; OR between words for either) and time.",
-			props: []mcpProp{{name: "level", typ: "string", desc: "Lowest level shown.", enum: []string{"debug", "info", "warn", "error"}},
-				{name: "words", typ: "string", desc: "Words every line must contain, e.g. \"10.0.0.5 down\"."},
-				{name: "since", typ: "string", desc: "15m, 1h (default), 6h, 1d, 7d or all."},
-				{name: "lines", typ: "integer", desc: "At most this many lines, newest kept (default 200, at most 2000)."}},
-			run: func(c *mcpCtx) (any, error) {
-				n := c.num("lines", 200)
-				if n < 1 || n > 2000 {
-					n = 2000
-				}
-				since := firstNonEmpty(c.str("since"), "1h")
-				q := url.Values{"level": {c.str("level")}, "q": {c.str("words")}, "since": {since}, "n": {strconv.Itoa(n)}}
-				b, err := c.get("/api/log?" + q.Encode())
-				if err != nil {
-					return nil, err
-				}
-				var r LogResult
-				_ = json.Unmarshal(b, &r)
-				lines := make([]string, 0, len(r.Lines))
-				for _, l := range r.Lines {
-					lines = append(lines, l.Raw)
-				}
-				return map[string]any{"matched": r.Matched, "truncated": r.Truncated, "oldest": r.Oldest, "lines": lines}, nil
-			}},
 		{name: "get_lldp", title: "LLDP neighbors",
 			desc: "Neighbor discovery on a node: whether LLDP is on (a shared setting), whether lldpd runs and who manages it, and for each interface the switch it is plugged into (name, port, VLANs, management address, how long ago it was heard).",
 			run:  func(c *mcpCtx) (any, error) { b, err := c.get("/api/lldp"); return asAny(b), err }},
@@ -1151,7 +1129,15 @@ func init() {
 		mcpDeviceChangeTool(), mcpDeviceRawTool(), mcpDeviceCaptureTool(), mcpDeviceTroubleshootTool(),
 		{name: "list_api", title: "The GUI's API", noNode: true,
 			desc: "Every route of the GUI's API (method, path, query parameters), for api_get. Answers are {ok, data} or {ok:false, error}.",
-			run:  func(c *mcpCtx) (any, error) { return mcpRoutes, nil }},
+			run: func(c *mcpCtx) (any, error) {
+				var out []apiRoute
+				for _, r := range mcpRoutes {
+					if !mcpRouteBarred(r.Path) {
+						out = append(out, r)
+					}
+				}
+				return out, nil
+			}},
 		{name: "api_get", title: "Read any API route",
 			desc:  "GET any route of the GUI's API (list_api) on a node, e.g. /api/config, /api/versions, /api/cluster, /api/users, /api/bgp. Query parameters go in the path.",
 			props: []mcpProp{{name: "path", typ: "string", required: true, desc: "The path, e.g. /api/devices/query?target=all&op=facts."}},

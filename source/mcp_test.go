@@ -99,7 +99,7 @@ func TestMCPReadOnly(t *testing.T) {
 	}
 	_, m = post(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	names := strings.Join(toolNames(t, m), " ")
-	if !strings.Contains(names, "get_log") || !strings.Contains(names, "api_get") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") || strings.Contains(names, "api_request") || strings.Contains(names, "edit_config") {
+	if !strings.Contains(names, "api_get") || strings.Contains(names, "set_node_paused") || strings.Contains(names, "schedule_set") || strings.Contains(names, "api_request") || strings.Contains(names, "edit_config") {
 		t.Fatalf("read-only tools: %s", names)
 	}
 	if txt, isErr := toolResult(t, func() map[string]any { _, m := post(mcpCall("list_nodes", `{}`)); return m }()); isErr || !strings.Contains(txt, `"this_node":true`) {

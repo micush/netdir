@@ -1,5 +1,16 @@
 # Changelog
 
+## [v151] - 2026-11-13 — An MCP caller cannot read logs, accounts or keys
+
+### Changed
+- MCP callers (any key or allowed source, read-only or rw) can no longer read log content: the `get_log` tool is gone, and `api_get` refuses `/api/log`, `/api/tshoot/*` (the troubleshooting bundle, which holds the MCP content log), `/api/users*`, `/api/backup*`, `/api/mcpusage` and `/api/cluster/token*` (`mcpbar.go`, checked in `mcpWriteGuard`, so also through `/api/proxy`). `list_api` no longer lists them.
+- `get_config` and `api_get /api/config` leave out the MCP keys and allowed sources, the login groups and the LDAP and SSO settings (`mcpDropAccounts`).
+- A netdir, DNS or NTP Director device no longer answers `show log`.
+- The GUI and CLI are unchanged: a signed-in administrator keeps every one of these.
+
+### Verified
+- `mcpbar_test.go`: tools/list without `get_log`, `api_get` refusals for each barred route, `list_api` without them, the account fields dropped.
+
 ## [v150] - 2026-11-13 — The troubleshooting bundle includes the MCP content log
 
 ### Added
