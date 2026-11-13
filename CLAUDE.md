@@ -227,6 +227,8 @@ README), so the version and changelog describe the final tree.
 
 ## Notes
 
+- **Never delete a file from the tree in a release.** Trees get copied over older ones, and a leftover old file that no longer compiles breaks the update (`go build failed`). Empty the file instead (`package main` and a comment) and keep it.
+
 - **NO BANNERS. Ever.** Never add a banner, notice bar or status message line to the GUI: not for
   progress ("Scanning…"), not for success ("Saved", "finished"), not for info or warnings. State goes
   in the control itself (tooltip, button label, a few words of small text beside it, a row's colour).

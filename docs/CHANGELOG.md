@@ -1,5 +1,17 @@
 # Changelog
 
+## [v153] - 2026-11-13 — v152 failed to build on a node whose source tree still had apiroutes.go
+
+### Fixed
+- v152 deleted `apiroutes.go` and `apiroutes_test.go`. An update whose source tree was made by copying v152 over an older tree kept the old file, which no longer compiled (`undefined: apiRoute`), so the update failed with `go build failed`. Both files are back as empty stubs (`package main` only), so any such tree overwrites them and builds. The route list itself stays removed.
+- `CLAUDE.md`: a file is never deleted from the tree in a release, only emptied (a release that has to remove a file leaves an empty stub), because trees are copied over each other.
+
+### Verified
+- A clean extract of the archive builds; the same tree with the v151 `apiroutes.go` and `apiroutes_test.go` copied over a v153 tree is overwritten by the stubs and builds. `gofmt`, `go vet`, `go test -race`, no-cgo vet and tests, cross-compiles as in v152.
+
+### Not verified
+- The GUI updater itself was not run here; its source staging (`ExtractSource`) replaces the tree whole, so the stale file must have come from the tree that was uploaded.
+
 ## [v152] - 2026-11-13 — An MCP caller can only ask the gateway about its devices
 
 ### Changed
