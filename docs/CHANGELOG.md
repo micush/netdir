@@ -1,5 +1,16 @@
 # Changelog
 
+## [v157] - 2026-11-14 — Certificate page: "shared" tag on the certificate and key
+
+### Changed
+- Web GUI ▸ Certificates ▸ "Upload your own certificate": the **Certificate** and **Private key** labels carry the same "shared" tag as the other cluster-wide fields (`sharedTag`, shown only when the node is in a multi-node cluster), because the certificate is replicated from the primary. Nothing else changed; v156 already runs on the cluster, so this is a new version to push to it.
+
+### Verified
+- `node --check webui/app.js`, `gofmt`, and `TestFieldHintsAreShort`, `TestEveryPageHasHelp`, `TestVersionIsPlainInteger` and the web tests. The full `go test -race` run was done for v156 (same Go code); `TestMCPUsage` fails there for the date reason given under v156.
+
+### Not verified
+- The tag was not looked at in Chromium (light and dark) or in a clustered GUI.
+
 ## [v156] - 2026-11-14 — Certificate page: no description text, equal-sized certificate and key boxes
 
 ### Changed

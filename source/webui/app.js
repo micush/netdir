@@ -4135,8 +4135,8 @@
         tools = h("div", {},
           section("Upload your own certificate",
             h("div", { class: "grid2" },
-              h("label", { class: "f" }, "Certificate", cert, certFile),
-              h("label", { class: "f" }, "Private key", key, keyFile)),
+              h("label", { class: "f" }, h("span", {}, "Certificate", sharedTag({ shared: true })), cert, certFile),
+              h("label", { class: "f" }, h("span", {}, "Private key", sharedTag({ shared: true })), key, keyFile)),
             h("div", { class: "toolbar" }, h("button", { class: "btn primary", type: "button", onclick: async (ev) => {
               ev.target.disabled = true;
               try {
