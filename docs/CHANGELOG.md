@@ -1,5 +1,18 @@
 # Changelog
 
+## [v156] - 2026-11-14 — Certificate page: no description text, equal-sized certificate and key boxes
+
+### Changed
+- Web GUI ▸ Certificates ▸ "Upload your own certificate": the paragraph under the heading is gone (the same facts — used from the next connection, no restart, nobody signed out, copied to every cluster node — are already in the page's help topic), and the **Certificate** and **Private key** boxes are now the same size (both 7 rows; the key box was 5).
+- Nothing changed in how the certificate is shared: it is installed on the primary and copied to every member, and the MCP listeners serve the same certificate as the GUI (both use one `CertManager`).
+
+### Verified
+- `node --check webui/app.js`, `gofmt`, `go build`, `go vet ./...` and `go test -race -count=1 ./...` (native, with PAM): everything passes except `TestMCPUsage`, see below.
+
+### Not verified
+- The layout was not looked at in Chromium (light and dark).
+- `TestMCPUsage` fails here and is not related to this change: it uses a fixed timestamp (6 Nov 2026) and the 7-day report window has moved past it with the real clock. Not touched.
+
 ## [v155] - 2026-11-13 — Version bump to test the primary role returning home
 
 ### Changed
