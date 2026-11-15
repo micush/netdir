@@ -11,7 +11,8 @@ import (
 
 func TestMCPUsage(t *testing.T) {
 	dir := t.TempDir()
-	now := time.Date(2026, 11, 7, 12, 30, 0, 0, time.UTC)
+	// near the real clock: the next daemon (below) drops what is older than the 8 days kept, by the real clock
+	now := time.Now().UTC().Truncate(time.Hour).Add(30 * time.Minute)
 	u := newMCPUsage(dir)
 	u.now = func() time.Time { return now }
 	rec := func(ago time.Duration, caller, addr, tool, target, res string, write bool) {

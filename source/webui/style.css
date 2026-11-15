@@ -175,10 +175,12 @@ label.f { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem;
 label.f.check { flex-direction: row; align-items: center; gap: .5rem; color: var(--text); margin-left: 0; }
 label.f.repo { margin-top: 1.25rem; }
 label.f.repo input { width: 50%; min-width: 16rem; }
-input[type=text], input[type=password], input[type=number], input[type=time], input[type=date], select, textarea {
+input[type=text], input[type=password], input[type=number], input[type=time], input[type=date], input[type=search], select, textarea {
   font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
   border-radius: 7px; padding: .42rem .6rem; width: 100%; min-width: 0;
 }
+input[type=search] { -webkit-appearance: none; appearance: none; }
+input[type=search]::-webkit-search-cancel-button { cursor: pointer; }
 textarea { font-family: var(--mono); font-size: .86rem; resize: vertical; }
 textarea.json { min-height: 28rem; }
 /* the picked rows keep the accent colour when the list loses the focus (the browser would turn them black) */
@@ -642,6 +644,8 @@ table.policy tr.drop-below td { box-shadow: inset 0 -3px 0 var(--accent); }
 .policy-bar input.policy-filter { width: 24rem; max-width: 100%; }
 .policy-bar select { width: auto; flex: 0 0 auto; }
 .policy-bar input.policy-page { width: 4.5rem; }
+.policy-bar input.policy-page { -moz-appearance: textfield; appearance: textfield; text-align: center; }  /* a plain box, no up/down arrows */
+.policy-bar input.policy-page::-webkit-inner-spin-button, .policy-bar input.policy-page::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .policy-pager { display: inline-flex; align-items: center; gap: .35rem; }
 .policy-pager[hidden], .policy-empty[hidden] { display: none; }
 .policy-box .policy-wrap { margin-top: .4rem; }
