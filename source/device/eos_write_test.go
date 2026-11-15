@@ -74,6 +74,28 @@ func eosWriteStub(t *testing.T, ports map[string]portState) (Device, *eosWState)
 			reply(J{"jsonrpc": "2.0", "id": req.ID, "result": []any{J{"interfaces": im}}})
 			return
 		}
+		if len(cmds) == 1 && cmds[0] == "write memory" {
+			reply(J{"jsonrpc": "2.0", "id": req.ID, "result": []any{J{}}})
+			return
+		}
+		if strings.HasPrefix(cmds[0], "clear counters") {
+			for _, c := range cmds {
+				if !eosCfgRE.MatchString(c) || !strings.HasPrefix(c, "clear counters") {
+					t.Errorf("a line a clear never sends: %q", c)
+				}
+				if f := strings.Fields(c); len(f) == 3 {
+					if _, ok := st.ports[f[2]]; !ok {
+						t.Errorf("clear counters of a port that does not exist: %s", f[2])
+					}
+				}
+			}
+			res := make([]any, len(cmds))
+			for i := range res {
+				res[i] = J{}
+			}
+			reply(J{"jsonrpc": "2.0", "id": req.ID, "result": res})
+			return
+		}
 		if !strings.HasPrefix(cmds[0], "configure session netdir") {
 			t.Errorf("a request that is neither the read nor a session: %q", cmds)
 		}
@@ -218,5 +240,37 @@ func TestEOSChange(t *testing.T) {
 		if err := e.cfg(ctx, []string{bad}); err == nil || !strings.Contains(err.Error(), "not a line a change sends") {
 			t.Errorf("%q: %v", bad, err)
 		}
+	}
+}
+
+func TestEOSClearCounters(t *testing.T) {
+	ctx := context.Background()
+	d, st := eosWriteStub(t, map[string]portState{"Ethernet1": {}, "Ethernet2": {Description: "x"}, "Port-Channel1": {}})
+	ch := open(t, d, Credential{Username: "admin", Password: "s3cret"}).(Changer)
+	ports, _ := ParsePorts("et1-2")
+	st.requests = nil
+	if r, err := ch.Change(ctx, Change{ActClearCounters, ports, ""}, true); err != nil || len(r.Changes) != 2 || len(st.requests) != 1 {
+		t.Fatalf("dry: %v %+v %v", err, r, st.requests) // the one request is the read of the ports
+	}
+	st.requests = nil
+	if r, err := ch.Change(ctx, Change{ActClearCounters, ports, ""}, false); err != nil || !r.Applied || len(st.requests) != 2 ||
+		strings.Join(st.requests[1], "|") != "clear counters Ethernet1|clear counters Ethernet2" {
+		t.Fatalf("clear: %v %+v %v", err, r, st.requests)
+	}
+	st.requests = nil
+	if r, err := ch.Change(ctx, AllPortsChange(), false); err != nil || !r.Applied || len(st.requests) != 1 || strings.Join(st.requests[0], "|") != "clear counters" {
+		t.Fatalf("all: %v %+v %v", err, r, st.requests)
+	}
+}
+
+func TestEOSSaveConfig(t *testing.T) {
+	d, st := eosWriteStub(t, map[string]portState{"Ethernet1": {}})
+	s, ok := open(t, d, Credential{Username: "admin", Password: "s3cret"}).(ConfigSaver)
+	if !ok {
+		t.Fatal("not a ConfigSaver")
+	}
+	st.requests = nil
+	if err := s.SaveConfig(context.Background()); err != nil || len(st.requests) != 1 || strings.Join(st.requests[0], "|") != "write memory" {
+		t.Fatalf("save: %v %v", err, st.requests)
 	}
 }

@@ -155,6 +155,9 @@ func (b *bigip) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 
 // bigipBodyCheck refuses a body that asks for a reboot, a halt or a load.
 func bigipBodyCheck(r Raw) error {
+	if !guardsOn {
+		return nil
+	}
 	var m map[string]any
 	if json.Unmarshal([]byte(r.Body), &m) == nil {
 		switch strings.ToLower(str(m["command"])) {
@@ -180,7 +183,7 @@ func (t *technitium) RawChange(ctx context.Context, r Raw, dry bool) (RawResult,
 	}
 	l := strings.ToLower(r.Path)
 	for _, no := range []string{"/api/user/", "/api/admin/", "/api/settings/restore", "/api/createtoken", "/api/changepassword"} {
-		if strings.HasPrefix(l, no) {
+		if guardsOn && strings.HasPrefix(l, no) {
 			return res, errors.New("path: users, sessions, tokens and restores are not changed here")
 		}
 	}

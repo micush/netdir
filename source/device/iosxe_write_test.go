@@ -135,6 +135,17 @@ func xeWriteStub(t *testing.T, ports map[string]portState) (Device, *xeWriteStat
 			}
 			st.ports[typ+un] = s
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && ep == "/restconf/operations/cisco-ia:save-config":
+			st.reqs = append(st.reqs, "POST "+ep)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && ep == "/restconf/operations/Cisco-IOS-XE-rpc:clear":
+			b, _ := io.ReadAll(r.Body)
+			st.reqs = append(st.reqs, "POST "+ep)
+			st.bodies = append(st.bodies, string(b))
+			if r.Header.Get("Content-Type") != yangJSON {
+				t.Errorf("POST content type %q", r.Header.Get("Content-Type"))
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("a request a change never sends: %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
@@ -241,5 +252,57 @@ func TestIOSXEChange(t *testing.T) {
 		if _, _, err := iosxeSplit(bad); err == nil {
 			t.Errorf("%q split", bad)
 		}
+	}
+}
+
+func TestIOSXEClearCounters(t *testing.T) {
+	ctx := context.Background()
+	d, st := xeWriteStub(t, xePorts())
+	ch := open(t, d, Credential{Username: "admin", Password: "s3cret"}).(Changer)
+	ports, _ := ParsePorts("gi1/0/1-2")
+	// a dry run sends nothing and lists the ports
+	r, err := ch.Change(ctx, Change{ActClearCounters, ports, ""}, true)
+	if err != nil || len(st.reqs) != 0 || len(r.Changes) != 2 || r.Changes[0].Field != "counters" {
+		t.Fatalf("dry: %v %+v %v", err, r, st.reqs)
+	}
+	// named ports: one RPC each, with the "count" leaf (clear counters), never the "interface" leaf (clear interface)
+	r, err = ch.Change(ctx, Change{ActClearCounters, ports, ""}, false)
+	if err != nil || !r.Applied || len(st.bodies) != 2 {
+		t.Fatalf("clear: %v %+v %v", err, r, st.bodies)
+	}
+	for i, want := range []string{"GigabitEthernet1/0/1", "GigabitEthernet1/0/2"} {
+		var b struct {
+			In map[string]string `json:"Cisco-IOS-XE-rpc:input"`
+		}
+		if json.Unmarshal([]byte(st.bodies[i]), &b) != nil || b.In["count"] != want || len(b.In) != 1 {
+			t.Errorf("body %d: %s", i, st.bodies[i])
+		}
+	}
+	// every port: one RPC with an empty count
+	st.reqs, st.bodies = nil, nil
+	if r, err = ch.Change(ctx, AllPortsChange(), false); err != nil || !r.Applied || len(st.bodies) != 1 || !strings.Contains(st.bodies[0], `"count":""`) {
+		t.Fatalf("all: %v %+v %v", err, r, st.bodies)
+	}
+	// a port the switch lacks cancels the change
+	st.reqs = nil
+	bad, _ := ParsePorts("gi1/0/1 gi1/0/99")
+	if _, err = ch.Change(ctx, Change{ActClearCounters, bad, ""}, false); err == nil || len(st.reqs) != 0 {
+		t.Errorf("missing port: %v %v", err, st.reqs)
+	}
+	// the port the gateway reaches the switch on may have its counters cleared
+	st.mgmt = "GigabitEthernet1/0/2"
+	if r, err = ch.Change(ctx, Change{ActClearCounters, ports, ""}, false); err != nil || !r.Applied {
+		t.Errorf("management port: %v %+v", err, r)
+	}
+}
+
+func TestIOSXESaveConfig(t *testing.T) {
+	d, st := xeWriteStub(t, xePorts())
+	s, ok := open(t, d, Credential{Username: "admin", Password: "s3cret"}).(ConfigSaver)
+	if !ok {
+		t.Fatal("not a ConfigSaver")
+	}
+	if err := s.SaveConfig(context.Background()); err != nil || len(st.reqs) != 1 || st.reqs[0] != "POST /restconf/operations/cisco-ia:save-config" {
+		t.Fatalf("save: %v %v", err, st.reqs)
 	}
 }

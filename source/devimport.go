@@ -35,7 +35,7 @@ func (m *Mgmt) deviceImportObservium(raw json.RawMessage, actor string) (any, er
 		return nil, fmt.Errorf("device %q: not in the inventory", a.Device)
 	}
 	if !device.ImportSources[srv.Platform] {
-		return nil, fmt.Errorf("device %s: devices are imported from an Observium, IP Fabric, Centreon, Panorama, Proxmox Datacenter Manager or Aruba Fabric Composer device only", srv.Name)
+		return nil, fmt.Errorf("device %s: devices are imported from an Observium, IP Fabric, Centreon, Panorama, Proxmox VE or VMware vCenter (its virtual machines), Proxmox Datacenter Manager or Aruba Fabric Composer device only", srv.Name)
 	}
 	if srv.Disabled {
 		return nil, fmt.Errorf("device %s is disabled: enable it first", srv.Name)

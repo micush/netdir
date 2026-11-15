@@ -42,6 +42,9 @@ func cxWriteStub(t *testing.T) (Device, *cxW) {
 		case below == "/login" && r.Method == http.MethodPost:
 			http.SetCookie(w, &http.Cookie{Name: "id", Value: "s", Secure: true, Path: "/"})
 		case below == "/logout":
+		case strings.HasPrefix(below, "/fullconfigs/startup-config") && r.Method == http.MethodPut:
+			st.patches = append(st.patches, "SAVE "+r.URL.Query().Get("from"))
+			w.WriteHeader(http.StatusOK)
 		case below == "/system/interfaces" && r.Method == http.MethodGet:
 			out := map[string]any{}
 			for n := range st.admin {
@@ -195,5 +198,17 @@ func TestResolveBarePort(t *testing.T) {
 	}
 	if _, err := resolve(have, []string{"1/1/7"}); err == nil || !strings.Contains(err.Error(), "no port 1/1/7") {
 		t.Errorf("missing: %v", err)
+	}
+}
+
+func TestAOSCXSaveConfig(t *testing.T) {
+	d, st := cxWriteStub(t)
+	drv := open(t, d, Credential{Username: "admin", Password: "s3cret"})
+	s, ok := drv.(ConfigSaver)
+	if !ok {
+		t.Fatal("not a ConfigSaver")
+	}
+	if err := s.SaveConfig(context.Background()); err != nil || len(st.patches) != 1 || !strings.HasPrefix(st.patches[0], "SAVE /rest/") || !strings.HasSuffix(st.patches[0], "/fullconfigs/running-config") {
+		t.Fatalf("save: %v %v", err, st.patches)
 	}
 }

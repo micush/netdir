@@ -55,13 +55,13 @@ func (e *entra) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 	r.Path = strings.TrimPrefix(r.Path, graphBase)
 	pp, _, _ := strings.Cut(r.Path, "?")
 	first := strings.SplitN(strings.TrimPrefix(pp, "/"), "/", 2)[0]
-	if !graphWritable[first] {
+	if guardsOn && !graphWritable[first] {
 		return res, errors.New("path: Entra is changed at /users, /devices, /groups and /organization (below /v1.0)")
 	}
-	if hasSeg(pp, graphDenied...) {
+	if guardsOn && hasSeg(pp, graphDenied...) {
 		return res, errors.New("path: sign-in methods, passwords, keys, roles, consent, mail and files are not changed here")
 	}
-	if strings.Contains(strings.ToLower(r.Body), "passwordprofile") {
+	if guardsOn && strings.Contains(strings.ToLower(r.Body), "passwordprofile") {
 		return res, errors.New("body: passwords are not set here")
 	}
 	if r.Method != http.MethodDelete && r.Method != http.MethodPost && strings.TrimSpace(r.Body) == "" {

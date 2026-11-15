@@ -1329,7 +1329,7 @@
       const d = devByName(name);
       return [
         ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")],
-        ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus", "device42"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
+        ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus", "device42", "proxmox", "vcenter"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
         "-", ["Edit", () => deviceForm(g, name)], ["Copy", () => { devClip = [name]; }], ["Paste", () => pasteDevice(g), "", null, pasteWhy(g)],
@@ -2077,7 +2077,7 @@
         tile("t6", "Unreachable", String(n("bad")), "no answer"),
         tile("t2", "Disabled", String(n("paused")), "never contacted"));
       const below = d.remote_errors || {};
-      clear(inv).append(all.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
+      clear(inv).append(all.length ? h("div", { class: "scroll" }, h("table", { class: "tight", onmouseover: cutTip },
         h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Via", "Tags", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, all.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Right-click for the network tools",
           oncontextmenu: rowMenu(toolItems(x.address)) },
@@ -2100,7 +2100,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2332,6 +2332,29 @@
     return el;
   }
 
+  // A table cell whose text is cut by its box (an ellipsis) shows the whole text as a tooltip when the pointer reaches it; a cell with a tooltip of its own keeps it.
+  function cutTip(e) {
+    const td = e.target.closest && e.target.closest("td");
+    if (td && !td.title && td.scrollWidth > td.clientWidth) td.title = td.textContent.trim();
+  }
+
+  // A field of a table whose text does not fit its box shows the whole text as a tooltip.  It is checked when the pointer arrives, the box gets
+  // the focus or its text changes, so a box that is wide enough has none.  A secret is never put in a tooltip.
+  const tipCtx = document.createElement("canvas").getContext("2d");
+  function tipWhenCut(el, text) {
+    const set = () => {
+      const t = text();
+      let cut = false;
+      if (t && el.tagName === "SELECT") {   // a select's text is not scrollable: measure it against the room inside the box (less the arrow)
+        const cs = getComputedStyle(el);
+        tipCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        cut = tipCtx.measureText(t).width > el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 24;
+      } else if (t) cut = el.scrollWidth > el.clientWidth;
+      if (cut) el.title = t; else el.removeAttribute("title");
+    };
+    for (const ev of ["mouseenter", "focus", "input", "change"]) el.addEventListener(ev, set);
+  }
+
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
@@ -2414,6 +2437,7 @@
             inp.addEventListener("focus", () => { if (spec.onList) spec.onList(c.list); });
           }
         }
+        if (!c.pills && !c.secret) tipWhenCut(inp, () => (inp.tagName === "SELECT" ? (inp.selectedOptions[0] ? inp.selectedOptions[0].textContent : "") : inp.value));
         tr.append(h("td", {}, inp));
       });
       grip.addEventListener("dragstart", (e) => {
@@ -2529,7 +2553,7 @@
   const PLATFORM_LABEL = {
     aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
     ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", device42: "Device42", smax: "Micro Focus SMAX", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
-    proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos",
+    proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
   };

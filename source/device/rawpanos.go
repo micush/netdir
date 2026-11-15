@@ -29,7 +29,7 @@ func (p *panos) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, erro
 		return res, errors.New("lines: PAN-OS is changed with an action, an XPath and an element")
 	}
 	x := r.Path
-	if !strings.HasPrefix(x, "/config/") || len(x) > 2000 || strings.Contains(x, "\x00") || strings.Contains(strings.ToLower(x), "mgt-config") {
+	if !strings.HasPrefix(x, "/config/") || len(x) > 2000 || strings.Contains(x, "\x00") || (guardsOn && strings.Contains(strings.ToLower(x), "mgt-config")) {
 		return res, errors.New("path: an XPath below /config/ (the management users and keys under mgt-config are not changed here)")
 	}
 	if len(r.Body) > rawMaxBody {

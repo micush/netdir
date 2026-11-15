@@ -93,7 +93,6 @@ func TestMCPDeviceChangeRaw(t *testing.T) {
 	// refused: nothing reaches the switch
 	sw.calls = nil
 	for _, bad := range []string{`{"target":"sw1"}`, `{"method":"PATCH","path":"/restconf/data/x","body":"{}"}`,
-		`{"target":"sw1","method":"POST","path":"/restconf/operations/cisco-ia:save-config"}`,
 		`{"target":"sw1","method":"PATCH","path":"/restconf/data/x","lines":"a"}`,
 		`{"target":"sw1","method":"PATCH","path":"/restconf/data/x"}`} {
 		if txt, isErr := call(bad); !isErr && !strings.Contains(txt, `"failed": 1`) && !strings.Contains(txt, `"failed":1`) {

@@ -57,11 +57,12 @@ the web GUI):
                    --canvas-add anycast --group N --address ADDR   (one anycast address; see --anycast)
                    --canvas-add device --group N --device NAME   (a device of settings.devices, drawn under the gateway;
                                          --canvas-del device takes it off, --canvas-move device --to N reorders)
-                   --device-change "ENGLISH" --target DEVICES [--dry-run] [--yes]
+                   --device-change "ENGLISH" --target DEVICES [--device-save] [--dry-run] [--yes]
                                         (change ports on Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches in plain English,
                                          e.g. --device-change 'change the description for ports gi1/0/1-24 to read "devices"'
                                          --target sw1; DEVICES is a name, tag:T, platform:P, gateway:N or all. The plan
-                                         is shown first; --dry-run stops there, --yes skips the question.)
+                                         is shown first; --dry-run stops there, --yes skips the question;
+                                         --device-save also saves the configuration (IOS-XE, EOS, Aruba CX).)
                    --device-raw "METHOD PATH" [--device-body TEXT|@FILE] --target DEVICES [--device-save] [--dry-run] [--yes]
                    --device-lines FILE --target DEVICES [--device-save] [--dry-run] [--yes]
                                         (any configuration change in the platform's own terms: a REST request, a PAN-OS
@@ -195,7 +196,7 @@ Shared settings ("settings" block, the same on every node of a cluster):
   mcp_log            true writes every /mcp request and reply to /var/lib/netdir/mcp-content.log (the --state-dir) (default false)
   mcp_log_mb         the most disk that log may use, 1 to 1000 (default 50)
   mcp_log_entry_kb   the most of one request or reply it writes, 1 to 8192 (default 256)
-  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|centreon|junos|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
+  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|centreon|junos|linux|windows|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
                      "credential", "tags", "insecure", "ca_pem", "options", "disabled"}
   device_credentials the logins they use: {"name", "username", "password"} or {"name", "token"}; never shown to a
                      read-only account or to any MCP caller

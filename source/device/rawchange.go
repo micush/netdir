@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -93,6 +94,29 @@ func (r Raw) checkREST(methods ...string) (Raw, error) {
 	return r, nil
 }
 
+// guardsOn says whether a change is checked against each platform's lists of what is never changed (users, tokens and login, keys,
+// certificates, file operations, deleting infrastructure, what would cut the management access).  It is OFF: an rw key may change
+// anything the device's own login allows, and the checks that remain are about the request being well formed (a method, a path that
+// stays on the device's API, a body that is JSON where the API wants JSON, no control characters in a line).  What makes a mistake
+// recoverable stays: the read before a change, put-back of a failed PUT or PATCH, the confirmed commit on Junos and EOS, the
+// checkpoint on NX-OS.  NETDIR_DEVICE_GUARDS=1 in the daemon's environment turns the lists back on.
+var guardsOn = os.Getenv("NETDIR_DEVICE_GUARDS") == "1"
+
+// SetGuards turns the lists on or off (tests; the daemon reads NETDIR_DEVICE_GUARDS).
+func SetGuards(on bool) { guardsOn = on }
+
+// GuardsOn says whether the lists are on.
+func GuardsOn() bool { return guardsOn }
+
+// pathOK is what a path must be whatever the guards say: one that starts at the API's root and cannot name another host or hold
+// anything but the characters of a URL path and query.
+func pathOK(p string) error {
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.Contains(p, "://") || strings.ContainsAny(p, " \t\r\n\x00#\\") {
+		return errors.New("path: a path that starts with a single / and holds no space, control character, # or backslash")
+	}
+	return nil
+}
+
 // restSpec is what a platform gives restRaw.
 type restSpec struct {
 	api     *apiClient
@@ -121,7 +145,10 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 		return res, fmt.Errorf("body: %s needs one", r.Method)
 	}
 	rb := s.reboot != nil && s.reboot(r)
-	if !rb {
+	if err := pathOK(r.Path); err != nil {
+		return res, err
+	}
+	if !rb && guardsOn && s.guard != nil {
 		if err := s.guard(r.Method, r.Path); err != nil {
 			return res, err
 		}
@@ -246,7 +273,7 @@ func checkLines(r Raw, deny *regexp.Regexp) ([]string, error) {
 		if len(l) > 512 || regexp.MustCompile(`[\x00-\x1f\x7f]`).MatchString(l) {
 			return nil, fmt.Errorf("line %q: longer than 512 characters or has control characters", l)
 		}
-		if deny.MatchString(strings.ToLower(l)) {
+		if guardsOn && deny.MatchString(strings.ToLower(l)) {
 			return nil, fmt.Errorf("line %q: not sent (it ends the session, reloads, erases, copies files, runs a shell, or cuts the management access)", l)
 		}
 		out = append(out, l)

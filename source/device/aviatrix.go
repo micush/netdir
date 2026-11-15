@@ -448,14 +448,14 @@ func (a *aviatrix) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, e
 		if k != "action" && !avxKeyRE.MatchString(k) {
 			return res, fmt.Errorf("body: %q is not a parameter name", k)
 		}
-		if k != "action" && avxDenied(k) != "" {
+		if guardsOn && k != "action" && avxDenied(k) != "" {
 			return res, fmt.Errorf("body: %q names a password, key, token or user: it is not sent here", k)
 		}
 	}
-	if w := avxDenied(action); w != "" {
+	if w := avxDenied(action); guardsOn && w != "" {
 		return res, fmt.Errorf("action %s: login, users, administrators, credentials, certificates, single sign-on, backups and restores are not changed here (%q)", action, w)
 	}
-	if action == "delete_container" || action == "delete_public_subnet_filtering_gateway" {
+	if guardsOn && (action == "delete_container" || action == "delete_public_subnet_filtering_gateway") {
 		return res, errors.New("action: deleting a gateway is not done here")
 	}
 	if avxReadRE.MatchString(action) {

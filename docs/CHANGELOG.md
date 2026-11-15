@@ -1,5 +1,118 @@
 # Changelog
 
+## [v177] - 2026-11-15 — Import the virtual machines of a vCenter
+
+### Added
+- **Import ▸ Devices / Preview on a `vcenter` device** (`device/import.go`): each powered-on VM (`/vcenter/vm?power_states=POWERED_ON`) becomes a `linux` or `windows` device, disabled, no login, tagged `source=vcenter` and `vm=ID`. System: the guest family of `/vcenter/vm/ID/guest/identity` (VMware Tools), else the guest OS of `/vcenter/vm/ID`. Address: a usable IPv4 address from the Tools (the identity, then `guest/networking/interfaces`), else the Tools' host name or the VM's name (tag `address=name`). Off or suspended machines, other systems and unknown ones are skipped with the reason.
+
+### Not verified
+- Not run against a real vCenter: the test feeds canned answers in the shapes of the vSphere Automation API. A VM name with spaces becomes a name with dashes. Two VMs of the same name in different folders import once (the second is skipped as the same name). An account without read access to a machine's guest data gets the guest-OS judgement and the VM's name as its address.
+
+## [v176] - 2026-11-15 — Proxmox import: only guests that are powered on
+
+### Changed
+- **Import ▸ Devices / Preview on a `proxmox` device** takes only running VMs and containers; a stopped or paused one is listed as skipped ("is not running") and no more of its API is read. Its address therefore always comes from what the running guest reports (guest agent, container interfaces), else its static configuration, else its name.
+
+## [v175] - 2026-11-15 — Windows hosts over OpenSSH (`windows`)
+
+### Added
+- **`windows` platform** (`device/windows.go`): facts, interfaces and ports with counters, routes, resources, configuration (ipconfig, routes, DNS, firewall), `show` commands from a fixed list (`ip`, `links`, `routes`, `neighbors`, `ports`, `services`, `service NAME`, `processes`, `eventlog`, `log`, `disk`, `memory`, `cpu`, `version`, `firewall`, `dns`, `time`, `users`, `updates`, `shares`) with the same filters as Linux, typed shutdown and no shutdown (`Disable-NetAdapter`, `Enable-NetAdapter`; `ethernet2` finds *Ethernet 2*), and raw lines of PowerShell (`$ErrorActionPreference = 'Stop'`).
+- Transport shared with `linux`: the script is base64-encoded into one line of PowerShell fed to `powershell -Command -` on standard input (`winInvocation`), so there is no cmd.exe quoting and no command-line length limit; `sshExec` now asks `remoteInvocation` for the command and the standard input. The password is in neither.
+- **Proxmox import**: a VM whose `ostype` is Windows (`win*`, `w2k*`, `wxp`, `wvista`) is imported as a `windows` device (it was skipped).
+- Port grammar accepts `ethernet` and `wi-fi` as written. The default port is 22; the web UI, help and README list the platform.
+- **Devices table**: a field whose text is longer than its box shows the whole text as a tooltip. Configure ▸ Devices (and every other row table): checked when the pointer arrives, the box is focused or its text changes; a box that is wide enough has none; a password or token is never put in a tooltip. Monitor ▸ Devices: a cell cut with an ellipsis (the name, say) shows its text; the State cell keeps its own tooltip.
+- Tests: `windows_test.go` with a fake runner and a stand-in `ssh` that records its arguments and standard input.
+
+### Not verified
+- Nothing was run against a real Windows host. The property names of `Get-NetAdapter` (`Speed`, `MtuSize`, `FullDuplex`, `ifIndex`) and `Get-NetAdapterStatistics` are those of Windows 10 / Server 2016 and later; an older release may lack some, and the answer shows zero for them.
+- PowerShell 7 or Windows PowerShell 5.1: only `powershell` (5.1) is started. A host with only `pwsh` would need the command changed.
+- A non-administrator can read most things and change nothing; the refusal is Windows's.
+- `Get-WinEvent -LogName Security` needs an administrator.
+
+## [v174] - 2026-11-15 — Import the VMs and containers of a Proxmox VE host
+
+### Added
+- **Import ▸ Devices / Preview on a `proxmox` device** (`device/import.go`, `ImportSources`): each VM and container of the cluster (`/cluster/resources?type=vm`) becomes a `linux` device, disabled, no login, tagged `source=proxmox`, `node=`, `vmid=` and `type=qemu|lxc`. Address, in order: the QEMU guest agent (`network-get-interfaces`) or the container's `/interfaces` while it runs; a static address in the configuration (`ipconfigN`, `netN` `ip=`); the guest's name (tag `address=name`). Loopback, link-local, Docker, bridge and veth addresses are never taken.
+- Skipped with a reason: templates, VMs whose `ostype` is not `l24` or `l26`, unmanaged containers, entries that are not guests, guests whose configuration could not be read, and guests already in the inventory.
+- Guest reads run 8 at a time; a skipped row now names the guest.
+
+### Not verified
+- Not run against a real Proxmox VE: the test feeds canned answers. The guest agent's and the container interface list's answer shapes are those in Proxmox's API documentation. A token without VM.Audit may see no guests, or no configurations.
+- A guest with several network cards gets the first usable IPv4 address, which may not be the one the gateway reaches.
+
+## [v173] - 2026-11-15 — Linux hosts over SSH (`linux`)
+
+### Added
+- **`linux` platform** (`device/linux.go`): facts, interfaces, ports with counters, routes, resources, LLDP neighbors (`lldpctl -f json`), a configuration of the network files and tables, and `show` commands from a fixed list (`ip`, `links`, `routes`, `neighbors`, `ports`, `services`, `service NAME`, `logs`, `log UNIT`, `disk`, `memory`, `cpu`, `processes`, `version`, `firewall`, `dns`, `time`, `users`) with `include`, `exclude`, `begin`, `head`, `last` and `count` filters done here.
+- **Login**: user name with a password (through `SSH_ASKPASS`; also to `sudo -S` for privileged commands) or a PEM private key as the token; neither means the daemon's own keys and `sudo -n`. Host key learned on first use (`accept-new`) or not checked with `insecure`. Runs the system `ssh` (`NETDIR_SSH` overrides the path), so the project stays stdlib-only. Option `sudo=no`; root never uses sudo. The script travels base64-encoded, so no quoting of the remote shell matters; the host name and user name are checked so neither can be taken for an ssh option.
+- **Typed changes**: description (interface alias), shutdown, no shutdown (`ip link set`). Port grammar: `eth0`, `eth0.100`, `ens3`, `enp1s0`, `br0`, `bond0`, `wlan0`, `docker0`, `veth…`, `lo` are taken as written (eth0 is read back from the Cisco spelling when the host has it). Clearing counters is refused; `save` says there is nothing to save.
+- **Raw changes**: `lines` of shell as root through sudo, one script with `set -e`; the answer carries what the lines printed. With the lists on (`NETDIR_DEVICE_GUARDS=1`) power, disk, user and firewall-flush commands are refused; by default they are not.
+- Web UI, help and the device documentation list the platform; the default port is 22.
+- Tests with a fake runner (`linux_test.go`) and a stand-in `ssh` that records its arguments, its standard input and its environment: the password is never in the arguments, a key file is mode 600 and removed afterwards.
+
+### Not verified
+- Nothing was run against a real Linux host or a real `ssh`: the `ip -j`, `lldpctl -f json`, `free`, `df` and `journalctl` output shapes are those of current distributions, and an old iproute2 (before 4.13) has no `ip -j`.
+- `lldpctl` JSON differs between lldpd releases; two shapes are handled (the chassis keyed by the neighbor's name, or holding it).
+- A host that asks for a password for sudo on a terminal (`requiretty`) cannot be used with `sudo -S` here.
+- Raw lines have no rollback and typed changes are not persisted across a reboot.
+
+## [v172] - 2026-11-15 — An `rw` key means `rw`: the refusal lists are off
+
+### Changed
+- **No lists of refusals for `rw` callers.** Every guard that refused a write by what it touched is behind `guardsOn` (default off): the per-platform path guards of `restRaw`, the CLI line denies (EOS, NX-OS), Proxmox, PDM and Proxmox-MX body checks (`purge`, `archive`, ...), BIG-IP body check, Technitium path denies, Aviatrix key, action and gateway-delete denies, Junos `delete` and line/RPC denies, PAN-OS `mgt-config`, Entra allowed-resource and password checks, vCenter/PDM/Proxmox delete refusals via their guards, and the refusal to shut the management port. Users, tokens, keys, certificates, files, deleting infrastructure and cutting your own management access are now sent if the device allows them.
+- Still checked: the method, a path that starts with a single `/` and holds no host, space, control character, `#` or backslash, and bodies that must be JSON. Still done: the read before a change, put-back of a failed PUT or PATCH, Junos and EOS confirmed commits, the NX-OS checkpoint. `ro` keys and read-side masking are unchanged.
+- `NETDIR_DEVICE_GUARDS=1` in the daemon's environment turns the lists back on; `device.SetGuards` does the same in tests (the refusal tests run with it on).
+
+### Added
+- `guardsoff_test.go`: pass-through with the lists off, and the path sanity check.
+
+### Not verified
+- Nothing in this release was run against a real device. A change that locks you out is not undone by netdir where the platform has no rollback (POST, DELETE, most CLI platforms).
+- Every guard function is reached only through `restSpec` (now gated), so the vCenter, PDM and Proxmox structural delete refusals are off too. `nsone.go` still calls its own guard to choose a path and was not changed.
+
+## [v171] - 2026-11-15 — Typed port changes on more platforms; `save`; rw callers create, delete and resize VMs and containers
+
+### Added
+- **`save` on `device_change`** (MCP `save`, API `"save": true`, CLI `--device-save`). After a change that was made, the configuration is saved so it survives a reboot: IOS-XE (`cisco-ia:save-config`), NX-OS (`copy running-config startup-config`), EOS (`write memory`), Aruba CX (a PUT of `/fullconfigs/startup-config` from the running one) and BIG-IP (`save sys config`). Junos (commits), FortiOS and Meraki keep a change on their own, and the result says so in `note`. A plan (`dry_run`) never saves, a change that was refused or put back is not saved, a save that fails leaves the change in the running configuration and says so in `note`, and `clear_counters` has nothing to save. New `device.ConfigSaver` interface; `ChangeResult` has `saved` and `note`.
+- **Typed description, shutdown and no shutdown on Junos, NX-OS, FortiOS and F5 BIG-IP** (`device/ifacewrite.go`). Each reads what a port holds from the driver's own `Interfaces`, builds the platform's request from the validated fields and sends it through that platform's `RawChange`, so its guards, checkpoint or confirmed commit, and rollback apply; `runChange` then reads back and writes the old values when something differs. Junos: set-format lines (`set interfaces ge-0/0/1 disable`, `… description "text"`), one request; NX-OS: `interface X`, `shutdown`, `description …` as one `cli_conf` request after a checkpoint; FortiOS: `PUT /api/v2/cmdb/system/interface/NAME` with `{"status": "down"|"up"}` or `{"description": …}`; BIG-IP: `PATCH /mgmt/tm/net/interface/NAME` with `{"disabled": true}` or `{"enabled": true}` or a description (only the physical interfaces are ports, not the self IPs). A port holding the address the gateway reaches the device on is never shut down. **PAN-OS** has no typed shut or description (a link-state or description change is a configuration change and a commit that also commits other people's pending changes): counters only; `device_change_raw` for the rest. Aruba CX and Meraki were already typed; Junos and PAN-OS also take `clear_counters` (v170).
+- **Port names of those platforms** in the grammar: Junos `ge-`, `xe-`, `et-`, `ae`, `irb` (`ge-0/0/1-3`), FortiOS `port1`, `wan1`, `lan1` and bare `dmz`, `lan`, `wan`, `internal`, `ha`, `fortilink`, `modem`, BIG-IP `1.1` and `mgmt`. Anything else is still refused; every name is then matched with the device's own list.
+
+### Changed
+- **VM platforms: `rw` means creating, deleting and resizing VMs and containers.** Proxmox VE and Proxmox Datacenter Manager: `DELETE /nodes/N/qemu/ID` and `…/lxc/ID` (PDM: `DELETE /pve/remotes/R/qemu/ID`) are no longer refused, and `purge` and `destroy-unreferenced-disks` are accepted in the body of that one request (anywhere else they are still refused, with `remove-vanished` and `destroy-data`); creating (`POST /nodes/N/qemu|lxc`), `PUT …/config` (cores, memory, disks) and `PUT …/resize` were already open. vCenter: `DELETE /vcenter/vm/ID` is no longer refused; creating, cloning and changing CPU, memory and disks were already open. **Still refused:** restoring a backup (a body with `archive`), rolling back a snapshot, migrating a guest to another cluster (PDM), removing a remote, deleting a storage or its volumes, removing a disk from a machine (`unlink` on Proxmox, a disk DELETE on vCenter), deleting a vCenter host, cluster, datacenter, datastore, folder, resource pool or network, and everything else on those lists. README and help text say so.
+- `device_change` tool text and the "no typed changer" error name the platforms; the README's "Changing devices" paragraph too.
+- The test that used NX-OS as "a platform with no typed writer" uses Infoblox NIOS.
+
+### Verified
+- gofmt, go vet, go test -race -count=1 ./..., the leak test. New tests: IOS-XE, EOS and AOS-CX savers against their stubs; `save` through the MCP tool (a plan does not save, a change does once, `clear_counters` says nothing to save); Junos, NX-OS, FortiOS and BIG-IP changes through a fake device (the exact lines and bodies, plan, shutdown, already-as-asked, no shutdown, a description with quotes and a backslash, a missing port cancels, a refusal is passed up) and that a line break, a `;` or a path in a port name is refused; the port grammar for the new names; Proxmox create, resize and delete (and that `purge` is refused anywhere else), PDM guest delete, vCenter create, clone, delete, CPU, memory and disk (and that host, datastore and disk deletes are still refused).
+
+### Not verified
+- **Nothing was run against real gear or real hypervisors.** The Junos, NX-OS, FortiOS and BIG-IP changes were tested through a fake of their `RawChange`, not a stub of their APIs; the field names (`status`, `disabled`/`enabled`, Junos `disable`) are from the vendors' documentation. Whether Junos and NX-OS read back the admin state the same way after the change as before was not seen. The Aruba CX save (`PUT /fullconfigs/startup-config?from=…running-config`) is from memory of the REST documentation. Proxmox takes `purge` and `destroy-unreferenced-disks` as parameters of the DELETE; whether a DELETE body is read as such by Proxmox was not tried.
+- v170's clear-counters notes stand: untried on real devices.
+
+## [v170] - 2026-11-15 — Clear interface counters (`clear_counters`) in `device_change`
+
+### Added
+- **A fifth typed change, `clear_counters`**, for `device_change` / `--device-change` / `POST /api/devices/change`. In English: `clear all port counters`, `clear counters on gi1/0/1-4`, `reset all interface statistics` (clear, reset or zero; counters, statistics or stats; for, on, of, from or in). Typed: `action: clear_counters` with `ports` (named, or empty or `all` for every port). The plan (`dry_run`) lists the ports a clear would reach.
+- **Platforms that do it:**
+  - Cisco IOS-XE: `POST /restconf/operations/Cisco-IOS-XE-rpc:clear` with `{"Cisco-IOS-XE-rpc:input": {"count": "<interface>"}}` (an empty `count` is every port). The RPC's `interface` leaf is `clear interface`, which resets the port, and is never sent. The RPC and its leaf are from Cisco's `Cisco-IOS-XE-rpc` YANG (release 17.18.1 copy); the switch's own copy of that source cannot be read over MCP.
+  - Arista EOS: `clear counters [Interface]` over eAPI, sent as plain exec commands (no configuration session).
+  - Juniper Junos: the RPC `<clear-interfaces-statistics><all/></clear-interfaces-statistics>` over the REST API. All ports only: Junos port names (`ge-0/0/0`) are not in the typed port grammar.
+  - Palo Alto PAN-OS: the operational command `<clear><counter><interface/></counter></clear>` over the XML API. All ports only: the command takes no interface.
+- **Platforms that cannot, and say so:** Aruba CX and Meraki (no such call found in their REST APIs), FortiOS (its monitor API clears counters of policies, VIPs and ACLs, not of interfaces) and NX-OS (the driver only sends `cli_show` requests, never a command that changes anything; NX-API REST has a clear action on `sys/action` but its payload was not verified). Each answers "this platform's API has no way to clear interface counters". `device_change_raw` is still open for them where the platform has a way.
+- Counters are not configuration, so a clear is planned from the device's own port list (a port the device lacks cancels the change), sent, and **not read back and not put back**; the result says `applied` when the device accepted the request. A port holding the gateway's management address may be cleared (only a shutdown is refused there).
+- `device.AllPorts`, `device.AllPortsChange()`, `Change.All()`, the `counterClearer` interface and `runClear` in `device/change.go`; `device/junos_write.go` and `device/panos_write.go` (Junos and PAN-OS had only raw changes before; their typed `Change` accepts nothing but this action).
+
+### Changed
+- `eosCfgRE` also accepts `clear counters` with an optional interface name, nothing else new.
+- README: the `device_change` rows and the "Changing devices" paragraph.
+
+### Verified
+- gofmt, go vet, go test -race -count=1 ./... pass. New tests: the English grammar and Validate for the new action (and that "clear the description" is not shadowed), `runClear` with a fake device (named, missing port, dry run, refusal, other action), the IOS-XE stub (the `count` leaf, an empty one for all, a missing port cancels, the management port may be cleared) and the EOS stub (the exact exec lines, with no session).
+
+### Not verified
+- **Nothing was run against real gear.** The IOS-XE RPC is taken from the YANG, not seen answering on a switch (whether `clear counters` with an empty `count` asks a confirmation the RPC does not answer is unknown). The EOS, Junos and PAN-OS commands are the documented CLI commands in their API forms; Junos and PAN-OS have no stub test of their own. Run `--device-change "clear counters on …" --dry-run` first, then one port.
+- The running netdir has to be updated to this version before the MCP `device_change` tool offers `clear_counters`.
+
 ## [v169] - 2026-11-15 — Ask removed from a device's right-click menu
 
 ### Removed

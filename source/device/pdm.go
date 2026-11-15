@@ -17,7 +17,7 @@ import (
 //
 // Changes (RawChange, rw callers only): POST, PUT or DELETE with a JSON body anywhere except users, tokens, permissions, consoles and
 // certificates.  What starts a task on a remote answers with its id and is not waited for.  Not done through this program: users,
-// tokens, permissions and realms; certificates; consoles; removing a remote; deleting a VM or container; rolling back a snapshot;
+// tokens, permissions and realms; certificates; consoles; removing a remote; rolling back a snapshot;
 // migrating a guest to another cluster; wiping disks; restarting or shutting down the machine; stopping a service.
 
 func init() { Register("pdm", newPDM) }
@@ -55,8 +55,6 @@ func pdmGuard(method string, segs []string) error {
 	switch {
 	case len(segs) == 3 && segs[0] == "remotes" && segs[1] == "remote":
 		return errors.New("path: a remote is not removed here")
-	case len(segs) >= 2 && (segs[len(segs)-2] == "qemu" || segs[len(segs)-2] == "lxc"):
-		return errors.New("path: a VM or container is not deleted here")
 	}
 	return nil
 }

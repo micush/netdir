@@ -31,8 +31,10 @@ import (
 //   - APIGet: any read below /vcenter, /appliance, /cis, /content, /esx and /vstats.  Sessions, users, accounts, tokens, passwords,
 //     certificates and keys, KMS, guest processes and files, and console tickets are refused.
 //   - RawChange (rw keys only): POST, PUT, PATCH and DELETE below /vcenter, /cis and /content (power, hardware, tags, folders,
-//     resource pools ...; power actions are POST /vcenter/vm/ID/power?action=start|stop|reset|suspend).  Deleting a virtual machine,
-//     host, cluster, datacenter, datastore, folder, resource pool or network, or a disk, is refused, and so are deployment, restore,
+//     resource pools ...; power actions are POST /vcenter/vm/ID/power?action=start|stop|reset|suspend).  An rw caller may create (POST /vcenter/vm,
+//     or a clone: POST /vcenter/vm?action=clone), delete (DELETE /vcenter/vm/ID) and change the CPU, memory and disks of a virtual
+//     machine (PATCH /vcenter/vm/ID/hardware/cpu, /hardware/memory, /hardware/disk/ID, POST /vcenter/vm/ID/hardware/disk).  Deleting a
+//     host, cluster, datacenter, datastore, folder, resource pool or network, or taking a disk off a machine, is refused, and so are deployment, restore,
 //     certificates, guest operations and console tickets.  The appliance (network, time, services, shutdown, reboot, SSH) is read, not
 //     changed.
 //
@@ -66,7 +68,7 @@ var (
 	// written never: installing, restoring, and the appliance's own network, time and services
 	vcNoWrite = []string{"deployment", "restore", "recovery", "backup", "namespace-management", "lcm", "update", "upgrade"}
 	// resources whose DELETE (the resource itself, one level below the type) is refused
-	vcNoDelete = map[string]bool{"vm": true, "host": true, "cluster": true, "datacenter": true, "datastore": true, "folder": true, "resource-pool": true, "network": true}
+	vcNoDelete = map[string]bool{"host": true, "cluster": true, "datacenter": true, "datastore": true, "folder": true, "resource-pool": true, "network": true}
 )
 
 func newVCenter(d Device, c Credential) (Driver, error) {
@@ -461,7 +463,7 @@ func (v *vcenter) APICatalog(context.Context) (any, error) {
 		"how": "Paths below /vcenter, /appliance, /cis, /content, /esx and /vstats (/api is added; an older vCenter is asked at /rest). Lists take filters such as " +
 			"?names=, ?power_states=, ?clusters=. Sessions, users, accounts, tokens, passwords, certificates and keys, KMS, guest processes and files, and console tickets " +
 			"are refused. Changes are device_change_raw below /vcenter, /cis and /content: POST /vcenter/vm/ID/power?action=start|stop|reset|suspend, PATCH hardware, " +
-			"tags and so on; deleting a VM, host, cluster, datacenter, datastore, folder, resource pool, network or disk is refused.",
+			"tags and so on; VMs are created, cloned and deleted, and their CPU, memory and disks changed, here; deleting a host, cluster, datacenter, datastore, folder, resource pool, network or a machine's disk is refused.",
 		"examples": ex,
 		"tip":      "show vm NAME (device_show) answers everything about one virtual machine in one call; the full API is at https://developer.broadcom.com/xapis/vsphere-automation-api/latest/.",
 	}, nil
@@ -484,7 +486,7 @@ func vcGuard(method, p string) error {
 	}
 	if method == http.MethodDelete {
 		if segs[0] == "vcenter" && len(segs) >= 2 && vcNoDelete[segs[1]] && len(segs) <= 3 {
-			return errors.New("path: a virtual machine, host, cluster, datacenter, datastore, folder, resource pool or network is not deleted here: use vCenter itself")
+			return errors.New("path: a host, cluster, datacenter, datastore, folder, resource pool or network is not deleted here: use vCenter itself")
 		}
 		if hasSeg(pp, "disk", "disks") {
 			return errors.New("path: a disk is not removed here: use vCenter itself")

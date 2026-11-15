@@ -80,6 +80,12 @@ func chgEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...strin
 				sw.down[n] = false
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && ep == "/restconf/operations/cisco-ia:save-config":
+			sw.calls = append(sw.calls, "SAVE")
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && ep == "/restconf/operations/Cisco-IOS-XE-rpc:clear":
+			sw.calls = append(sw.calls, "CLEAR")
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
@@ -95,7 +101,7 @@ func chgEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...strin
 	}
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "sw-secret-pw"}}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true, Tags: []string{"site=home"}},
-		{Name: "fw1", Platform: "nxos", Address: host, Port: p, Credential: "lab", Insecure: true}}
+		{Name: "fw1", Platform: "nios", Address: host, Port: p, Credential: "lab", Insecure: true}}
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +142,22 @@ func TestMCPDeviceChange(t *testing.T) {
 	}
 	if txt, isErr = call(`{"target":"sw1","text":"shut down gi1/0/3"}`); isErr || !sw.down["1/0/3"] {
 		t.Fatalf("shutdown: %v %s", isErr, txt)
+	}
+	// save: a plan never saves; a change with save: true does, once, after the PATCH; clear_counters has nothing to save
+	sw.calls = nil
+	if txt, isErr = call(`{"target":"sw1","text":"no shutdown gi1/0/3","dry_run":true,"save":true}`); isErr || len(sw.calls) != 0 {
+		t.Fatalf("plan with save: %v %s %v", isErr, txt, sw.calls)
+	}
+	if txt, isErr = call(`{"target":"sw1","text":"no shutdown gi1/0/3","save":true}`); isErr || strings.Join(sw.calls, ",") != "DELETE,SAVE" || !strings.Contains(txt, `"saved": true`) && !strings.Contains(txt, `"saved":true`) {
+		t.Fatalf("save: %v %s %v", isErr, txt, sw.calls)
+	}
+	sw.calls = nil
+	if txt, isErr = call(`{"target":"sw1","text":"clear all port counters","save":true}`); isErr || strings.Join(sw.calls, ",") != "CLEAR" || !strings.Contains(txt, "nothing to save") {
+		t.Fatalf("clear: %v %s %v", isErr, txt, sw.calls)
+	}
+	sw.calls = nil
+	if txt, isErr = call(`{"target":"sw1","action":"clear_counters","ports":"gi1/0/1"}`); isErr || strings.Join(sw.calls, ",") != "CLEAR" {
+		t.Fatalf("typed clear: %v %s %v", isErr, txt, sw.calls)
 	}
 	// refused before any device is asked
 	sw.calls = nil

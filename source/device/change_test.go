@@ -207,3 +207,71 @@ func TestRunChange(t *testing.T) {
 		t.Errorf("both fail: %v %+v", err, r)
 	}
 }
+
+func TestParseClearCounters(t *testing.T) {
+	for _, in := range []string{"clear all port counters", "clear counters", "Clear the counters on all ports", "reset all interface statistics", "please clear stats for every port", "zero all counters"} {
+		c, err := ParseChange(in)
+		if err != nil || c.Action != ActClearCounters || !c.All() {
+			t.Errorf("%q: %+v %v", in, c, err)
+		}
+	}
+	c, err := ParseChange("clear counters on gi1/0/1-2")
+	if err != nil || c.Action != ActClearCounters || c.All() || len(c.Ports) != 2 || c.Ports[1] != "GigabitEthernet1/0/2" {
+		t.Errorf("named: %+v %v", c, err)
+	}
+	if c, err = ParseChange("clear the port counters for ports et1, et3"); err != nil || len(c.Ports) != 2 {
+		t.Errorf("named 2: %+v %v", c, err)
+	}
+	// the description grammar is not shadowed
+	if c, err = ParseChange("clear the description on gi1/0/1"); err != nil || c.Action != ActClearDescription {
+		t.Errorf("clear description: %+v %v", c, err)
+	}
+	// all is for clear_counters only
+	bad := Change{Action: ActShutdown, Ports: []string{AllPorts}}
+	if bad.Validate() == nil {
+		t.Error("shutdown of all ports was accepted")
+	}
+	if (&Change{Action: ActClearCounters, Ports: []string{AllPorts, "Ethernet1"}}).Validate() == nil {
+		t.Error("all with a named port was accepted")
+	}
+	if (&Change{Action: ActClearCounters, Ports: []string{"Ethernet1"}, Value: "x"}).Validate() == nil {
+		t.Error("a value on clear_counters was accepted")
+	}
+}
+
+type fakeClearer struct {
+	names []string
+	got   []string
+	all   bool
+	err   error
+}
+
+func (f *fakeClearer) ports(context.Context) ([]string, error) { return f.names, nil }
+func (f *fakeClearer) clear(_ context.Context, p []string, all bool) error {
+	f.got, f.all = p, all
+	return f.err
+}
+
+func TestRunClear(t *testing.T) {
+	ctx := context.Background()
+	f := &fakeClearer{names: []string{"Ethernet1", "Ethernet2"}}
+	r, err := runClear(ctx, f, Change{Action: ActClearCounters, Ports: []string{"ethernet1"}}, false)
+	if err != nil || !r.Applied || len(f.got) != 1 || f.got[0] != "Ethernet1" || f.all {
+		t.Fatalf("named: %+v %v %+v", r, err, f)
+	}
+	f = &fakeClearer{names: []string{"Ethernet1"}}
+	if _, err = runClear(ctx, f, Change{Action: ActClearCounters, Ports: []string{"Ethernet9"}}, false); err == nil || f.got != nil {
+		t.Errorf("a port the device lacks: %v %+v", err, f)
+	}
+	f = &fakeClearer{}
+	if r, err = runClear(ctx, f, AllPortsChange(), true); err != nil || !r.DryRun || r.Applied || f.got != nil || len(r.Changes) != 1 {
+		t.Errorf("dry all: %+v %v %+v", r, err, f)
+	}
+	f = &fakeClearer{err: errors.New("refused")}
+	if r, err = runClear(ctx, f, AllPortsChange(), false); err == nil || r.Applied || !f.all {
+		t.Errorf("refused: %+v %v", r, err)
+	}
+	if _, err = runClear(ctx, f, Change{Action: ActShutdown, Ports: []string{"Ethernet1"}}, false); err == nil {
+		t.Error("another action was run by runClear")
+	}
+}

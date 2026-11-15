@@ -99,6 +99,7 @@ type mChg struct{ mx }
 type mUser struct{ mx }
 type mCli struct{ mx }
 type mCap struct{ mx }
+type mSave struct{ mx }
 type mDown struct{ mx }
 
 func (m mAPI) APIGet(ctx context.Context, p string) (any, bool, error) {
@@ -150,6 +151,11 @@ func (m mChg) Change(ctx context.Context, c Change, dry bool) (ChangeResult, err
 	v, err := m.d.(Changer).Change(ctx, c, dry)
 	leakAdd(m.plat, "change", v, err)
 	return v, err
+}
+func (m mSave) SaveConfig(ctx context.Context) error {
+	err := m.d.(ConfigSaver).SaveConfig(ctx)
+	leakAdd(m.plat, "save_config", nil, err)
+	return err
 }
 func (m mUser) UserDevices(ctx context.Context, who string) (map[string]any, []map[string]any, error) {
 	u, dv, err := m.d.(UserDeviceLooker).UserDevices(ctx, who)
@@ -203,6 +209,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 	_, res := drv.(Resourcer)
 	_, vlan := drv.(VLANer)
 	_, chg := drv.(Changer)
+	_, sav := drv.(ConfigSaver)
 	_, user := drv.(UserDeviceLooker)
 	_, cli := drv.(ClientReporter)
 	_, capt := drv.(Capturer)
@@ -215,12 +222,13 @@ func wrapLeak(plat string, drv Driver) Driver {
 	add(res, "res")
 	add(vlan, "vlan")
 	add(chg, "chg")
+	add(sav, "save")
 	add(user, "user")
 	add(cli, "cli")
 	add(capt, "cap")
 	add(down, "down")
 	switch set {
-	case "api raw fw port route res vlan chg cap ": // eos
+	case "api raw fw port route res vlan chg save cap ": // eos, bigip
 		return struct {
 			recDrv
 			mAPI
@@ -231,9 +239,10 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRes
 			mVLAN
 			mChg
+			mSave
 			mCap
-		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mCap{m}}
-	case "api raw fw port route res vlan ": // fortios, nxos, panos
+		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mSave{m}, mCap{m}}
+	case "api raw fw port route res vlan chg ": // fortios, panos
 		return struct {
 			recDrv
 			mAPI
@@ -243,7 +252,8 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRoute
 			mRes
 			mVLAN
-		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}}
+			mChg
+		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}}
 	case "api raw port chg cli ": // meraki
 		return struct {
 			recDrv
@@ -260,24 +270,19 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRaw
 			mRes
 		}{rd, mAPI{m}, mRaw{m}, mRes{m}}
-	case "api raw ": // afc, aviatrix, centreon, ipfabric, junos, proxmox
+	case "api raw ": // afc, aviatrix, centreon, ipfabric, proxmox
 		return struct {
 			recDrv
 			mAPI
 			mRaw
 		}{rd, mAPI{m}, mRaw{m}}
-	case "api raw fw port route res vlan cap ": // bigip
+	case "api raw chg ": // junos
 		return struct {
 			recDrv
 			mAPI
 			mRaw
-			mFW
-			mPort
-			mRoute
-			mRes
-			mVLAN
-			mCap
-		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mCap{m}}
+			mChg
+		}{rd, mAPI{m}, mRaw{m}, mChg{m}}
 	case "api raw user ": // entra
 		return struct {
 			recDrv
@@ -293,7 +298,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mPort
 			mRes
 		}{rd, mAPI{m}, mRaw{m}, mPort{m}, mRes{m}}
-	case "api raw fw port route res vlan chg ": // aoscx, iosxe
+	case "api raw fw port route res vlan chg save ": // aoscx, iosxe, nxos
 		return struct {
 			recDrv
 			mAPI
@@ -304,7 +309,8 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRes
 			mVLAN
 			mChg
-		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}}
+			mSave
+		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mSave{m}}
 	case "api raw res cap down ": // dnsdir, ntpdir, netdir
 		return struct {
 			recDrv
@@ -345,6 +351,8 @@ func init() {
 }
 
 func TestMain(m *testing.M) {
+	// the refusal tests exercise the lists, which are off by default; the pass-through tests turn them off themselves
+	SetGuards(true)
 	code := m.Run()
 	if p := os.Getenv("NETDIR_LEAKCAPTURE"); p != "" {
 		var sec []string

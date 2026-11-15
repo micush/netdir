@@ -80,6 +80,18 @@ func (s cxStore) write(ctx context.Context, plan []portPlan) error {
 	return nil
 }
 
+// SaveConfig implements ConfigSaver: copy running-config startup-config, the REST way (a PUT of the startup configuration from the
+// running one).  The path is built from the switch's own REST version; nothing the caller typed is in it.
+func (a *aoscx) SaveConfig(ctx context.Context) error {
+	if err := a.login(ctx); err != nil {
+		return err
+	}
+	from := a.path("/fullconfigs/running-config")
+	p := a.path("/fullconfigs/startup-config") + "?from=" + url.QueryEscape(from)
+	_, err := a.api.do(ctx, http.MethodPut, p, nil, http.Header{"Accept": {"*/*"}})
+	return err
+}
+
 // Change implements Changer.
 func (a *aoscx) Change(ctx context.Context, c Change, dry bool) (ChangeResult, error) {
 	if err := keepManagement(ctx, a, a.d, c); err != nil {

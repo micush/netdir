@@ -100,9 +100,13 @@ func pveStub(t *testing.T, st *pveState) Device {
 			out(200, []map[string]any{{"iface": "vmbr0", "type": "bridge", "active": 1, "cidr": "10.0.0.2/24", "comments": "lan"}, {"iface": "eno1", "type": "eth", "active": 0}})
 		case p == "/nodes/pve2/qemu/100/config" && r.Method == "GET":
 			out(200, map[string]any{"name": "web", "memory": 1024, "cipassword": "hunter2hunter2", "digest": "abc"})
+		case r.Method == "GET" && (p == "/nodes/pve2/qemu/100/resize" || p == "/nodes/pve2/qemu/100" || p == "/nodes/pve1/lxc/200"): // the read before a change
+			out(200, map[string]any{})
 		case p == "/nodes/pve2/qemu/100/status/current":
 			out(200, map[string]any{"status": "stopped", "vmid": 100})
-		case p == "/nodes/pve2/qemu/100/config" && r.Method == "PUT":
+		case p == "/nodes/pve2/qemu/100/config" && r.Method == "PUT", p == "/nodes/pve2/qemu/100/resize" && r.Method == "PUT",
+			p == "/nodes/pve1/qemu" && r.Method == "POST", p == "/nodes/pve1/lxc" && r.Method == "POST",
+			p == "/nodes/pve2/qemu/100" && r.Method == "DELETE", p == "/nodes/pve1/lxc/200" && r.Method == "DELETE":
 			out(200, nil)
 		case p == "/nodes/pve2/qemu/100/status/start" && r.Method == "POST":
 			out(200, pveUPIDOK)
@@ -247,8 +251,6 @@ func TestProxmoxChange(t *testing.T) {
 		{Method: "POST", Path: "/nodes/pve1/vncshell", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/certificates/custom", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/disks/wipedisk", Body: `{}`},
-		{Method: "DELETE", Path: "/nodes/pve2/qemu/100"},
-		{Method: "DELETE", Path: "/nodes/pve1/lxc/200"},
 		{Method: "DELETE", Path: "/storage/local"},
 		{Method: "DELETE", Path: "/nodes/pve1/storage/local"},
 		{Method: "DELETE", Path: "/nodes/pve1/storage/local/content/local:iso%2Fx.iso"},
@@ -264,6 +266,8 @@ func TestProxmoxChange(t *testing.T) {
 		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config"},
 		{Method: "GET", Path: "/version"},
 		{Method: "POST", Path: "/nodes/pve2/qemu/100/status/start", Body: `{"purge":1}`},
+		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config", Body: `{"destroy-unreferenced-disks":1}`}, // only the deletion of a guest may say how far it goes
+		{Method: "DELETE", Path: "/nodes/pve2/qemu/100/config", Body: `{"purge":1}`},
 	} {
 		if _, err := rc.RawChange(ctx, bad, false); err == nil {
 			t.Errorf("%+v accepted", bad)
@@ -288,5 +292,28 @@ func TestProxmoxChange(t *testing.T) {
 	r, err = rc.RawChange(ctx, Raw{Method: "POST", Path: "/nodes/pve2/qemu/101/status/start"}, false)
 	if err == nil || !strings.Contains(err.Error(), "start failed") || !strings.Contains(err.Error(), "cannot allocate memory") || !r.Applied {
 		t.Fatalf("failed task: %+v %v", r, err)
+	}
+}
+
+// An rw caller creates, resizes and deletes VMs and containers.
+func TestProxmoxGuestLifecycle(t *testing.T) {
+	ctx := context.Background()
+	st := &pveState{secret: "SEC"}
+	d := pveStub(t, st)
+	rc := openPVE(t, d, Credential{Name: "a", Token: "root@pam!nd=SEC"}).(RawChanger)
+	for _, ok := range []Raw{
+		{Method: "POST", Path: "/nodes/pve1/qemu", Body: `{"vmid":300,"name":"new","memory":2048,"cores":2,"scsi0":"local-lvm:32"}`},
+		{Method: "POST", Path: "/nodes/pve1/lxc", Body: `{"vmid":301,"ostemplate":"local:vztmpl/debian-12.tar.zst","memory":512,"cores":1,"rootfs":"local-lvm:8"}`},
+		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config", Body: `{"cores":4,"memory":8192}`},
+		{Method: "PUT", Path: "/nodes/pve2/qemu/100/resize", Body: `{"disk":"scsi0","size":"+10G"}`},
+		{Method: "DELETE", Path: "/nodes/pve2/qemu/100", Body: `{"purge":1,"destroy-unreferenced-disks":1}`},
+		{Method: "DELETE", Path: "/nodes/pve1/lxc/200"},
+	} {
+		if r, err := rc.RawChange(ctx, ok, false); err != nil || !r.Applied {
+			t.Errorf("%+v: %+v %v", ok, r, err)
+		}
+	}
+	if len(st.writes) != 6 {
+		t.Errorf("writes: %v", st.writes)
 	}
 }

@@ -28,10 +28,12 @@ import (
 //	                                (node-status, node-network, vm-config, vm-status, vm-snapshots, ct-config, ...); a guest's node is found
 //	                                from its vmid
 //
-// Changes (RawChange, rw callers only): POST, PUT or DELETE below /nodes, /cluster, /pools or /storage with a JSON body.  A change that
+// Changes (RawChange, rw callers only): POST, PUT or DELETE below /nodes, /cluster, /pools or /storage with a JSON body.  An rw
+// caller may create VMs and containers (POST /nodes/N/qemu and /lxc), delete them (DELETE /nodes/N/qemu/ID, with purge and
+// destroy-unreferenced-disks in the body when wanted) and change their CPU, memory and disks (PUT .../config, PUT .../resize).  A change that
 // starts a task (the answer is a UPID) is waited for: the answer is the task's end, and a failed task is an error with its last log
 // lines.  Not done through this program: users, roles, permissions, tokens and realms; cluster create, join and removal; rebooting,
-// shutting down or stopping everything on a node; shells and consoles; certificates; deleting a VM or container; deleting
+// shutting down or stopping everything on a node; shells and consoles; certificates; deleting
 // a storage; restoring a backup (a body with archive) or rolling back a snapshot; removing or wiping disks; the guest agent's
 // command execution and file access; stopping a node's services.  The change is applied as sent; a PUT is not put back (the digest
 // of the configuration changes), the copy in "before" shows what was there.
@@ -453,8 +455,6 @@ func pveRawGuard(method, p string) error {
 	}
 	if method == http.MethodDelete {
 		switch {
-		case len(segs) == 4 && segs[0] == "nodes" && (segs[2] == "qemu" || segs[2] == "lxc"):
-			return errors.New("path: a VM or container is not deleted here")
 		case len(segs) == 2 && segs[0] == "storage", len(segs) == 4 && segs[0] == "nodes" && segs[2] == "storage":
 			return errors.New("path: a storage is not deleted here")
 		case len(segs) == 5 && segs[0] == "nodes" && segs[2] == "storage" && segs[4] == "content" || len(segs) == 6 && segs[0] == "nodes" && segs[2] == "storage" && segs[4] == "content":
@@ -466,22 +466,32 @@ func pveRawGuard(method, p string) error {
 
 // pveBodyCheck refuses a body that restores a backup (archive) or asks for data to be destroyed along with the change.
 func pveBodyCheck(r Raw) error {
-	if strings.TrimSpace(r.Body) == "" {
+	if !guardsOn || strings.TrimSpace(r.Body) == "" {
 		return nil
 	}
 	var m map[string]any
 	if json.Unmarshal([]byte(r.Body), &m) != nil {
 		return errors.New("body: a JSON object")
 	}
+	guestDelete := pveIsGuestDelete(r)
 	for k := range m {
 		switch strings.ToLower(k) {
 		case "archive":
 			return errors.New("body: restoring a backup (archive) is not done here")
 		case "purge", "destroy-unreferenced-disks":
-			return fmt.Errorf("body: %q removes data and is not sent here", k)
+			// removing a guest takes its disks with it, and these two say how far: they are for that request and no other
+			if !guestDelete {
+				return fmt.Errorf("body: %q removes data and is sent only when a VM or container is deleted", k)
+			}
 		}
 	}
 	return nil
+}
+
+// pveIsGuestDelete says whether r is the deletion of one VM or container: DELETE /nodes/N/qemu/ID or /nodes/N/lxc/ID.
+func pveIsGuestDelete(r Raw) bool {
+	segs := strings.Split(strings.Trim(strings.TrimPrefix(r.Path, pveBase), "/"), "/")
+	return strings.EqualFold(r.Method, http.MethodDelete) && len(segs) == 4 && segs[0] == "nodes" && (segs[2] == "qemu" || segs[2] == "lxc")
 }
 
 func (p *proxmox) RawChange(ctx context.Context, r Raw, dry bool) (RawResult, error) {

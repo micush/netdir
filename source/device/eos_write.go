@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,7 +27,7 @@ import (
 // Every line sent is built here from a typed Change and then checked against eosCfgRE, so a line that is not one of these
 // forms (a different command, a second line in a description) is refused before it leaves the gateway.
 
-var eosCfgRE = regexp.MustCompile(`^(?:configure session netdir[0-9a-f]{8}|interface [A-Za-z][A-Za-z-]*[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?|description [^\x00-\x1f\x7f]{1,200}|no description|shutdown|no shutdown|commit|abort)$`)
+var eosCfgRE = regexp.MustCompile(`^(?:configure session netdir[0-9a-f]{8}|interface [A-Za-z][A-Za-z-]*[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?|description [^\x00-\x1f\x7f]{1,200}|no description|shutdown|no shutdown|commit|abort|clear counters(?: [A-Za-z][A-Za-z-]*[0-9]+(?:/[0-9]+)*(?:\.[0-9]+)?)?)$`)
 
 // cfg sends configuration lines as one request, each checked against eosCfgRE.
 func (e *eos) cfg(ctx context.Context, cmds []string) error {
@@ -87,6 +88,37 @@ func (s eosStore) write(ctx context.Context, plan []portPlan) error {
 		defer cancel()
 		_ = s.e.cfg(actx, []string{"configure session " + sess, "abort"})
 	}
+	return err
+}
+
+// ports and clear make eosStore a counterClearer: "clear counters [interface]" is an exec command, sent on its own (no session).
+func (s eosStore) ports(ctx context.Context) ([]string, error) {
+	m, err := s.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(m))
+	for n := range m {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s eosStore) clear(ctx context.Context, ports []string, all bool) error {
+	if all {
+		return s.e.cfg(ctx, []string{"clear counters"})
+	}
+	cmds := make([]string, 0, len(ports))
+	for _, p := range ports {
+		cmds = append(cmds, "clear counters "+p)
+	}
+	return s.e.cfg(ctx, cmds)
+}
+
+// SaveConfig implements ConfigSaver: write memory.
+func (e *eos) SaveConfig(ctx context.Context) error {
+	_, err := e.post(ctx, []string{"write memory"}, "json")
 	return err
 }
 

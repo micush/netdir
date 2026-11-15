@@ -25,7 +25,7 @@ type changeAnswer struct {
 
 // runDeviceChange is --device-change: the plan is made and shown first (nothing is sent to a device but reads); unless --dry-run it
 // then asks (unless --yes) and makes the change.  The exit status is 1 when any device failed.
-func runDeviceChange(sock, text, target string, dry, yes bool) {
+func runDeviceChange(sock, text, target string, dry, yes, save bool) {
 	if strings.TrimSpace(target) == "" {
 		fatalf(`--device-change needs --target: a device name, tag:TAG, platform:PLATFORM, gateway:N or "all"`)
 	}
@@ -54,6 +54,7 @@ func runDeviceChange(sock, text, target string, dry, yes bool) {
 	}
 	askYes(fmt.Sprintf("Make these %d changes on %d devices?", n, plan.Asked-plan.Failed), yes)
 	args["dry_run"] = false
+	args["save"] = save // only the real change saves; the plan never does
 	var done changeAnswer
 	decode(op(sock, "device.change", args), &done)
 	fmt.Println()
@@ -73,7 +74,10 @@ func printChange(a changeAnswer) {
 			fmt.Printf("%-20s FAILED: %s\n", r.Device, r.Error)
 			continue
 		}
-		fmt.Printf("%-20s %d %s, %d already as asked\n", r.Device, len(r.Data.Changes), word, len(r.Data.Unchanged))
+		fmt.Printf("%-20s %d %s, %d already as asked%s\n", r.Device, len(r.Data.Changes), word, len(r.Data.Unchanged), map[bool]string{true: ", saved", false: ""}[r.Data.Saved])
+		if r.Data.Note != "" {
+			fmt.Printf("  note: %s\n", r.Data.Note)
+		}
 		for i, c := range r.Data.Changes {
 			if i >= 30 {
 				fmt.Printf("  … and %d more\n", len(r.Data.Changes)-i)

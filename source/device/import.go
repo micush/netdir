@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // Importing the devices a monitoring or assurance server knows into the inventory (Observium, IP Fabric, Centreon).  Each one is
@@ -21,7 +24,7 @@ type Skipped struct {
 }
 
 // ImportSources are the platforms a device can be imported from.
-var ImportSources = map[string]bool{"observium": true, "ipfabric": true, "centreon": true, "panorama": true, "pdm": true, "afc": true, "unimus": true, "device42": true}
+var ImportSources = map[string]bool{"observium": true, "ipfabric": true, "centreon": true, "panorama": true, "pdm": true, "afc": true, "unimus": true, "device42": true, "proxmox": true, "vcenter": true}
 
 // impRow is one device as a source describes it.
 type impRow struct {
@@ -31,6 +34,7 @@ type impRow struct {
 	Short    string   // the name to make the inventory name from (default: Host)
 	What     string   // what the source says it is, as shown in a skip reason
 	Platform string   // the driver, "" when none fits
+	Why      string   // why there is none, when the source can say better than "no driver for ..."
 	Tags     []string // beyond source=
 }
 
@@ -85,6 +89,10 @@ func ImportDevices(ctx context.Context, d Device, c Credential, existing []Devic
 		rows, err = uniImportRead(ctx, d, c)
 	case "device42":
 		rows, err = d42ImportRead(ctx, d, c)
+	case "proxmox":
+		rows, err = pveImportRead(ctx, d, c)
+	case "vcenter":
+		rows, err = vcImportRead(ctx, d, c)
 	default:
 		return nil, nil, fmt.Errorf("device %s: devices are imported from Observium, IP Fabric and Centreon, not %s", d.Name, d.Platform)
 	}
@@ -108,7 +116,7 @@ func impBuild(source string, rows []impRow, existing []Device) ([]Device, []Skip
 			skipped = append(skipped, Skipped{Name: firstOf(r.Host, r.Short, r.ID), OS: r.What, Reason: why})
 		}
 		if r.Platform == "" {
-			skip(fmt.Sprintf("no driver for %q", firstOf(r.What, "an unknown device")))
+			skip(firstOf(r.Why, fmt.Sprintf("no driver for %q", firstOf(r.What, "an unknown device"))))
 			continue
 		}
 		addr := r.Host
@@ -401,6 +409,319 @@ func pdmImportRows(remotes []map[string]any) []impRow {
 		}
 	}
 	return out
+}
+
+// ---- Proxmox VE: the VMs and containers ----
+
+// pveImportRead lists the guests of the cluster (or of the one host) a Proxmox VE device reaches; only those that are running are imported.  Each Linux guest is a device of the
+// platform linux: disabled, no login, tagged source=proxmox, node, vmid and type (qemu or lxc).  Its address is what the guest reports
+// (the QEMU guest agent, or a container's interfaces) while it runs, else the static address of its configuration (cloud-init ipconfig,
+// a container's net), else its name, which only helps if DNS has it (the tag address=name says so).  Windows and other systems, templates
+// and containers that are not managed (ostype unmanaged) are listed as skipped.  A Windows VM (ostype wxp, w2k*, wvista, win*) is a windows device.
+func pveImportRead(ctx context.Context, d Device, c Credential) ([]impRow, error) {
+	drv, err := newProxmox(d, c)
+	if err != nil {
+		return nil, err
+	}
+	p := drv.(*proxmox)
+	defer p.Close(context.WithoutCancel(ctx))
+	v, err := p.get(ctx, "/cluster/resources?type=vm")
+	if err != nil {
+		return nil, err
+	}
+	return pveImportRows(ctx, rows(v), p.get), nil
+}
+
+// pveImportRows makes the rows; get reads one API path (the driver's, or a stub's in tests).  A guest's own reads that fail are left out
+// of its answer: a stopped machine has no agent, and a token may lack the right to read a configuration.
+func pveImportRows(ctx context.Context, guests []map[string]any, get func(context.Context, string) (any, error)) []impRow {
+	out := make([]impRow, len(guests))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i, g := range guests {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i] = pveGuestRow(ctx, g, get)
+		}()
+	}
+	wg.Wait()
+	sort.SliceStable(out, func(a, b int) bool {
+		x, _ := strconv.Atoi(out[a].ID)
+		y, _ := strconv.Atoi(out[b].ID)
+		return x < y
+	})
+	return out
+}
+
+// pveWindowsOS is the ostype of a Windows VM: wxp, w2k, w2k3, w2k8, wvista, win7, win8, win10, win11.
+var pveWindowsOS = regexp.MustCompile(`^(?:wxp|w2k\d*|wvista|win\d*)$`)
+
+var pveNameOK = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+func pveGuestRow(ctx context.Context, g map[string]any, get func(context.Context, string) (any, error)) impRow {
+	id, node, kind, name, status := str(g["vmid"]), str(g["node"]), strings.ToLower(str(g["type"])), str(g["name"]), strings.ToLower(str(g["status"]))
+	if name == "" {
+		name = kind + id
+	}
+	r := impRow{ID: id, Short: name, What: fmt.Sprintf("%s %s", kind, id)}
+	if kind != "qemu" && kind != "lxc" {
+		r.Why = fmt.Sprintf("%s %s is not a VM or a container", kind, id)
+		return r
+	}
+	if !pveNodeRE.MatchString(node) || !regexp.MustCompile(`^\d{1,10}$`).MatchString(id) {
+		r.Why = "the cluster gave no node or no VM ID for it"
+		return r
+	}
+	if n, _ := g["template"].(float64); n == 1 || str(g["template"]) == "1" {
+		r.Why = r.What + " is a template"
+		return r
+	}
+	if status != "running" {
+		r.Why = fmt.Sprintf("%s %s is not running (%s)", kind, id, firstOf(status, "state unknown"))
+		return r
+	}
+	base := "/nodes/" + node + "/" + kind + "/" + id
+	cfg := map[string]any{}
+	if v, err := get(ctx, base+"/config"); err == nil {
+		cfg, _ = v.(map[string]any)
+	} else if kind == "qemu" {
+		r.Why = r.What + ": its configuration could not be read, so its system is not known"
+		return r
+	}
+	ost := strings.ToLower(str(cfg["ostype"]))
+	win := false
+	switch {
+	case kind == "qemu" && pveWindowsOS.MatchString(ost):
+		win = true
+	case kind == "qemu" && ost != "l24" && ost != "l26":
+		r.What = fmt.Sprintf("%s (ostype %s)", r.What, firstOf(ost, "not set"))
+		r.Why = "no Linux driver for " + r.What
+		return r
+	case kind == "lxc" && ost == "unmanaged":
+		r.Why = r.What + " is an unmanaged container"
+		return r
+	}
+	r.Platform = "linux"
+	if win {
+		r.Platform = "windows"
+	}
+	r.Tags = append(impTag("node", node), impTag("vmid", id)...)
+	r.Tags = append(r.Tags, "type="+kind)
+	r.What = fmt.Sprintf("%s %s %s (%s)", kind, id, name, firstOf(status, "unknown state"))
+	addr := ""
+	if kind == "qemu" {
+		if v, err := get(ctx, base+"/agent/network-get-interfaces"); err == nil {
+			addr = pveAgentIP(v)
+		}
+	} else if v, err := get(ctx, base+"/interfaces"); err == nil {
+		addr = pveCTIP(v)
+	}
+	if addr == "" {
+		addr = pveConfigIP(cfg, kind)
+	}
+	if addr != "" {
+		r.Host, r.Alt = addr, name
+	} else {
+		r.Host = name
+		if !pveNameOK.MatchString(name) {
+			r.Host = ""
+		}
+		r.Tags = append(r.Tags, "address=name")
+	}
+	return r
+}
+
+// pveUsableIP says whether s (an address, with or without /prefix) is one to reach a guest on.
+func pveUsableIP(s string) (string, bool) {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), "/")
+	a, err := netip.ParseAddr(s)
+	if err != nil || !a.Is4() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() {
+		return "", false
+	}
+	return a.String(), true
+}
+
+var pveVirtualIf = regexp.MustCompile(`^(lo|docker\d*|veth.*|br-.*|virbr.*|cni.*|flannel.*|cali.*|tunl.*|kube.*)$`)
+
+// pveAgentIP is the first usable IPv4 address in the answer of the guest agent's network-get-interfaces.
+func pveAgentIP(v any) string {
+	m, _ := v.(map[string]any)
+	for _, ifc := range rows(m["result"]) {
+		if pveVirtualIf.MatchString(str(ifc["name"])) {
+			continue
+		}
+		for _, a := range rows(ifc["ip-addresses"]) {
+			if str(a["ip-address-type"]) != "ipv4" {
+				continue
+			}
+			if ip, ok := pveUsableIP(str(a["ip-address"])); ok {
+				return ip
+			}
+		}
+	}
+	return ""
+}
+
+// pveCTIP is the first usable IPv4 address in a container's /interfaces.
+func pveCTIP(v any) string {
+	for _, ifc := range rows(v) {
+		if pveVirtualIf.MatchString(str(ifc["name"])) {
+			continue
+		}
+		if ip, ok := pveUsableIP(str(ifc["inet"])); ok {
+			return ip
+		}
+	}
+	return ""
+}
+
+// pveConfigIP is a static address in a guest's configuration: cloud-init ipconfigN of a VM, netN of a container (ip=10.0.0.5/24).
+func pveConfigIP(cfg map[string]any, kind string) string {
+	key := "ipconfig"
+	if kind == "lxc" {
+		key = "net"
+	}
+	for i := 0; i < 8; i++ {
+		for _, kv := range strings.Split(str(cfg[key+strconv.Itoa(i)]), ",") {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(kv), "ip="); ok {
+				if ip, ok := pveUsableIP(v); ok {
+					return ip
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// ---- VMware vCenter: the virtual machines ----
+
+// vcImportRead lists the virtual machines of a vCenter that are powered on.  A machine with VMware Tools says what system it runs
+// (guest identity: family LINUX or WINDOWS) and its addresses; one without is judged by the guest OS it was created with.  Linux
+// machines are devices of the platform linux and Windows machines of the platform windows: disabled, no login, tagged source=vcenter and
+// vm=<ID>.  Others, and machines whose system cannot be told, are listed as skipped.
+func vcImportRead(ctx context.Context, d Device, c Credential) ([]impRow, error) {
+	drv, err := newVCenter(d, c)
+	if err != nil {
+		return nil, err
+	}
+	v := drv.(*vcenter)
+	defer v.Close(context.WithoutCancel(ctx))
+	x, err := v.get(ctx, "/vcenter/vm?power_states=POWERED_ON")
+	if err != nil {
+		return nil, err
+	}
+	return vcImportRows(ctx, rows(x), v.get), nil
+}
+
+func vcImportRows(ctx context.Context, vms []map[string]any, get func(context.Context, string) (any, error)) []impRow {
+	out := make([]impRow, len(vms))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i, m := range vms {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out[i] = vcVMRow(ctx, m, get)
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+var (
+	vcImpIDRE   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	vcWindowsOS = regexp.MustCompile(`^(?:WIN|DOS|MS_DOS)`)
+	vcLinuxOS   = regexp.MustCompile(`LINUX|^(?:UBUNTU|DEBIAN|RHEL|CENTOS|SLES|SUSE|OPENSUSE|ORACLE|FEDORA|ALMA|ROCKY|PHOTON|COREOS|FLATCAR|AMAZON|ASIANUX|MANDRAKE|MANDRIVA|TURBO|NEOKYLIN|KYLIN)`)
+)
+
+func vcVMRow(ctx context.Context, m map[string]any, get func(context.Context, string) (any, error)) impRow {
+	id, name, state := str(m["vm"]), str(m["name"]), strings.ToUpper(str(m["power_state"]))
+	if name == "" {
+		name = id
+	}
+	r := impRow{ID: id, Short: name, What: fmt.Sprintf("VM %s %s", id, name)}
+	if !vcImpIDRE.MatchString(id) {
+		r.Why = "the vCenter gave no usable ID for " + name
+		return r
+	}
+	if state != "" && state != "POWERED_ON" {
+		r.Why = fmt.Sprintf("%s is not powered on (%s)", r.What, state)
+		return r
+	}
+	base := "/vcenter/vm/" + id
+	var ident map[string]any
+	if v, err := get(ctx, base+"/guest/identity"); err == nil {
+		ident, _ = v.(map[string]any)
+	}
+	family := strings.ToUpper(str(ident["family"]))
+	guestOS := ""
+	if family == "" { // no VMware Tools: the system the machine was created for
+		if v, err := get(ctx, base); err == nil {
+			if vm, ok := v.(map[string]any); ok {
+				guestOS = strings.ToUpper(str(vm["guest_OS"]))
+				switch {
+				case vcWindowsOS.MatchString(guestOS):
+					family = "WINDOWS"
+				case vcLinuxOS.MatchString(guestOS):
+					family = "LINUX"
+				}
+			}
+		}
+	}
+	switch family {
+	case "LINUX":
+		r.Platform = "linux"
+	case "WINDOWS":
+		r.Platform = "windows"
+	default:
+		r.What += " (" + firstOf(strings.ToLower(family), guestOS, "system unknown") + ")"
+		r.Why = "no driver for the system of " + r.What
+		return r
+	}
+	r.Tags = impTag("vm", id)
+	addr := ""
+	if ip, ok := pveUsableIP(str(ident["ip_address"])); ok {
+		addr = ip
+	}
+	if addr == "" {
+		if v, err := get(ctx, base+"/guest/networking/interfaces"); err == nil {
+			for _, ifc := range rows(v) {
+				for _, a := range rows(mapGet(ifc, "ip", "ip_addresses")) {
+					if ip, ok := pveUsableIP(str(a["ip_address"])); ok && addr == "" {
+						addr = ip
+					}
+				}
+			}
+		}
+	}
+	if addr != "" {
+		r.Host, r.Alt = addr, name
+	} else {
+		r.Host = firstOf(str(ident["host_name"]), name)
+		if !pveNameOK.MatchString(r.Host) {
+			r.Host = ""
+		}
+		r.Alt = name
+		r.Tags = append(r.Tags, "address=name")
+	}
+	return r
+}
+
+// mapGet follows keys through nested objects.
+func mapGet(v any, keys ...string) any {
+	for _, k := range keys {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = m[k]
+	}
+	return v
 }
 
 // ---- Aruba Fabric Composer ----

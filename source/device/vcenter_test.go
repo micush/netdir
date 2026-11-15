@@ -145,7 +145,9 @@ func vcStub(t *testing.T, st *vcState) Device {
 				send(403, J{"error_type": "UNAUTHORIZED"})
 			}
 		case r.Method == "POST" && p == "/vcenter/vm/vm-10/power", r.Method == "PATCH" && p == "/vcenter/vm/vm-10/hardware/cpu",
-			r.Method == "GET" && p == "/vcenter/vm/vm-10/hardware/cpu", r.Method == "PUT" && p == "/cis/tagging/tag/t1":
+			r.Method == "GET" && p == "/vcenter/vm/vm-10/hardware/cpu", r.Method == "PUT" && p == "/cis/tagging/tag/t1",
+			r.Method == "DELETE" && p == "/vcenter/vm/vm-10", r.Method == "POST" && p == "/vcenter/vm", r.Method == "PATCH" && p == "/vcenter/vm/vm-10/hardware/memory",
+			r.Method == "PATCH" && p == "/vcenter/vm/vm-10/hardware/disk/2000", r.Method == "POST" && p == "/vcenter/vm/vm-10/hardware/disk":
 			send(200, wrap(J{"count": 2}))
 		case strings.Contains(p, "session") || strings.Contains(p, "users") || strings.Contains(p, "tickets") || strings.Contains(p, "processes") || strings.Contains(p, "certificate") ||
 			r.Method == "DELETE":
@@ -323,7 +325,6 @@ func TestVCenterChange(t *testing.T) {
 		t.Fatalf("tag %+v %v", res, err)
 	}
 	for _, bad := range []Raw{
-		{Method: "DELETE", Path: "/vcenter/vm/vm-10"},
 		{Method: "DELETE", Path: "/vcenter/host/host-20"},
 		{Method: "DELETE", Path: "/vcenter/datastore/ds-1"},
 		{Method: "DELETE", Path: "/vcenter/vm/vm-10/hardware/disk/2000"},
@@ -343,6 +344,25 @@ func TestVCenterChange(t *testing.T) {
 	} {
 		if _, err := rc.RawChange(ctx, bad, false); err == nil {
 			t.Errorf("%+v accepted", bad)
+		}
+	}
+}
+
+// An rw caller creates and deletes virtual machines and changes their CPU, memory and disks; hosts, datastores and a machine's disk stay.
+func TestVCenterGuestLifecycle(t *testing.T) {
+	for _, m := range []struct{ method, path string }{
+		{"POST", "/vcenter/vm"}, {"POST", "/vcenter/vm?action=clone"}, {"DELETE", "/vcenter/vm/vm-10"}, {"PATCH", "/vcenter/vm/vm-10/hardware/cpu"},
+		{"PATCH", "/vcenter/vm/vm-10/hardware/memory"}, {"PATCH", "/vcenter/vm/vm-10/hardware/disk/2000"}, {"POST", "/vcenter/vm/vm-10/hardware/disk"},
+	} {
+		if err := vcGuard(m.method, m.path); err != nil {
+			t.Errorf("%s %s: %v", m.method, m.path, err)
+		}
+	}
+	for _, m := range []struct{ method, path string }{
+		{"DELETE", "/vcenter/host/host-20"}, {"DELETE", "/vcenter/datastore/ds-1"}, {"DELETE", "/vcenter/vm/vm-10/hardware/disk/2000"}, {"POST", "/vcenter/vm/vm-10/guest/processes"},
+	} {
+		if err := vcGuard(m.method, m.path); err == nil {
+			t.Errorf("%s %s accepted", m.method, m.path)
 		}
 	}
 }

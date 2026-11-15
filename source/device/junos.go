@@ -495,10 +495,10 @@ func junLines(r Raw) ([]string, error) {
 		if !junLineFirst[w[0]] {
 			return nil, fmt.Errorf("line %q: a line is set, delete, deactivate, activate, insert or annotate (set format)", l)
 		}
-		if len(w) < 2 || (w[0] == "delete" && len(w) < 3) {
+		if len(w) < 2 || (guardsOn && w[0] == "delete" && len(w) < 3) {
 			return nil, fmt.Errorf("line %q: too little: a delete names a statement below a top level (\"delete interfaces ge-0/0/1\"), never a whole hierarchy", l)
 		}
-		if junLineDeny.MatchString(strings.Join(w[1:], " ")) {
+		if guardsOn && junLineDeny.MatchString(strings.Join(w[1:], " ")) {
 			return nil, fmt.Errorf("line %q: not sent (users and login, the REST, NETCONF and SSH services, and the management interfaces are not changed here)", l)
 		}
 		out = append(out, l)
@@ -644,10 +644,10 @@ func (j *junos) rawRPC(ctx context.Context, r Raw, dry bool) (RawResult, error) 
 	if err != nil {
 		return res, err
 	}
-	if !junRPCRootRE.MatchString(root) || junRPCDeny.MatchString(root) {
+	if !junRPCRootRE.MatchString(root) || (guardsOn && junRPCDeny.MatchString(root)) {
 		return res, fmt.Errorf("body: the RPC %q is not sent here (configuration changes are lines of configuration; locks, commits, zeroize, power off, software and file operations are not sent)", root)
 	}
-	if strings.Contains(root, "password") || strings.Contains(root, "secret") || strings.Contains(root, "login") {
+	if guardsOn && (strings.Contains(root, "password") || strings.Contains(root, "secret") || strings.Contains(root, "login")) {
 		return res, fmt.Errorf("body: the RPC %q is about secrets or login and is not sent here", root)
 	}
 	if strings.HasPrefix(root, "get-") && !strings.Contains(root, "config") {

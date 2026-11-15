@@ -395,7 +395,7 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.scanAddr != "":
 		runScan(sock, *f.scanAddr)
 	case *f.deviceChange != "":
-		runDeviceChange(sock, *f.deviceChange, *f.deviceTarget, *f.dryRun, *f.yes)
+		runDeviceChange(sock, *f.deviceChange, *f.deviceTarget, *f.dryRun, *f.yes, *f.deviceSave)
 	case *f.troubleUser != "" || *f.troubleHost != "":
 		runTroubleshootUser(sock, *f.troubleUser, *f.troubleHost, *f.troubleHours)
 	case *f.deviceImport != "":

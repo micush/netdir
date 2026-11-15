@@ -113,6 +113,43 @@ func (s iosxeStore) write(ctx context.Context, plan []portPlan) error {
 	return nil
 }
 
+// ports and clear make iosxeStore a counterClearer.  The RPC is Cisco-IOS-XE-rpc:clear with its "count" leaf, the "clear counters
+// [interface]" command (an empty value is every port); the "interface" leaf of the same RPC is "clear interface", which resets the
+// port, and is never sent.  The interface names come from the switch's own list (resolve) and are checked again here.
+func (s iosxeStore) ports(ctx context.Context) ([]string, error) {
+	m, err := s.read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(m))
+	for n := range m {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s iosxeStore) clear(ctx context.Context, ports []string, all bool) error {
+	hdr := http.Header{"Content-Type": {yangJSON}}
+	send := func(count string) error {
+		body := mustJSON(map[string]any{"Cisco-IOS-XE-rpc:input": map[string]any{"count": count}})
+		_, err := s.x.api.do(ctx, http.MethodPost, "/restconf/operations/Cisco-IOS-XE-rpc:clear", body, hdr)
+		return err
+	}
+	if all {
+		return send("")
+	}
+	for _, p := range ports {
+		if _, _, err := iosxeSplit(p); err != nil {
+			return err
+		}
+		if err := send(p); err != nil {
+			return fmt.Errorf("port %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
 // iosxeLeaf is the RESTCONF path of one leaf of one interface (the list key is escaped: "1/0/1" is 1%2F0%2F1).
 func iosxeLeaf(typ, name, leaf string) string {
 	return "/restconf/data/" + iosxeIfPath + "/" + typ + "=" + url.PathEscape(name) + "/" + leaf
@@ -124,6 +161,13 @@ func (x *iosxe) Change(ctx context.Context, c Change, dry bool) (ChangeResult, e
 		return ChangeResult{}, err
 	}
 	return runChange(ctx, iosxeStore{x}, c, dry)
+}
+
+// SaveConfig implements ConfigSaver: the RPC the raw change uses for save.
+func (x *iosxe) SaveConfig(ctx context.Context) error {
+	h := http.Header{"Content-Type": {yangJSON}, "Accept": {yangJSON}}
+	_, err := x.api.do(ctx, http.MethodPost, "/restconf/operations/cisco-ia:save-config", nil, h)
+	return err
 }
 
 func mustJSON(v any) []byte {

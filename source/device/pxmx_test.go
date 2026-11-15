@@ -98,6 +98,10 @@ func pxStub(t *testing.T, st *pxState) Device {
 			out(200, nil)
 		case p == "/config/sync/job1":
 			out(200, map[string]any{"id": "job1", "schedule": "daily"})
+		case p == "/pve/remotes/prod/qemu/100" && r.Method == "DELETE":
+			out(200, nil)
+		case p == "/pve/remotes/prod/qemu/100" && r.Method == "GET":
+			out(200, map[string]any{})
 		case p == "/pve/remotes/prod/qemu/100/start" && r.Method == "POST":
 			out(200, "prod!"+pbsUPID)
 		default:
@@ -260,7 +264,6 @@ func TestPDMReadAndChange(t *testing.T) {
 	rc := drv.(RawChanger)
 	for _, bad := range []Raw{
 		{Method: "DELETE", Path: "/remotes/remote/prod"},
-		{Method: "DELETE", Path: "/pve/remotes/prod/qemu/100"},
 		{Method: "POST", Path: "/pve/remotes/prod/qemu/100/remote-migrate", Body: `{}`},
 		{Method: "POST", Path: "/pve/remotes/prod/qemu/100/snapshot/s1/rollback", Body: `{}`},
 		{Method: "POST", Path: "/access/users", Body: `{}`},
@@ -269,6 +272,10 @@ func TestPDMReadAndChange(t *testing.T) {
 		if _, err := rc.RawChange(ctx, bad, false); err == nil {
 			t.Errorf("%+v accepted", bad)
 		}
+	}
+	// a guest is deleted, with its disks when the body says so; a remote is not
+	if r, err := rc.RawChange(ctx, Raw{Method: "DELETE", Path: "/pve/remotes/prod/qemu/100", Body: `{"purge":1}`}, false); err != nil || !r.Applied {
+		t.Errorf("delete a guest: %+v %v", r, err)
 	}
 	r, err := rc.RawChange(ctx, Raw{Method: "POST", Path: "/pve/remotes/prod/qemu/100/start", Body: `{}`}, false)
 	if err != nil || !r.Applied || !strings.Contains(r.Note, "task was started") {

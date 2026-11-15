@@ -291,7 +291,7 @@ func (p *pxmx) rawGuard(method, path string) error {
 
 // bodyCheck refuses a body that restores or purges, or asks for what is gone at the other end to be removed here.
 func pxBodyCheck(r Raw) error {
-	if strings.TrimSpace(r.Body) == "" {
+	if !guardsOn || strings.TrimSpace(r.Body) == "" {
 		return nil
 	}
 	var m map[string]any
@@ -304,6 +304,10 @@ func pxBodyCheck(r Raw) error {
 			return errors.New("body: restoring a backup (archive) is not done here")
 		case "purge", "destroy-unreferenced-disks", "remove-vanished", "destroy-data":
 			if b, _ := v.(bool); b || fmt.Sprint(v) == "1" {
+				// the first two say how far the deletion of one VM or container goes: for that request and no other
+				if guest := strings.EqualFold(r.Method, http.MethodDelete) && pxIsGuestPath(r.Path); guest && (strings.EqualFold(k, "purge") || strings.EqualFold(k, "destroy-unreferenced-disks")) {
+					continue
+				}
 				return fmt.Errorf("body: %q removes data and is not sent here", k)
 			}
 		}
@@ -435,4 +439,10 @@ func (p *pxmx) uptime(ctx context.Context) int64 {
 	}
 	m, _ := v.(map[string]any)
 	return num(m["uptime"])
+}
+
+// pxIsGuestPath says whether a path ends at one VM or container: .../qemu/ID or .../lxc/ID.
+func pxIsGuestPath(p string) bool {
+	segs := strings.Split(strings.Trim(strings.TrimPrefix(p, pxBase), "/"), "/")
+	return len(segs) >= 2 && (segs[len(segs)-2] == "qemu" || segs[len(segs)-2] == "lxc") && !strings.EqualFold(segs[len(segs)-1], "config")
 }

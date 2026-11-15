@@ -35,6 +35,7 @@ const (
 	ActClearDescription = "clear_description" // remove the description
 	ActShutdown         = "shutdown"          // administratively down
 	ActNoShutdown       = "no_shutdown"       // administratively up
+	ActClearCounters    = "clear_counters"    // zero the interface counters (the ports named, or all of them)
 )
 
 // Change is one typed change, the same for every platform: Action on Ports, with Value for a description.  Ports are
@@ -44,6 +45,16 @@ type Change struct {
 	Ports  []string `json:"ports"`
 	Value  string   `json:"value,omitempty"`
 }
+
+// AllPorts is the one "port" of a clear_counters change that clears every port of the device: Ports is []string{AllPorts}.  It
+// is not an interface name any device has, so it cannot be mistaken for one.
+const AllPorts = "all"
+
+// AllPortsChange is the change that clears the counters of every port.
+func AllPortsChange() Change { return Change{Action: ActClearCounters, Ports: []string{AllPorts}} }
+
+// All says whether the change is for every port of the device (clear_counters only).
+func (c Change) All() bool { return len(c.Ports) == 1 && c.Ports[0] == AllPorts }
 
 // PortChange is one thing that changes (or would) on one port.
 type PortChange struct {
@@ -60,6 +71,15 @@ type ChangeResult struct {
 	Changes    []PortChange `json:"changes"`               // what differs (what changed, or would)
 	Unchanged  []string     `json:"unchanged,omitempty"`   // ports that already held the values
 	RolledBack bool         `json:"rolled_back,omitempty"` // the write failed or did not read back, and the old values are back
+	Saved      bool         `json:"saved,omitempty"`       // the running configuration was saved over a reboot (save was asked for)
+	Note       string       `json:"note,omitempty"`        // what a caller should know that is not an error (a save that needs no doing)
+}
+
+// ConfigSaver is a driver that can save the running configuration so that it survives a reboot (IOS-XE save-config, EOS write memory,
+// AOS-CX copy running-config startup-config).  A platform that keeps what it is told on its own (Junos commits, FortiOS, Meraki,
+// the Proxmox and vCenter platforms) has none, and a change there is already kept.
+type ConfigSaver interface {
+	SaveConfig(ctx context.Context) error
 }
 
 // Changer is a driver that can change what Change describes.  A driver that is not one answers ErrUnsupported to a
@@ -86,12 +106,20 @@ func (c *Change) Validate() error {
 			return errors.New("a description to set is needed (to remove one, clear it)")
 		}
 		c.Value = v
-	case ActClearDescription, ActShutdown, ActNoShutdown:
+	case ActClearDescription, ActShutdown, ActNoShutdown, ActClearCounters:
 		if c.Value != "" {
 			return fmt.Errorf("%s takes no value", c.Action)
 		}
 	default:
-		return fmt.Errorf("action %q: description, clear_description, shutdown or no_shutdown", c.Action)
+		return fmt.Errorf("action %q: description, clear_description, shutdown, no_shutdown or clear_counters", c.Action)
+	}
+	if c.All() && c.Action != ActClearCounters {
+		return fmt.Errorf("%s needs the ports named; only clear_counters can take all of them", c.Action)
+	}
+	for _, p := range c.Ports {
+		if strings.EqualFold(p, AllPorts) && !c.All() {
+			return errors.New("name the ports or say all, not both")
+		}
 	}
 	if len(c.Ports) == 0 {
 		return errors.New("name the ports")
@@ -135,7 +163,15 @@ var portTypes = map[string]string{
 	"lo": "Loopback", "loopback": "Loopback",
 	"ma": "Management", "mgmt": "Management", "management": "Management",
 	"lag": "lag",
+	// Junos
+	"ge-": "ge-", "xe-": "xe-", "et-": "et-", "ae": "ae", "irb": "irb",
+	// FortiOS: port1, wan2, lan1
+	"port": "port", "wan": "wan", "lan": "lan",
 }
+
+// literalPortRE is the few port names a device spells with no type and no number, or with no type this program has: FortiOS dmz, lan,
+// wan, internal, ha and fortilink, and BIG-IP 1.1 and mgmt.  They are taken as written, and the device's own list says whether it has them.
+var literalPortRE = regexp.MustCompile(`(?i)^(?:dmz|lan|wan|internal|ha|mgmt|fortilink|modem|\d+\.\d+|lo|ethernet|wi-fi|eth\d+\.\d+|(?:ens|eno|enp|enx|wlan|wlp|bond|br|docker|veth|virbr|vmbr|tun|tap|wg|ppp)[a-z0-9._-]*)$`)
 
 var portTokenRE = regexp.MustCompile(`^([A-Za-z][A-Za-z-]*?)(\d+(?:/\d+)*)(?:-(\d+(?:/\d+)*))?$`)
 
@@ -202,14 +238,16 @@ func ParsePorts(s string) ([]string, error) {
 			}
 		} else {
 			m := portTokenRE.FindStringSubmatch(tok)
-			if m == nil {
-				return nil, fmt.Errorf("port %q: write it like gi1/0/1, gi1/0/1-24, te1/1/3, et5, on Aruba CX 1/1/1-1/1/48, on a Meraki switch 1-24", tok)
+			typ, ok := "", false
+			if m != nil {
+				typ, ok = portTypes[strings.ToLower(m[1])]
 			}
-			typ, ok := portTypes[strings.ToLower(m[1])]
 			if !ok {
-				return nil, fmt.Errorf("port %q: %q is not a port type I know (gi, te, tw, fo, hu, fa, et, po, vl, lo, ma, lag or the full name)", tok, m[1])
-			}
-			if m[3] == "" {
+				if !literalPortRE.MatchString(tok) {
+					return nil, fmt.Errorf("port %q: write it like gi1/0/1, gi1/0/1-24, te1/1/3, et5, on Aruba CX 1/1/1-1/1/48, on a Meraki switch 1-24, on Junos ge-0/0/1, on FortiOS port1, on BIG-IP 1.1", tok)
+				}
+				names = []string{tok} // the device's own list decides whether it has it
+			} else if m[3] == "" {
 				names = []string{typ + m[2]}
 			} else {
 				var err error
@@ -242,6 +280,9 @@ var (
 	downRE     = regexp.MustCompile(`(?is)^\s*(?:please\s+)?(?:shut\s*down|disable|turn\s+off|admin(?:istratively)?\s+down|bring\s+down)\s+(?:the\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(.+?)\s*$`)
 	downPostRE = regexp.MustCompile(`(?is)^\s*(?:please\s+)?(?:shut|turn|take|bring|put)\s+(?:the\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(.+?)\s+(?:down|off)\s*$`)
 	upPostRE   = regexp.MustCompile(`(?is)^\s*(?:please\s+)?(?:turn|take|bring|put)\s+(?:the\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(.+?)\s+(?:up|on)\s*$`)
+	// clear (all) (port|interface) counters|statistics (on|for|of ports)
+	countersRE = regexp.MustCompile(`(?is)^\s*(?:please\s+)?(?:clear|reset|zero)\s+(?:the\s+)?(?:all\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(?:counters?|statistics|stats)\s*(?:(?:for|on|of|from|in)\s+(?:the\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(.*?))?\s*$`)
+	allPortsRE = regexp.MustCompile(`(?i)^(?:all(?:\s+(?:the\s+)?(?:ports?|interfaces?))?|every\s+(?:port|interface))$`)
 	upRE       = regexp.MustCompile(`(?is)^\s*(?:please\s+)?(?:no\s+shut(?:down)?|enable|turn\s+on|bring\s+up|admin(?:istratively)?\s+up)\s+(?:the\s+)?(?:(?:ports?|interfaces?|int|intf)\s+)?(.+?)\s*$`)
 )
 
@@ -275,6 +316,7 @@ func unquote(s string) (string, error) {
 //	shut down | disable | turn off | admin down  gi1/0/1-24
 //	no shutdown | enable | turn on | bring up | admin up  gi1/0/1-24
 //	shut port 1/1/1 down | turn gi1/0/1-24 off | bring port 1/1/5 up      (the verb either side of the ports)
+//	clear all port counters | clear counters on gi1/0/1-24             (clear|reset|zero; counters|statistics|stats)
 //
 // Ports are written with their type (gi1/0/1-24, te1/1/3, et1-48) or, as on Aruba CX, without (1/1/1-1/1/48).  A port with no type
 // is matched to the device's own ports in resolve: exactly, or by the one port whose name ends with it.
@@ -296,6 +338,14 @@ func ParseChange(text string) (Change, error) {
 		c := Change{Action: act, Ports: ps, Value: val}
 		return c, c.Validate()
 	}
+	if m := countersRE.FindStringSubmatch(t); m != nil {
+		ports := strings.TrimSpace(m[1])
+		if ports == "" || allPortsRE.MatchString(ports) {
+			c := AllPortsChange()
+			return c, c.Validate()
+		}
+		return finish(ActClearCounters, ports, "")
+	}
 	for _, re := range []*regexp.Regexp{setDescRE, setDesc2RE, descRE} {
 		if m := re.FindStringSubmatch(t); m != nil {
 			v, err := unquote(m[2])
@@ -313,7 +363,7 @@ func ParseChange(text string) (Change, error) {
 			return finish(x.act, m[1], "")
 		}
 	}
-	return Change{}, errors.New("I did not understand that. I know: change the description for ports gi1/0/1-24 to read \"text\"; clear the description on gi1/0/1-24; shut down gi1/0/1-24; no shutdown gi1/0/1-24")
+	return Change{}, errors.New("I did not understand that. I know: change the description for ports gi1/0/1-24 to read \"text\"; clear the description on gi1/0/1-24; shut down gi1/0/1-24; no shutdown gi1/0/1-24; clear all port counters; clear counters on gi1/0/1-24")
 }
 
 // ── the common part of every driver's change ──
@@ -398,6 +448,13 @@ func runChange(ctx context.Context, st changeStore, c Change, dry bool) (ChangeR
 	res := ChangeResult{DryRun: dry, Changes: []PortChange{}}
 	if err := c.Validate(); err != nil {
 		return res, err
+	}
+	if c.Action == ActClearCounters {
+		cl, ok := st.(counterClearer)
+		if !ok {
+			return res, errors.New("this platform's API has no way to clear interface counters")
+		}
+		return runClear(ctx, cl, c, dry)
 	}
 	before, err := st.read(ctx)
 	if err != nil {
@@ -501,7 +558,7 @@ func verifyPlan(have map[string]portState, plan []portPlan) error {
 // the gateway off, and with it the read-back and the way back.  Only a shutdown can do that; the other actions skip the check.
 // When the device's address is a host name, what it resolves to is what counts.
 func keepManagement(ctx context.Context, drv Driver, d Device, c Change) error {
-	if c.Action != ActShutdown {
+	if c.Action != ActShutdown || !guardsOn {
 		return nil
 	}
 	mgmt := map[netip.Addr]bool{}
@@ -536,4 +593,54 @@ func keepManagement(ctx context.Context, drv Driver, d Device, c Change) error {
 		}
 	}
 	return nil
+}
+
+// ── clearing counters ──
+
+// counterClearer is what a driver gives to clear interface counters (a store that has it is asked by runChange; a driver with no
+// typed port changes but this one calls runClear itself).  Counters are not configuration: there is nothing to read back and
+// nothing to put back, so a clear is planned from the ports the device has and reported as sent.
+type counterClearer interface {
+	// ports lists the interface names the device has (what a named port is matched against).
+	ports(ctx context.Context) ([]string, error)
+	// clear zeroes the counters of the ports (every port when all is set).
+	clear(ctx context.Context, ports []string, all bool) error
+}
+
+// runClear plans and makes a clear_counters change.
+func runClear(ctx context.Context, cl counterClearer, c Change, dry bool) (ChangeResult, error) {
+	res := ChangeResult{DryRun: dry, Changes: []PortChange{}}
+	if err := c.Validate(); err != nil {
+		return res, err
+	}
+	if c.Action != ActClearCounters {
+		return res, fmt.Errorf("this platform's API only clears counters here, not %s", c.Action)
+	}
+	var ports []string
+	if c.All() {
+		res.Changes = append(res.Changes, PortChange{Port: "all ports", Field: "counters", Before: "counting", After: "cleared"})
+	} else {
+		names, err := cl.ports(ctx)
+		if err != nil {
+			return res, fmt.Errorf("reading the ports before the change: %w", err)
+		}
+		have := make(map[string]portState, len(names))
+		for _, n := range names {
+			have[n] = portState{}
+		}
+		if ports, err = resolve(have, c.Ports); err != nil {
+			return res, err
+		}
+		for _, p := range ports {
+			res.Changes = append(res.Changes, PortChange{Port: p, Field: "counters", Before: "counting", After: "cleared"})
+		}
+	}
+	if dry {
+		return res, nil
+	}
+	if err := cl.clear(ctx, ports, c.All()); err != nil {
+		return res, err
+	}
+	res.Applied = true // sent and accepted; counters are not read back, and a clear cannot be undone
+	return res, nil
 }
