@@ -43,7 +43,7 @@ func (s *Supervisor) deviceInventory() ([]device.Device, []device.Credential) {
 	if s.dc == nil {
 		return nil, nil
 	}
-	return append([]device.Device(nil), s.dc.Settings.Devices...), append([]device.Credential(nil), s.dc.Settings.DeviceCredentials...)
+	return s.dc.effectiveDevices(), append([]device.Credential(nil), s.dc.Settings.DeviceCredentials...)
 }
 
 // deviceTuning is how often the devices are looked at (settings.device_check_s, device_facts_min, device_live_check_s, device_live_facts_min).

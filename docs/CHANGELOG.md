@@ -1,5 +1,34 @@
 # Changelog
 
+## [v169] - 2026-11-15 — Ask removed from a device's right-click menu
+
+### Removed
+- **Ask ▸** (Facts, Interfaces, Ports, Neighbors, Routes, Firewall, Configuration, Show command, Look up user/computer/group) from a device's right-click menu on Topology. The menu is now: Network tools ▸, (Import / Troubleshoot / Sign in for the platforms that have them), Edit, Copy, Paste, Pause ▸, Delete. The code behind it is gone too. Asking a device is still possible from an assistant over MCP (`device_facts`, `device_show` and the rest) and the API; the web GUI no longer has a way to do it.
+
+### Verified
+- gofmt, go vet, go test -race pass; the device menu in headless Chromium.
+
+### Not verified
+- Nothing tested against real devices.
+
+## [v168] - 2026-11-15 — Device right-click menu; Pause a device on this node; copy and paste anycast addresses
+
+### Changed
+- **A device's right-click menu on Topology** is now: Ask ▸, Network tools ▸, (Import / Troubleshoot / Sign in for the platforms that have them), then Edit, Copy, Paste, Pause ▸ (This node / All nodes), and Delete. **Ask ▸** is kept because it is the only place left in the GUI to ask a device (Monitor ▸ Devices no longer has the form). **Delete** takes the device off this gateway, the same as the Delete key; it stays in the inventory. To remove it from the inventory, pick it and choose **Delete devices**, or use Configure ▸ Devices. **Copy** / **Paste** are the old Copy device / Paste device; Paste puts the copied device(s) on this gateway.
+- **Pause ▸ All nodes** is what Disable was (the inventory's switch: no node contacts the device). **Pause ▸ This node** is new: only this node leaves the device out (the saved list `paused_devices_here`, local to the node, not replicated); the drawing shows it as paused and the tooltip says "Paused on this node". A name no longer in the inventory is dropped from the list when the configuration is saved. History shows it as "paused on this node: NAME".
+- CLI: `--canvas-pause|--canvas-resume device --device NAME --scope node|all` (default all, as before).
+
+### Added
+- **Copy and paste anycast addresses**, as in dnsdir and ntpdir: right-click an anycast address ▸ Copy ▸ Anycast address or All anycast addresses (also put on the system clipboard as text); right-click another gateway ▸ Paste ▸ Anycast address or All anycast addresses. An address the gateway already has, or that is any gateway's own address, is left out; pasting on the gateway they came from is refused, with the reason as the tooltip.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`; a new test (`TestCanvasDevicePauseThisNode`) covers pausing on this node, that the saved inventory is not changed, resuming and a bad scope.
+- Headless Chromium against a mocked API: the device menu reads as above; Pause ▸ This node saves `paused_devices_here: ["sw1"]` and leaves the device enabled; copying All anycast addresses on one gateway and pasting on another adds both.
+
+### Not verified
+- Not run against a real cluster or real devices: that a device paused on this node is really not contacted from here (health checks, Ask, changes, captures) rests on the code reading it as disabled and was not seen live. A device paused on this node still shows as answering on another node's pages.
+- Delete is "off this gateway" (the Delete key's meaning); the old "Delete device" (out of the inventory) is no longer in this menu.
+
 ## [v167] - 2026-11-15 — Theme toggle: Light / Dark / Auto
 
 ### Added

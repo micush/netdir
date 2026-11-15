@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -337,5 +338,44 @@ func TestCanvasDeviceDisable(t *testing.T) {
 		if _, err := applyCanvasEdit(dc, e); err == nil {
 			t.Errorf("%+v accepted", e)
 		}
+	}
+}
+
+// Pause ▸ This node on a device: only this node's list changes; the inventory entry stays enabled, and this node reads it as disabled.
+func TestCanvasDevicePauseThisNode(t *testing.T) {
+	dc := &DaemonConfig{}
+	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}, {Name: "sw2", Platform: "iosxe", Address: "10.0.0.3", Credential: "c"}}
+	if msg, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "device", Device: "sw1", Scope: "node"}); err != nil || !strings.Contains(msg, "this node") {
+		t.Fatalf("pause here: %q %v", msg, err)
+	}
+	if dc.Settings.Devices[0].Disabled {
+		t.Error("pausing on this node must not disable the device for every node")
+	}
+	eff := dc.effectiveDevices()
+	if !eff[0].Disabled || eff[1].Disabled {
+		t.Errorf("effective devices: sw1 disabled=%v, sw2 disabled=%v", eff[0].Disabled, eff[1].Disabled)
+	}
+	if dc.Settings.Devices[0].Disabled {
+		t.Error("effectiveDevices changed the saved inventory")
+	}
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "device", Device: "sw1", Scope: "node"}); !errors.Is(err, errNoChange) {
+		t.Errorf("pausing twice on this node: %v", err)
+	}
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "resume", Kind: "device", Device: "sw1", Scope: "node"}); err != nil || len(dc.PausedDevicesHere) != 0 {
+		t.Errorf("resume here: %v %v", err, dc.PausedDevicesHere)
+	}
+	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "device", Device: "sw1", Scope: "bogus"}); err == nil {
+		t.Error("a bad scope was accepted")
+	}
+	// a name that is no longer in the inventory is dropped by Validate
+	dc2 := newDaemonConfig()
+	dc2.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}}
+	dc2.Settings.DeviceCredentials = []device.Credential{{Name: "c", Username: "u", Password: "p"}}
+	dc2.PausedDevicesHere = []string{"sw1", "gone", "sw1"}
+	if err := dc2.Validate(); err != nil {
+		t.Skipf("a minimal configuration does not validate here: %v", err)
+	}
+	if len(dc2.PausedDevicesHere) != 1 || dc2.PausedDevicesHere[0] != "sw1" {
+		t.Errorf("paused_devices_here after Validate: %v", dc2.PausedDevicesHere)
 	}
 }

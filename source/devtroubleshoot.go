@@ -160,7 +160,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	if err != nil {
 		return nil, err
 	}
-	devs, creds := dc.Settings.Devices, dc.Settings.DeviceCredentials
+	devs, creds := dc.effectiveDevices(), dc.Settings.DeviceCredentials
 	ask := func(d device.Device, to time.Duration, fn func(context.Context, device.Driver) (any, error)) (any, error) {
 		r := device.FanoutReuse(context.Background(), []device.Device{d}, creds, 1, to, fn)[0]
 		if !r.OK {

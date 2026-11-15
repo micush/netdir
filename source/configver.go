@@ -521,6 +521,17 @@ func configSections(a, b *DaemonConfig) []Section {
 		}
 	}
 
+	if padd, prem := setDiff(a.PausedDevicesHere, b.PausedDevicesHere); len(padd)+len(prem) > 0 {
+		var parts []string
+		if len(padd) > 0 {
+			parts = append(parts, "paused on this node: "+strings.Join(padd, ", "))
+		}
+		if len(prem) > 0 {
+			parts = append(parts, "resumed on this node: "+strings.Join(prem, ", "))
+		}
+		out = append(out, Section{"Devices", strings.Join(parts, "; ")})
+	}
+
 	if dadd, drem := setDiff(deviceNames(a.Settings.Devices), deviceNames(b.Settings.Devices)); len(dadd)+len(drem) > 0 {
 		var parts []string
 		if len(dadd) > 0 {

@@ -571,6 +571,22 @@ type DaemonConfig struct {
 	// replicated; omitempty so a config that never used it stays readable by older
 	// versions.
 	NodePaused bool `json:"node_paused,omitempty"`
+	// PausedDevicesHere lists devices (by name) that this node does not contact: Pause ▸ This node on a device.  Local to the
+	// node, never replicated (Disabled on the inventory entry is the same for every node); omitempty so an older version
+	// still reads the file.  A name that is not in the inventory is dropped when the configuration is validated.
+	PausedDevicesHere []string `json:"paused_devices_here,omitempty"`
+}
+
+// effectiveDevices is the inventory as this node uses it: a device paused on this node (PausedDevicesHere) reads as disabled,
+// so nothing here contacts it.  It is a copy; the saved inventory is not changed.
+func (dc *DaemonConfig) effectiveDevices() []device.Device {
+	out := append([]device.Device(nil), dc.Settings.Devices...)
+	for i := range out {
+		if containsStr(dc.PausedDevicesHere, out[i].Name) {
+			out[i].Disabled = true
+		}
+	}
+	return out
 }
 
 // effective is the configuration the supervisor runs: with the node paused every
@@ -749,6 +765,18 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if err := dc.validateGatewayDevices(); err != nil {
 			return err
+		}
+		if len(dc.PausedDevicesHere) > 0 { // keep only devices that exist, once each
+			var keep []string
+			for _, n := range dc.PausedDevicesHere {
+				for _, d := range dc.Settings.Devices {
+					if d.Name == n && !containsStr(keep, n) {
+						keep = append(keep, n)
+						break
+					}
+				}
+			}
+			dc.PausedDevicesHere = keep
 		}
 		if len(dc.Settings.Devices) == 0 {
 			dc.Settings.Devices = nil

@@ -177,7 +177,7 @@ func (f *cliFlags) run(sock string) bool {
 			e.Action, e.Kind = "resume", *f.canvasResume
 		}
 		if (e.Action == "pause" || e.Action == "resume") && e.Kind != "gateway" && e.Kind != "anycast" && e.Kind != "device" {
-			fatalf("only a gateway, an anycast address or a device can be paused: --canvas-%s gateway|anycast --group N [--address ADDR] --scope node|all, or --canvas-%s device --device NAME", e.Action, e.Action)
+			fatalf("only a gateway, an anycast address or a device can be paused: --canvas-%s gateway|anycast --group N [--address ADDR] --scope node|all, or --canvas-%s device --device NAME [--scope node|all]", e.Action, e.Action)
 		}
 		if e.Action == "del" && e.Kind == "gateway" {
 			askYes(fmt.Sprintf("Delete gateway %d?", e.Group), *f.yes)

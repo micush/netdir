@@ -108,7 +108,8 @@ the web GUI):
                    --node-rename NAME   (this node's host name and its /etc/hosts entry; on another node: pick it in the Node menu)
                    --canvas-move anycast --group N --address ADDR --to N   (its place in the list, 1 = top)
                    --canvas-pause|--canvas-resume anycast --group N --address ADDR --scope node|all
-                   --canvas-pause|--canvas-resume device --device NAME   (disable / enable a device: a disabled one is never contacted)
+                   --canvas-pause|--canvas-resume device --device NAME [--scope node|all]   (scope all, the default: disable / enable a device, a
+                                        disabled one is contacted by no node; scope node: this node alone leaves it out)
                                         (stop/start announcing one anycast address on this node only, or on every node)
                    --canvas-del gateway --group N
                    --canvas-del anycast --group N --address ADDR

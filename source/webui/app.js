@@ -988,7 +988,7 @@
       });
       devs.forEach((name, i) => {
         const d = devByName(name), { x, y } = devAt(i), mx = x + SW / 2;
-        const info = st.devs[name], c = d.disabled ? "paused" : info ? info.status : "idle";
+        const info = st.devs[name], c = d.disabled || devPausedHere(name) ? "paused" : info ? info.status : "idle";
         lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: y, class: "edge" + (c === "bad" ? " down" : "") }));
         shapes.push(sv("g", { class: "shape drag st-" + c + (sel("dev", name) ? " sel" : ""), "data-col": "dev:" + name, tabindex: "0", role: "button", "aria-label": "Device " + name,
           onclick: pick("dev", name), oncontextmenu: rightClick("dev", name),
@@ -1272,35 +1272,8 @@
       return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""), info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
         f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
-        (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : ""].filter(Boolean).join("\n");
+        (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : devPausedHere(d.name) ? "Paused on this node: not contacted from here" : ""].filter(Boolean).join("\n");
     };
-    // Facts, Interfaces, … of one device: asked through the API like Monitor ▸ Devices, shown as text in a popup
-    const pad = (rows) => {
-      const w = rows[0].map((_, i) => Math.max(...rows.map((r) => String(r[i] == null ? "" : r[i]).length)));
-      return rows.map((r) => r.map((c, i) => String(c == null ? "" : c).padEnd(w[i])).join("  ").trimEnd()).join("\n");
-    };
-    const devText = (op, r) => {
-      if (!r.ok) return r.error;
-      const x = r.data;
-      if (op === "facts") return [["Host name", x.hostname], ["Vendor", x.vendor], ["Model", x.model], ["OS version", x.os_version], ["Serial", x.serial], ["Up", x.uptime_s ? spanText(x.uptime_s) : ""]]
-        .filter((l) => l[1]).map((l) => l[0].padEnd(12) + l[1]).join("\n");
-      const yn = (b) => (b == null ? "" : b ? "up" : "down");
-      if (op === "interfaces") return pad([["Interface", "Admin", "Link", "Speed", "Address", "Description"]].concat((x || []).map((i) => [i.name, yn(i.admin_up), yn(i.oper_up), i.speed_mbps ? i.speed_mbps + " Mb/s" : "", (i.addresses || []).join(","), i.description || ""])));
-      if (op === "neighbors") return (x || []).length ? pad([["Local port", "Neighbor", "Its port", "Its address"]].concat(x.map((n) => [n.local_port, n.remote_name || "", n.remote_port || "", n.remote_addr || ""]))) : "No neighbors.";
-      if (op === "ports") return pad([["Port", "Link", "In octets", "In errors", "Out octets", "Out errors", "Flaps"]].concat((x || []).map((i) => { const c = i.counters || {}; return [i.name, yn(i.oper_up), c.in_octets || 0, c.in_errors || 0, c.out_octets || 0, c.out_errors || 0, c.flaps || 0]; })));
-      if (op === "routes") return (x || []).length ? pad([["Prefix", "Protocol", "Next hop", "Interface", "Distance", "Metric", "VRF"]].concat(x.map((r) => [r.prefix, r.protocol || "", r.next_hop || "", r.interface || "", r.distance || "", r.metric || "", r.vrf || ""]))) : "No routes.";
-      if (op === "vlans") return (x || []).length ? pad([["VLAN", "Name", "Status", "Ports"]].concat(x.map((v) => [v.id, v.name || "", v.status || "", (v.ports || []).join(",")]))) : "No VLANs.";
-      return typeof x === "string" ? x : plainText(x);
-    };
-    const OPWORD = { facts: "Facts", interfaces: "Interfaces", ports: "Ports", neighbors: "Neighbors", neighbor_details: "LLDP and CDP details", routes: "Routes", routing: "Routing protocols", firewall: "Firewall", resources: "CPU, memory and power", vlans: "VLANs", api_catalog: "API catalog", api: "API path", config: "Configuration", show: "Show" };
-    function devAsk(name, op, cmd) {
-      textPopup(OPWORD[op] + " — " + name + (cmd ? ": " + cmd : ""), async (put) => {
-        const q = new URLSearchParams({ target: name, op });
-        if (cmd) q.set("cmd", cmd);
-        const d = (await api("GET", "/api/devices/query?" + q.toString())).data;
-        put(devText(op, d.results[0]));
-      });
-    }
     // Entra: sign in with a browser (the device code flow); the daemon stores the result in the device's login, so the page loads the config again
     function signinDialog(name) {
       const link = h("a", { class: "btn", href: "#", target: "_blank", rel: "noopener noreferrer", hidden: true }, "Open sign-in page");
@@ -1346,41 +1319,22 @@
         return "";
       }, "Run", true);
     }
-    // Active Directory: a user, computer or group by name, shown as text
-    function lookupForm(name, kind) {
-      form("Look up " + kind + " — " + name, [{ k: "who", l: kind === "computer" ? "Computer" : kind === "group" ? "Group" : "User", v: kind === "user" ? state.lastUser || "" : "", ph: kind === "computer" ? "PC-123" : kind === "group" ? "Domain Admins" : "jsmith" }], (v) => {
-        if (!v.who.trim()) return "Give a name.";
-        if (kind === "user") state.lastUser = v.who.trim();
-        setTimeout(() => devAsk(name, "show", "show " + kind + " " + v.who.trim()), 0);
-        return "";
-      }, "Look up", true);
-    }
-    function showForm(name) {
-      form("Show command — " + name, [{ k: "cmd", l: "Command", v: state.lastShow || "", ph: "show version" }], (v) => {
-        if (!/^show\s+\S/.test(v.cmd)) return "Only a show command, e.g. show version.";
-        state.lastShow = v.cmd;
-        setTimeout(() => devAsk(name, "show", v.cmd), 0);
-        return "";
-      }, "Run", true);
-    }
-    // Ask every device of the gateway at once: Monitor ▸ Devices, with the target filled in and the question asked
     // Copy a device (right-click it), or every device of a gateway (right-click the gateway), and paste them on another gateway (right-click the circle, or the empty drawing)
     let devClip = [];
     const clipNew = (g) => devClip.filter((n) => devByName(n) && !(g.devices || []).includes(n));
-    const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy device, or a gateway ▸ Copy ▸ All devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
+    const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy, or a gateway ▸ Copy ▸ All devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
     const pasteDevice = (g) => quick(() => { const add = clipNew(g); g.devices = (g.devices || []).concat(add); cv.sel = { kind: "dev", addr: add[add.length - 1] }; });
     const pasteItem = (g) => [devClip.length > 1 ? "Paste " + devClip.length + " devices" : "Paste device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), "", null, pasteWhy(g)];
     const devItems = (g, name) => {
       const d = devByName(name);
-      return [["Ask", null, "", [["Facts", () => devAsk(name, "facts")], ["Interfaces", () => devAsk(name, "interfaces")], ["Ports", () => devAsk(name, "ports")], ["Neighbors", () => devAsk(name, "neighbors")],
-        ["LLDP and CDP details", () => devAsk(name, "neighbor_details")], ["Routes", () => devAsk(name, "routes")], ["Routing protocols", () => devAsk(name, "routing")], ["Firewall", () => devAsk(name, "firewall")], ["CPU, memory and power", () => devAsk(name, "resources")], ["VLANs", () => devAsk(name, "vlans")], ["API catalog", () => devAsk(name, "api_catalog")],
-        ["Configuration", () => devAsk(name, "config")], ["Show command", () => showForm(name)],
-        ...(d.platform === "ad" ? [["Look up user", () => lookupForm(name, "user")], ["Look up computer", () => lookupForm(name, "computer")], ["Look up group", () => lookupForm(name, "group")]] : [])]],
-        ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")], "-",
+      return [
+        ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")],
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus", "device42"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
-        [d.disabled ? "Enable" : "Disable", () => toggleDevice(d)], ["Edit", () => deviceForm(g, name)], ["Copy device", () => { devClip = [name]; }], ["Remove from this gateway", delSel], ["Delete device", () => deleteDevice(name), "danger"]];
+        "-", ["Edit", () => deviceForm(g, name)], ["Copy", () => { devClip = [name]; }], ["Paste", () => pasteDevice(g), "", null, pasteWhy(g)],
+        ...pauseItems("", (sc) => (sc === "all" ? !!d.disabled : devPausedHere(name)), (sc, p) => pauseDevice(d, sc, p)),
+        "-", ["Delete", delSel, "danger"]];
     };
     // Add a device to the gateway: one already in the inventory, or a new one (with a new login, or one that exists).  Edit changes
     // the device everywhere it is drawn.
@@ -1461,16 +1415,12 @@
         return null;
       }, edit ? "Save" : "Add device");
     }
-    function toggleDevice(d) {   // a disabled device stays in the inventory and is never contacted
-      if (d.disabled) delete d.disabled; else d.disabled = true;
-      commit();
-    }
-    function deleteDevice(name) {
-      const on = groups().filter((x) => (x.devices || []).includes(name));
-      confirmDialog("Delete device " + name + "?", "This takes it out of the inventory" + (on.length > 1 ? " and off all " + on.length + " gateways it is on" : "") + ". Its login stays. You can restore it later from History.", "Delete device", () => {
-        cv.cfg.settings.devices = inventory().filter((x) => x.name !== name);
-        for (const gg of groups()) if (gg.devices) { gg.devices = gg.devices.filter((n) => n !== name); if (!gg.devices.length) delete gg.devices; }
-        cv.sel = null; commit();
+    // Pause ▸ All nodes is the inventory's switch (a disabled device is contacted by no node); This node keeps the name in this node's own list
+    const devPausedHere = (name) => (cv.cfg.paused_devices_here || []).includes(name);
+    function pauseDevice(d, scope, pause) {
+      quick(() => {
+        if (scope === "all") { if (pause) d.disabled = true; else delete d.disabled; }
+        else toggleIn(cv.cfg, "paused_devices_here", d.name, pause);
       });
     }
     // several devices picked on the map: delete them from the inventory
@@ -1489,7 +1439,7 @@
       const plan = copyPlan(g);
       confirmDialog("Copy the devices to every other gateway?", "Adds the devices of " + gwLabel(g) + " that are missing there: " + plan.map(([o, add]) => gwLabel(o) + " " + add.length).join(", ") + ". Nothing is removed from any gateway.", "Copy to " + plan.length + " gateway" + (plan.length > 1 ? "s" : ""), () => quick(() => { for (const [o, add] of plan) o.devices = (o.devices || []).concat(add); }));
     };
-    const pasteSub = (g) => [[devClip.length > 1 ? devClip.length + " devices" : "Device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), pasteWhy(g)]];
+    const pasteSub = (g) => [[devClip.length > 1 ? devClip.length + " devices" : "Device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), pasteWhy(g)], ...pasteAnySubs(g)];
     const gwItems = (g) => [["Statistics", () => selectTab("mcpusage")],
       "-",
       ["Edit", null, "", [["Gateway", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")]]],
@@ -1507,7 +1457,32 @@
         if (!g[k].length) delete g[k];
       });
     }
-    const anyItems = (g, addr) => [["Edit", () => anycastForm(g, addr)],
+    // Anycast addresses: right-click one ▸ Copy ▸ Anycast address / All anycast addresses; right-click another gateway ▸ Paste ▸ the same.
+    // They are added to that gateway's own list (a pause stays where it was).  Copy also puts them on the system clipboard as plain
+    // text.  Pasting on the gateway they came from is refused; an address the gateway already has, or that is any gateway's shared
+    // address, is left out.
+    let anyClip = null, anysClip = null;
+    const copyAnycast = (g, addr) => { anyClip = { list: [addr], gid: g.group_id }; try { navigator.clipboard.writeText(addr); } catch (_) { /* the page keeps it for Paste */ } };
+    const copyAllAnycast = (g) => { anysClip = { list: (g.extra_vips || []).slice(), gid: g.group_id }; try { navigator.clipboard.writeText(anysClip.list.join("\n")); } catch (_) { /* the page keeps it for Paste */ } };
+    const anyPasteList = (g, clip) => (clip.list || []).map((x) => x.toLowerCase()).filter((a) => !(g.extra_vips || []).includes(a)
+      && !groups().some((x) => [x.vip4, x.vip6, ...(x.more_vip4 || []), ...(x.more_vip6 || [])].some((z) => z && z.split("/")[0].toLowerCase() === a)));
+    const pasteAnyWhy = (g, clip, none) => {
+      if (!clip) return none;
+      if (clip.gid === g.group_id) return "Those are on this gateway: paste them on another gateway";
+      if (!clip.list.length) return "That gateway has no anycast addresses";
+      if (!anyPasteList(g, clip).length) return clip.list.length === 1 ? "This gateway already has that address, or it is a gateway's own address" : "This gateway already has all of them, or they are gateways' own addresses";
+      return "";
+    };
+    const pasteOneWhy = (g) => pasteAnyWhy(g, anyClip, "No anycast address copied yet: right-click an anycast address ▸ Copy ▸ Anycast address");
+    const pasteAllWhy = (g) => pasteAnyWhy(g, anysClip, "No anycast addresses copied yet: right-click an anycast address ▸ Copy ▸ All anycast addresses");
+    function pasteAnycast(g, clip) {
+      if (pasteAnyWhy(g, clip, "none")) return;
+      const add = anyPasteList(g, clip);
+      quick(() => { g.extra_vips = (g.extra_vips || []).concat(add); cv.sel = { kind: "any", addr: add[0] }; });
+    }
+    const copyAnyItem = (g, addr) => ["Copy", null, "", [["Anycast address", () => copyAnycast(g, addr)], ["All anycast addresses", () => copyAllAnycast(g), (g.extra_vips || []).length > 1 ? "" : "This gateway has only this one"]]];
+    const pasteAnySubs = (g) => [["Anycast address", () => pasteAnycast(g, anyClip), pasteOneWhy(g)], ["All anycast addresses", () => pasteAnycast(g, anysClip), pasteAllWhy(g)]];
+    const anyItems = (g, addr) => [["Edit", () => anycastForm(g, addr)], copyAnyItem(g, addr),
       ...pauseItems("", (sc) => anyPaused(g, addr, sc), (sc, p) => pauseAnycast(g, addr, sc, p)), "-", ["Delete", delSel, "danger"]];
     // the cluster's nodes (the parallelograms left of the circle)
     const nodeTip = (n) => [

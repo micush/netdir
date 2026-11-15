@@ -309,7 +309,7 @@ func (m *Mgmt) withBelow(tool string, raw json.RawMessage, actor string, here fu
 		return nil, err
 	}
 	dirOf := map[string]device.Device{}
-	for _, d := range dc.Settings.Devices {
+	for _, d := range dc.effectiveDevices() {
 		dirOf[d.Name] = d
 	}
 	cred := map[string]device.Credential{}

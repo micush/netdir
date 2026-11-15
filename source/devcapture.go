@@ -49,7 +49,7 @@ func (m *Mgmt) deviceCaptureHere(raw json.RawMessage, actor string) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	devs, creds := dc.Settings.Devices, dc.Settings.DeviceCredentials
+	devs, creds := dc.effectiveDevices(), dc.Settings.DeviceCredentials
 	if len(devs) == 0 {
 		return nil, errors.New("no devices are configured (settings.devices)")
 	}

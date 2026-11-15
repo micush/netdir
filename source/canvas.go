@@ -693,23 +693,45 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 		}
 		return "", fmt.Errorf("a node can be added to or removed from a gateway: --canvas-add|--canvas-del node --group N --node NODE")
 	case "device":
-		if e.Action == "pause" || e.Action == "resume" { // the inventory's switch: a disabled device is never contacted
+		if e.Action == "pause" || e.Action == "resume" { // all nodes: the inventory's switch (a disabled device is never contacted); node: only this node
+			scope := orDefault(e.Scope, "all")
+			if scope != "node" && scope != "all" {
+				return "", errors.New("--scope must be node (this node) or all (every node)")
+			}
+			if e.Device == "" {
+				return "", errors.New("--device is required: a device's name (settings.devices)")
+			}
 			for i := range dc.Settings.Devices {
 				d := &dc.Settings.Devices[i]
 				if d.Name != e.Device {
 					continue
 				}
-				if d.Disabled == (e.Action == "pause") {
+				pause := e.Action == "pause"
+				if scope == "node" {
+					if containsStr(dc.PausedDevicesHere, d.Name) == pause {
+						return "", errNoChange
+					}
+					if pause {
+						dc.PausedDevicesHere = append(dc.PausedDevicesHere, d.Name)
+						return fmt.Sprintf("device %s paused on this node: this node does not contact it", e.Device), nil
+					}
+					var keep []string
+					for _, n := range dc.PausedDevicesHere {
+						if n != d.Name {
+							keep = append(keep, n)
+						}
+					}
+					dc.PausedDevicesHere = keep
+					return fmt.Sprintf("device %s resumed on this node", e.Device), nil
+				}
+				if d.Disabled == pause {
 					return fmt.Sprintf("device %s is already %s", e.Device, map[bool]string{true: "disabled", false: "enabled"}[d.Disabled]), nil
 				}
-				d.Disabled = e.Action == "pause"
+				d.Disabled = pause
 				if d.Disabled {
-					return fmt.Sprintf("device %s disabled: it is not contacted until it is enabled again", e.Device), nil
+					return fmt.Sprintf("device %s disabled: no node contacts it until it is enabled again", e.Device), nil
 				}
 				return fmt.Sprintf("device %s enabled", e.Device), nil
-			}
-			if e.Device == "" {
-				return "", errors.New("--device is required: a device's name (settings.devices)")
 			}
 			return "", fmt.Errorf("there is no device %q", e.Device)
 		}
