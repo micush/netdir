@@ -860,6 +860,7 @@ func (m *Mgmt) CanvasEdit(e canvasEdit, actor string) (string, error) {
 			return "", err
 		}
 	}
+	known := groupIDSet(dc)
 	msg, err := applyCanvasEdit(dc, e)
 	if errors.Is(err, errNoChange) {
 		return "nothing to change", nil
@@ -867,6 +868,7 @@ func (m *Mgmt) CanvasEdit(e canvasEdit, actor string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	m.holdBackFromNewGateways(dc, known)
 	if err := m.PutConfig(dc, actor, "canvas: "+e.Action+" "+e.Kind); err != nil {
 		return "", err
 	}

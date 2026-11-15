@@ -26,17 +26,7 @@ The web GUI, taken in a lab: two Juniper routers and a Centreon server behind on
 
 ![Configure, MCP: allowed sources and keys](snaps/configure-mcp.png)
 
-**Monitor ▸ Devices**: ask every device, or a group of them, the same question. Facts from all three at once:
-
-![Monitor, Devices: facts of every device](snaps/monitor-facts.png)
-
-The interfaces of one router:
-
-![Monitor, Devices: the interfaces of a Juniper router](snaps/monitor-interfaces.png)
-
-A show command on one device:
-
-![Monitor, Devices: show bgp summary on a Juniper router](snaps/monitor-show.png)
+**Monitor ▸ Devices**: the devices at a glance, counted by state, with each one's state, platform, address and tags. Ask a device its facts, interfaces or a show command from its right-click menu on the Topology drawing, or from an assistant over MCP.
 
 ## Contents
 
@@ -68,7 +58,7 @@ A show command on one device:
 | Writes to devices | typed port changes from plain English on Catalyst IOS-XE, Arista EOS, Aruba CX and Meraki switches (`device_change`), and any configuration change on every platform (`device_change_raw`: REST request, PAN-OS action, or CLI lines); an `rw` key, ACL entry or GUI account may, `ro` may not; not yet run on real gear |
 | `show` commands, text running-configs | NX-OS, EOS and PAN-OS answer them over their APIs; IOS-XE, ArubaOS-CX and FortiOS need an SSH transport, not built yet; Infoblox and Technitium have none |
 | NX-OS, EOS, ArubaOS-CX, PAN-OS, Infoblox and Technitium drivers | built against vendor documentation and a test stub, not yet run on real gear (see the changelog) |
-| Web GUI | Configure ▸ Devices edits the inventory and logins, Monitor ▸ Devices asks the devices and holds the network tools. |
+| Web GUI | Configure ▸ Devices edits the inventory and logins, Monitor ▸ Devices lists the devices with their state (right-click a row for the network tools). |
 
 ## How it works
 
@@ -605,7 +595,7 @@ Hiding is best effort: a value written in an unusual way, an address split over 
 
 ## Trying a device first: devprobe
 
-In the GUI, Monitor ▸ Devices asks the devices of a target for their facts, interfaces, port counters, neighbors, routes, routing protocols, firewall rules, configuration or a show command, and Configure ▸ Devices edits the inventory and the logins.
+In the GUI, a device's right-click menu on Topology asks it for its facts, interfaces, port counters, neighbors, routes, routing protocols, firewall rules, configuration or a show command, Monitor ▸ Devices lists the devices with their state, and Configure ▸ Devices edits the inventory and the logins.
 
 `source/tools/devprobe` runs the same drivers from any machine, macOS included, against an inventory file. It's the quickest way to check a device before it goes into a gateway:
 

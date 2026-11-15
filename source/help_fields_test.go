@@ -115,7 +115,6 @@ func TestHelpCoversEveryField(t *testing.T) {
 		"anycast_bgp":     {"Local AS number", "Router ID", "New neighbor address", "New neighbor AS", "New neighbor description", "New neighbor password"},
 		"anycast_ospf":    {"Router ID", "Hello interval", "Dead interval", "Metric", "New interface name", "New interface area", "New interface link type", "New interface key"},
 		"history":         {"Compare version", "Configuration file"},
-		"devices":         {"Target", "Ask for", "Command", "Address"},
 		"host":            {"Time range", "From", "To"},
 		"capture":         {"Interface", "Filter"},
 		"log":             {"Filter text", "Level", "Time range", "Lines", "Live"},

@@ -1,5 +1,127 @@
 # Changelog
 
+## [v167] - 2026-11-15 — Theme toggle: Light / Dark / Auto
+
+### Added
+- A small icon at the right of the sidebar, just above the "Signed in as" line, switches the theme: **Auto** (half-filled circle; follows the system's light or dark setting, as before), **Light** (sun) and **Dark** (moon). Each click goes to the next one; the icon shows the current choice and its tooltip names it and what a click does. The choice is kept in this browser (localStorage); with storage blocked it lasts until the page is reloaded.
+
+### Changed
+- The stylesheet has `:root[data-theme="light"]` and `:root[data-theme="dark"]` copies of the colour sets, so a forced theme wins over the system's. The "no toggle, no stored preference" rule in `CLAUDE.md` and the stylesheet's header comment now say this.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium (system set to dark): Auto → Light turns the page light, Light → Dark turns it dark again, Dark → Auto follows the system, a reload keeps the choice, no page errors.
+
+### Not verified
+- Not looked at with the system set to light, in a real browser, or on a phone-width layout. Charts and drawings that take their colours from the page (the topology, Statistics) were not checked in each theme by eye.
+
+## [v166] - 2026-11-15 — Monitor ▸ Devices: tiles and the Devices card only; Monitor ▸ Cluster: no subtitle
+
+### Removed
+- **Monitor ▸ Devices** keeps its tiles and the Devices card; every other card is gone: the Target / Ask for / Ask form and its answers, Change ports, Advanced change, Capture packets and Network tools. A device is still asked from its right-click menu on Topology (Ask ▸ …), and a row on this page still has the network tools on right-click. Changing ports, a raw change and packet capture are no longer in the GUI: they stay on the command line (`--device-change`, `--device-raw`, `--device-capture`), over MCP and the API. Clicking a row no longer fills in a target. Help and README say so; the three README screenshots of the old page are no longer referred to (the files are still in `snaps/`).
+- The line "Nodes sharing these settings." in the header of the Cluster members card on Monitor ▸ Cluster.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- `help_fields_test.go` no longer expects Fields entries for the controls of Monitor ▸ Devices (Target, Ask for, Command, Address), which are gone.
+- Headless Chromium against a mocked API: Monitor ▸ Devices shows the five tiles and the one Devices card with no page errors, and a row's right-click menu has Ping, Traceroute, Scan, Lookup and Whois.
+
+### Not verified
+- Not run against a real daemon.
+
+## [v165] - 2026-11-15 — Monitor ▸ Gateways: VIP and AGC in the same type
+
+### Fixed
+- In a gateway card's header on Monitor ▸ Gateways, "VIP" and its address were both in the monospace font while "AGC" was in the normal font with only its address in monospace. Both now show the label in the normal font and the address in monospace. VIP and AGC also sit a little further right, so they no longer crowd the gateway name.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not looked at in a browser after the change (a one-line markup change).
+
+## [v164] - 2026-11-15 — [Test] popup: no Run again, no scroll bar
+
+### Changed
+- The **[Test]** popup on Monitor ▸ Gateways has no **Run again** button, and no scroll bar: the result wraps in the popup, and its buttons are at the lower right (Close last); the ✕ in its corner is gone. When the gateway already uses real MAC addresses it reads just "Real MAC addresses are on for this gateway: there are no virtual MACs to test".
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`; headless Chromium against a mocked API: the popup for a real-MAC gateway shows the one line, and Use real MAC addresses still saves.
+
+### Not verified
+- Not run against a real daemon.
+
+## [v163] - 2026-11-15 — Test virtual MACs is a [Test] button on Monitor ▸ Gateways
+
+### Changed
+- **Test virtual MACs** is no longer in the gateway's right-click menu on Topology. Each gateway's card on Monitor ▸ Gateways has a **[Test]** button at the right of its header (not shown when the gateway uses real MAC addresses). It opens the same result popup, now with **Run again**, and **Use real MAC addresses** is still offered when the test says virtual MACs are not delivered. Help is updated.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium against a mocked API: the button sits at the right of the card header, the popup shows the result, and **Use real MAC addresses** saves `real_macs: true` for that gateway.
+
+### Not verified
+- Not run against a real daemon (the test itself, which needs a router to ask).
+- A read-only user: the button is shown to everyone and the daemon decides whether the test may run.
+
+## [v162] - 2026-11-15 — No menu on the empty drawing
+
+### Removed
+- Right-clicking an empty part of the Topology drawing no longer opens a menu (it held New gateway and a few of the gateway's own items, all of which are on the sidebar's ＋ New gateway and the gateway's circle). The click now only clears the selection. Help, and the "No gateway yet" text, no longer mention it.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser (the handler is one line; the browser's own right-click menu is suppressed there as before).
+
+## [v161] - 2026-11-15 — Gateway menu: Ask devices removed
+
+### Removed
+- **Ask devices** (Facts, Interfaces, Neighbors) is gone from the gateway's right-click menu on Topology: all three only opened Monitor ▸ Devices with the question pre-asked. Ask the devices on Monitor ▸ Devices, or one device at a time from its own right-click menu. The gateway menu now reads Statistics, Test virtual MACs (when the gateway does not use real MACs), Edit ▸, Add ▸, Copy ▸, Paste ▸, Pause ▸, Delete. Help is updated.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+
+### Not verified
+- Not opened in a browser (a deletion of one menu line and its receiving code on Monitor ▸ Devices).
+
+## [v160] - 2026-11-15 — New gateways run on one node; Add ▸ Node no longer lists nodes that left
+
+### Fixed
+- Right-click the gateway ▸ **Add ▸ Node** listed "A node that left the cluster (xxxxxxxx)" for every stale entry in the gateway's removed-nodes list (a node that was taken off the gateway, or held back when it joined, and later left the cluster). Those entries are not nodes that can be added. The submenu now lists only nodes that are still in the cluster.
+
+### Changed
+- **A new gateway in a cluster runs on the node it was made on, and on no other.** Before, every node in the cluster started serving it at once. The other nodes are put on the gateway's removed-nodes list when it is created (in the web GUI, with the CLI `--canvas-add gateway`, and over MCP); add them where they should serve with right-click the gateway ▸ Add ▸ Node. A gateway that arrives with its own removed-nodes list (a restore, an import, a copy) is left as it is. On a single node nothing changes.
+- A node that joins a cluster already started out serving no gateway (that was already so); the help and README now say both things in the same place.
+
+### Added
+- **Forget N nodes that left the cluster**, at the bottom of Add ▸ Node when there are such entries: clears them from that gateway. The Add ▸ Node item is greyed out only when there is nothing to add and nothing to forget.
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium (netdir) against a mocked API: with one removed node still in the cluster and two stale IDs, the submenu shows the node and "Forget 2 nodes that left the cluster".
+
+### Not verified
+- The new-gateway rule (above) has no automated test and was not run on a real cluster: it was only compiled. Check it by creating a gateway on one node of a cluster and looking at the other nodes in Monitor ▸ Cluster / the gateway drawing.
+- Not run against a real cluster. The menu code is the same in all three programs but was only opened in netdir's headless run; the Forget click was not followed to a saved config. If the cluster view has not loaded yet (no nodes known), nothing is treated as having left.
+
+## [v159] - 2026-11-15 — Gateway menu reorganised; Statistics opens Monitor ▸ MCP
+
+### Changed
+- The gateway's right-click menu on Topology now reads: **Statistics**, **Ask devices** ▸ (Facts, Interfaces, Neighbors; greyed out when the gateway has no devices), **Test virtual MACs** (when the gateway does not use real MACs), then **Edit** ▸ (Gateway, MCP), **Add** ▸ (Device, Node, Anycast address), **Copy** ▸ (All devices, To all gateways), **Paste** ▸ (Device), **Pause** ▸, and **Delete**.
+- **Statistics** is new: it opens Monitor ▸ MCP.
+- Items that cannot be used are greyed out with the reason as a tooltip: Add ▸ Node when every node already serves the gateway, Paste ▸ Device when nothing is copied (or it is already there), and the Copy items. Before, the Copy and Paste reasons were not shown.
+- Menus can now open a third level beside the second (the same menu code as dnsdir), used by Add ▸ Node to list the nodes that were removed from the gateway.
+- Help names the new paths (Add ▸ Node, Add ▸ Anycast address).
+
+### Verified
+- `node --check`, `gofmt -l`, `go vet`, `go test -race -count=1 ./...`.
+- Headless Chromium against a mocked API: the menu shows the items above, Add ▸ Node lists a removed node, Paste ▸ Device is greyed out with nothing copied, and Statistics goes to `#mcpusage`.
+
+### Not verified
+- Not run against a real daemon; not tried with a read-only user; the menu for an empty drawing, a device, a node and a pill is unchanged. Nothing was clicked through to completion for Edit ▸ Gateway, Edit ▸ MCP, Add ▸ Device, Add ▸ Anycast address or Ask devices (the handlers are the same as before).
+
 ## [v158] - 2026-11-15 — History under Operate, plain search and page boxes
 
 ### Changed

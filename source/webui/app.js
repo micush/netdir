@@ -8,6 +8,36 @@
     target: null, nodes: [], clustered: false }; // target: address of the node being driven, null = this one
   const root = document.getElementById("app");
 
+  // Theme: Auto follows the system (prefers-color-scheme); Light and Dark force one.  The choice is kept in this browser only.
+  const THEMES = [["auto", "Auto"], ["light", "Light"], ["dark", "Dark"]];
+  const themeGet = () => { try { const t = localStorage.getItem("theme"); return THEMES.some(([k]) => k === t) ? t : "auto"; } catch (_) { return "auto"; } };
+  const themeApply = (t) => { if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t; };
+  themeApply(themeGet());
+  function themeToggle() {
+    const svg = (tag, a) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    const ICON = {
+      auto: () => [svg("circle", { cx: 8, cy: 8, r: 6 }), svg("path", { d: "M8 2a6 6 0 0 1 0 12z", fill: "currentColor" })],
+      light: () => [svg("circle", { cx: 8, cy: 8, r: 3 }), ...[0, 45, 90, 135, 180, 225, 270, 315].map((a) => svg("path", { d: "M8 1.2v1.6", transform: "rotate(" + a + " 8 8)" }))],
+      dark: () => [svg("path", { d: "M13.4 9.6A5.6 5.6 0 0 1 6.4 2.6a5.6 5.6 0 1 0 7 7z" })],
+    };
+    const btn = h("button", { class: "theme-btn", type: "button" });
+    const draw = () => {
+      const t = themeGet(), i = THEMES.findIndex(([k]) => k === t), next = THEMES[(i + 1) % THEMES.length];
+      const s = svg("svg", { viewBox: "0 0 16 16", width: 16, height: 16, fill: "none", stroke: "currentColor", "stroke-width": 1.5, "stroke-linecap": "round", "aria-hidden": "true" });
+      for (const e of ICON[t]()) s.append(e);
+      btn.replaceChildren(s);
+      btn.title = "Theme: " + THEMES[i][1] + (t === "auto" ? " (follows the system)" : "") + ". Click for " + next[1] + ".";
+      btn.setAttribute("aria-label", btn.title);
+    };
+    btn.addEventListener("click", () => {
+      const next = THEMES[(THEMES.findIndex(([k]) => k === themeGet()) + 1) % THEMES.length][0];
+      try { if (next === "auto") localStorage.removeItem("theme"); else localStorage.setItem("theme", next); } catch (_) { /* no storage: lasts until reload */ }
+      themeApply(next); draw();
+    });
+    draw();
+    return h("div", { class: "nav-theme" }, btn);
+  }
+
   // A small eye (struck through while the value is shown), drawn with DOM calls: no innerHTML.
   function eyeIcon(struck) {
     const NS = "http://www.w3.org/2000/svg";
@@ -382,6 +412,7 @@
       h("div", { class: "mark" }, h("div", { class: "brand" }, "MCP Network Director"),
         h("div", { class: "muted small" }, "v" + s.version + (s.hostname && s.hostname.toLowerCase() !== "netdir" ? " · " + s.hostname : ""))),
       h("div", { class: "nav-section" }, groups),
+      themeToggle(),
       h("div", { class: "nav-footer" },
         h("div", { class: "who" }, "Signed in as ", h("strong", {}, s.user)),
         h("button", { class: "nav-signout", type: "button", onclick: logout }, "Sign out")));
@@ -729,8 +760,6 @@
     // The gateway circle's tooltip: its name, how long it has been up, each address family's state, and how many
     // nodes serve it.  The overall status line is added only when it says more than the family lines do (a
     // pause, a gateway with one family, a start still waiting); it is the same words as the two together otherwise.
-    const vmacWords = { delivered: "delivered", "not-delivered": "NOT delivered", inconclusive: "inconclusive" };
-    const vmacLine = (r) => "Virtual MACs: " + (vmacWords[r.verdict] || r.verdict) + " — " + r.detail;
     const gwTip = (g, st, dual) => {
       const fam = (af) => (st.fams[af] ? st.fams[af].detail : "not running");
       const together = dual ? "IPv4: " + fam("v4") + "; IPv6: " + fam("v6") : null;
@@ -781,24 +810,6 @@
           : "This node stops serving the gateway — it gives up its address and stops answering on it — so it can be taken offline. The other cluster nodes carry on. Resume it here when you are done.",
         "Pause gateway", () => quick(() => { g[k] = true; }), "btn primary");
     }
-    // "Test virtual MACs…": asks this node to check that replies addressed to a virtual MAC reach it, and shows what it found.
-    // Nothing changes unless the person presses "Use real MAC addresses".
-    async function vmacTest(g) {
-      const body = h("div", {}, h("p", {}, "Testing… this takes a few seconds."));
-      const toolbar = h("div", { class: "toolbar" }, h("button", { class: "btn", type: "button", onclick: closeEditor }, "Close"));
-      openDialog("Virtual MACs: " + gwLabel(g), body, toolbar);
-      try {
-        const r = await api("POST", "/api/vmactest", { group: g.group_id });
-        const x = (r.data || [])[0];
-        if (!x) throw new Error("no result");
-        clear(body).append(h("p", {}, vmacLine(x)), ...(x.families || []).map((f) => h("p", { class: "hint" }, f.af + ": " + f.detail)));
-        if (x.verdict === "not-delivered") {
-          toolbar.prepend(h("button", { class: "btn primary", type: "button", onclick: () => { closeEditor(); quick(() => { g.real_macs = true; }); } }, "Use real MAC addresses"));
-        }
-      } catch (e) {
-        clear(body).append(h("p", {}, "The test could not run: " + e.message));
-      }
-    }
     // ── drawing ──────────────────────────────────────────────────────────
     function draw() {
       cv.stale = 0;
@@ -806,7 +817,7 @@
       const oldWrap = svgHost.querySelector(".cv-wrap");
       const keep = oldWrap && cv.drawn === cv.gid ? { x: oldWrap.scrollLeft, y: oldWrap.scrollTop } : { x: 0, y: 0 };
       const g = curGroup();
-      if (!g) { clear(svgHost); svgHost.append(h("div", { class: "empty" }, "No gateway yet. Click “＋ New gateway” under Topology in the sidebar (or right-click here) to draw one.")); return; }
+      if (!g) { clear(svgHost); svgHost.append(h("div", { class: "empty" }, "No gateway yet. Click “＋ New gateway” under Topology in the sidebar to draw one.")); return; }
       const st = statusOf(g);
       // The circle shows bare addresses (no /prefix) and grows until the longest one fits,
       // up to a full 39-character IPv6 address (monospace 12px ≈ 7.3px per character).
@@ -1148,40 +1159,66 @@
       window.removeEventListener("blur", closeMenu);
       window.removeEventListener("resize", closeMenu);
     }
-    let subEl = null;
+    let subEl = null, sub2El = null;   // the second menu, and a third one beside it for a sub-item that has sub-items of its own
+    function closeSub2() {
+      if (sub2El) { sub2El.remove(); sub2El = null; }
+      if (subEl) subEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
+    }
     function closeSub() {
+      if (sub2El) { sub2El.remove(); sub2El = null; }
       if (subEl) { subEl.remove(); subEl = null; }
       // the parent item's "open" highlight must go with its submenu, or it stays lit after the pointer moves on
       if (menuEl) menuEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
     }
-    const outsideClick = (e) => { if (!(menuEl && menuEl.contains(e.target)) && !(subEl && subEl.contains(e.target))) closeMenu(); };
+    const outsideClick = (e) => { if (!(menuEl && menuEl.contains(e.target)) && !(subEl && subEl.contains(e.target)) && !(sub2El && sub2El.contains(e.target))) closeMenu(); };
     function menuKey(e) {
       if (!menuEl) return;
       if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
       const cur = document.activeElement;
       if (e.key === "ArrowRight" && cur && cur.dataset && cur.dataset.sub) { e.preventDefault(); cur.click(); return; }
+      if (e.key === "ArrowLeft" && sub2El && sub2El.contains(cur)) { e.preventDefault(); const p = subEl.querySelector("button.open"); closeSub2(); if (p) p.focus(); return; }
       if (e.key === "ArrowLeft" && subEl && subEl.contains(cur)) { e.preventDefault(); const p = menuEl.querySelector("button.open"); closeSub(); if (p) p.focus(); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        const box = subEl && subEl.contains(cur) ? subEl : menuEl;
+        const box = sub2El && sub2El.contains(cur) ? sub2El : subEl && subEl.contains(cur) ? subEl : menuEl;
         const items = [...box.querySelectorAll("button")];
         const i = items.indexOf(cur);
         items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
       }
     }
     // items: [label, handler, "danger"?, subitems?]. An item with subitems opens a second menu beside the first
-    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler] too.
+    // when the pointer rests on it (or on click / the right arrow key); the sub-items are [label, handler, why-not?, subitems?] (a reason greys one out; a sub-item with subitems opens a third menu).
     let menuAt = { x: 0, y: 0 };
     function openMenu(e, items) {
       e.preventDefault(); e.stopPropagation();
       closeMenu();
       menuAt = { x: e.clientX || 0, y: e.clientY || 0 };
+      const openSub2 = (btn, subs2) => {
+        closeSub2();
+        btn.classList.add("open");
+        sub2El = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs2.map(([label, fn, off]) => off
+          ? h("button", { type: "button", role: "menuitem", disabled: true, title: off }, plain(label))
+          : h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
+        root.append(sub2El);
+        const pr = subEl.getBoundingClientRect(), br = btn.getBoundingClientRect(), sr = sub2El.getBoundingClientRect();
+        const left = pr.right + sr.width + 4 <= window.innerWidth ? pr.right - 2 : Math.max(4, pr.left - sr.width + 2);
+        sub2El.style.left = left + "px";
+        sub2El.style.top = Math.max(4, Math.min(br.top - 4, window.innerHeight - sr.height - 4)) + "px";
+      };
       const openSub = (btn, subs) => {
         closeSub();
         menuEl.querySelectorAll("button.open").forEach((b) => b.classList.remove("open"));
         btn.classList.add("open");
-        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn]) =>
-          h("button", { type: "button", role: "menuitem", onclick: () => { closeMenu(); fn(); } }, plain(label))));
+        subEl = h("div", { class: "cv-menu cv-sub", role: "menu" }, subs.map(([label, fn, off, subs2]) => {
+          if (subs2 && !off) {
+            const b = h("button", { type: "button", role: "menuitem", class: "has-sub", "aria-haspopup": "true", "data-sub": "1", onclick: () => { openSub2(b, subs2); sub2El.querySelector("button").focus(); } }, plain(label), h("span", { class: "arrow" }, "▸"));
+            b.addEventListener("mouseenter", () => openSub2(b, subs2));
+            return b;
+          }
+          return off
+            ? h("button", { type: "button", role: "menuitem", disabled: true, title: off, onmouseenter: closeSub2 }, plain(label))
+            : h("button", { type: "button", role: "menuitem", onmouseenter: closeSub2, onclick: () => { closeMenu(); fn(); } }, plain(label));
+        }));
         root.append(subEl);
         const pr = menuEl.getBoundingClientRect(), br = btn.getBoundingClientRect(), sr = subEl.getBoundingClientRect();
         const left = pr.right + sr.width + 4 <= window.innerWidth ? pr.right - 2 : Math.max(4, pr.left - sr.width + 2);
@@ -1327,7 +1364,6 @@
       }, "Run", true);
     }
     // Ask every device of the gateway at once: Monitor ▸ Devices, with the target filled in and the question asked
-    const askGateway = (g, op) => { state.prefill.devices = { target: "gateway:" + g.group_id, op }; selectTab("devices"); };
     // Copy a device (right-click it), or every device of a gateway (right-click the gateway), and paste them on another gateway (right-click the circle, or the empty drawing)
     let devClip = [];
     const clipNew = (g) => devClip.filter((n) => devByName(n) && !(g.devices || []).includes(n));
@@ -1453,11 +1489,13 @@
       const plan = copyPlan(g);
       confirmDialog("Copy the devices to every other gateway?", "Adds the devices of " + gwLabel(g) + " that are missing there: " + plan.map(([o, add]) => gwLabel(o) + " " + add.length).join(", ") + ". Nothing is removed from any gateway.", "Copy to " + plan.length + " gateway" + (plan.length > 1 ? "s" : ""), () => quick(() => { for (const [o, add] of plan) o.devices = (o.devices || []).concat(add); }));
     };
-    const gwItems = (g) => [["Edit", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")], ["Add device", () => deviceForm(g)], pasteItem(g),
-      ["Copy", null, "", [["All devices", () => { devClip = [...(g.devices || [])]; }, "", null, (g.devices || []).length ? "" : "This gateway has no devices"], ["To all gateways", () => copyToAll(g), "", null, copyWhy(g)]]],
-      ...((g.devices || []).length ? [["Ask its devices", null, "", [["Facts", () => askGateway(g, "facts")], ["Interfaces", () => askGateway(g, "interfaces")], ["Neighbors", () => askGateway(g, "neighbors")]]]] : []),
-      "-", ["Add anycast address", () => anycastForm(g)],
-      ...(g.real_macs ? [] : [["Test virtual MACs", () => vmacTest(g)]]), ...addNodeItems(g),
+    const pasteSub = (g) => [[devClip.length > 1 ? devClip.length + " devices" : "Device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), pasteWhy(g)]];
+    const gwItems = (g) => [["Statistics", () => selectTab("mcpusage")],
+      "-",
+      ["Edit", null, "", [["Gateway", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")]]],
+      ["Add", null, "", [["Device", () => deviceForm(g)], nodeAddItem(g), ["Anycast address", () => anycastForm(g)]]],
+      ["Copy", null, "", [["All devices", () => { devClip = [...(g.devices || [])]; }, (g.devices || []).length ? "" : "This gateway has no devices"], ["To all gateways", () => copyToAll(g), copyWhy(g)]]],
+      ["Paste", null, "", pasteSub(g)],
       ...pauseItems("", (sc) => !!g[sc === "all" ? "paused_all" : "paused"], (sc, p) => pauseGateway(g, sc, p)), "-", ["Delete", delSel, "danger"]];
     // Pause / resume announcing one anycast address: on this node only (kept in this node's own settings) or on every node (shared)
     const anyPauseList = (g, scope) => (scope === "all" ? "paused_vips" : "paused_vips_here");
@@ -1571,13 +1609,19 @@
       const nodes = statusOf(g).nodes || [];
       return (g.excluded_nodes || []).map((id) => {
         const n = nodes.find((x) => x.node_id === id);
-        return { id, label: n ? n.name + (n.self ? " (this node)" : "") : "A node that left the cluster (" + id.slice(0, 8) + ")" };
+        return { id, gone: !!nodes.length && !n, label: n ? n.name + (n.self ? " (this node)" : "") : "A node that left the cluster (" + id.slice(0, 8) + ")" };
       });
     };
-    const addNodeItems = (g) => {
-      const l = removedNodes(g);
-      return l.length ? [["Add node", null, "", l.map((r) => [r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))])]] : [];
+    // Add ▸ Node lists the nodes that were taken off the gateway and are still in the cluster.  An entry for a node that has left the
+    // cluster is not a node that can be added: one item, "Forget nodes that left the cluster", clears them all from this gateway.
+    const nodeSubs = (g) => {
+      const l = removedNodes(g), live = l.filter((r) => !r.gone), gone = l.filter((r) => r.gone);
+      if (!live.length && !gone.length) return ["Node", null, "Every node already serves this gateway"];
+      return ["Node", null, "", [
+        ...live.map((r) => [r.label, () => quick(() => toggleIn(g, "excluded_nodes", r.id, false))]),
+        ...(gone.length ? [["Forget " + gone.length + " node" + (gone.length > 1 ? "s" : "") + " that left the cluster", () => quick(() => { g.excluded_nodes = (g.excluded_nodes || []).filter((id) => !gone.some((r) => r.id === id)); if (!g.excluded_nodes.length) delete g.excluded_nodes; })]] : [])]];
     };
+    const nodeAddItem = nodeSubs;
     // The last node in service cannot be paused: the item is greyed out, with the reason as its tooltip.  A node that is not answering or
     // is paused is out of service.
     const lastNodeWhy = (n) => {
@@ -1821,9 +1865,8 @@
       mount(main) {
         svgHost = h("div", { class: "cv-card",
           onmouseout: (e) => { if (cv.stale && !cv.drag && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".shape"))) draw(); },
-          // right-click on empty canvas (shapes and tabs handle their own menus)
-          oncontextmenu: (e) => { cv.sel = null; refresh(); const g = curGroup();
-            openMenu(e, [["New gateway", () => gatewayForm(null)]].concat(g ? [["Add device", () => deviceForm(g)], pasteItem(g), ["Add anycast address", () => anycastForm(g)]] : [])); } });
+          // right-click on empty canvas: no menu (the shapes and tabs have their own); it only clears the selection
+          oncontextmenu: (e) => { e.preventDefault(); cv.sel = null; refresh(); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small hidden" },
           h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused");
         state.onTopoFilter = () => { if (cv.loaded) refresh(); };
@@ -1871,9 +1914,12 @@
             h("td", { class: "mono" }, m.vmac || "–"),
             h("td", {}, pill(m.service_up ? "answering" : "not answering", m.service_up ? "ok" : "warn"))));
           out.append(h("div", { class: "card" },
-            h("header", {}, h("h2", {}, g.name ? g.name + " · Group " + g.group_id : "Group " + g.group_id),
-              h("span", { class: "mono muted" }, "VIP " + g.vip),
-              g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null),
+            h("header", { class: "bar" }, h("h2", {}, g.name ? g.name + " · Group " + g.group_id : "Group " + g.group_id),
+              h("span", { class: "muted gw-vip" }, "VIP ", h("span", { class: "mono" }, g.vip)),
+              g.agc ? h("span", { class: "muted" }, "AGC ", h("span", { class: "mono" }, g.agc)) : null,
+              h("span", { class: "grow" }),
+              g.members.some((m) => m.local && m.real_macs) ? null
+                : h("button", { class: "btn hdr", type: "button", title: "Check that replies addressed to this gateway's virtual MAC reach this node", onclick: () => vmacTestPopup(g.group_id, g.name || "Group " + g.group_id) }, "Test")),
             h("div", { class: "scroll" }, h("table", { class: "tight" },
               h("thead", {}, h("tr", {}, ["Node name", "Node IP", "Pri", "Slot", "Weight", "Role", "State", "Hello avg / max (ms)", "vMAC", "Service"].map((t, i) => h("th", { class: [2, 3, 4, 7].includes(i) ? "num" : "" }, t)))),
               h("tbody", {}, rows)))));
@@ -1894,7 +1940,7 @@
         if (c && c.data) {
           const v = c.data;
           out.append(h("div", { class: "card" },
-            h("header", {}, h("h2", {}, tc("Cluster members")), h("span", { class: "muted" }, "Nodes sharing these settings."),
+            h("header", {}, h("h2", {}, tc("Cluster members")),
               v.conflict ? pill("conflict", "bad") : null),
             membersTable(v, null, true)));
         }
@@ -1926,6 +1972,44 @@
       }
       put(j.text || "nmap printed nothing");
     });
+  }
+
+  // Virtual MACs: what the test found, in words (Monitor ▸ Gateways ▸ [Test]).
+  const vmacWords = { delivered: "delivered", "not-delivered": "NOT delivered", inconclusive: "inconclusive" };
+  const vmacLine = (r) => "Virtual MACs: " + (vmacWords[r.verdict] || r.verdict) + " — " + r.detail;
+  // Asks this node to check that replies addressed to a virtual MAC reach it, and shows what it found.  Nothing changes unless
+  // the person presses "Use real MAC addresses" (offered only when the test says they are not delivered).
+  function vmacTestPopup(gid, label) {
+    const out = h("div", { class: "vmac-out", "aria-live": "polite" }, h("p", {}, "Testing… this takes a few seconds."));
+    const useReal = h("button", { class: "btn primary", type: "button", hidden: true, onclick: async () => {
+      useReal.disabled = true;
+      try {
+        const r = await api("GET", "/api/config");
+        const g = (r.config.groups || []).find((x) => x.group_id === gid);
+        if (!g) throw new Error("the gateway is not in the saved configuration");
+        g.real_macs = true;
+        await api("PUT", "/api/config", { config: r.config, note: "Use real MAC addresses", base: r.base });
+        useReal.textContent = "Real MAC addresses are on";
+      } catch (e) { if (e.message !== "unauthenticated") { useReal.disabled = false; useReal.textContent = "Could not save: " + e.message; } }
+    } }, "Use real MAC addresses");
+    const d = h("dialog", { class: "cv-dialog nt-dialog", "aria-label": "Virtual MACs: " + label });
+    const close = () => { try { d.close(); } catch (_) { /* closed */ } d.remove(); };
+    d.addEventListener("close", () => d.remove());
+    d.append(h("h2", {}, "Virtual MACs: " + label), out,
+      h("div", { class: "toolbar vmac-bar" }, useReal, h("button", { class: "btn", type: "button", onclick: close }, "Close")));
+    root.append(d);
+    d.showModal();
+    (async () => {
+      try {
+        const r = await api("POST", "/api/vmactest", { group: gid });
+        const x = (r.data || [])[0];
+        if (!x) throw new Error("no result");
+        // real MAC addresses on: just say so (the daemon's words, capitalised); otherwise the verdict, then a line per address family
+        const lines = x.verdict === "off" ? [x.detail.charAt(0).toUpperCase() + x.detail.slice(1)] : [vmacLine(x), ...(x.families || []).map((f) => f.af + ": " + f.detail)];
+        clear(out).append(...lines.map((t) => h("p", {}, t)));
+        useReal.hidden = x.verdict !== "not-delivered";
+      } catch (e) { if (e.message !== "unauthenticated") clear(out).append(h("p", {}, "The test could not run: " + e.message)); }
+    })();
   }
 
   // A popup with text in it that a function fills in (and can fill in again: Run again): Whois, Ping, Traceroute.
@@ -1999,193 +2083,7 @@
   // The inventory, and a form that asks the devices a target picks for one thing at once.  Every device answers on its own row:
   // what it said, or why not, and how long it took.  Nothing is polled: a device is asked only when Ask is pressed.
   VIEWS.devices = (() => {
-    let tiles, inv, form, out, err, targetIn, opSel, cmdIn, askBtn, chgIn, planBtn, applyBtn, chgOut, chgErr, planned = null;
-    const OPS = [["facts", "Facts"], ["interfaces", "Interfaces"], ["ports", "Ports"], ["neighbors", "Neighbors"], ["neighbor_details", "LLDP and CDP details"], ["routes", "Routes"], ["routing", "Routing protocols"], ["firewall", "Firewall"], ["resources", "CPU, memory and power"], ["vlans", "VLANs"], ["api_catalog", "API catalog"], ["api", "API path"], ["config", "Configuration"], ["show", "Show command"]];
-    const upFor = (s) => (!s ? "" : s < 3600 ? Math.round(s / 60) + " min" : s < 86400 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " d");
-    const yes = (b) => (b == null ? "–" : b ? pill("up", "ok tiny") : pill("down", "bad tiny"));
-    const resultHead = (r) => h("header", {}, h("h2", {}, r.device), h("span", { class: "muted" }, platformName(r.platform) + " · " + r.ms + " ms"),
-      r.ok ? null : pill("failed", "bad"));
-    function drawResults(d) {
-      clear(out);
-      if (d.op === "facts") {
-        out.append(h("div", { class: "card" }, h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Device", "Host name", "Vendor", "Model", "OS version", "Serial", "Up", "ms"].map((t, i) => h("th", { class: i >= 6 ? "num" : "" }, t)))),
-          h("tbody", {}, d.results.map((r) => {
-            const f = r.data || {};
-            if (!r.ok) return h("tr", {}, h("td", { class: "nname" }, r.device), h("td", { class: "wrap bad-text", colspan: "6" }, r.error), h("td", { class: "num" }, r.ms));
-            return h("tr", {}, h("td", { class: "nname" }, r.device), h("td", {}, f.hostname || "–"), h("td", {}, f.vendor || "–"), h("td", {}, f.model || "–"),
-              h("td", {}, f.os_version || "–"), h("td", { class: "mono" }, f.serial || "–"), h("td", { class: "num" }, upFor(f.uptime_s) || "–"),
-              h("td", { class: "num" }, r.ms));
-          }))))));
-        return;
-      }
-      for (const r of d.results) {
-        let body;
-        if (!r.ok) body = h("p", { class: "bad-text" }, r.error);
-        else if (d.op === "interfaces") body = h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Interface", "Description", "Admin", "Link", "Speed", "MAC", "Address"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, (r.data || []).map((i) => h("tr", {}, h("td", { class: "mono" }, i.name), h("td", {}, i.description || ""), h("td", {}, yes(i.admin_up)), h("td", {}, yes(i.oper_up)),
-            h("td", { class: "num" }, i.speed_mbps ? (i.speed_mbps >= 1000 ? i.speed_mbps / 1000 + " Gb/s" : i.speed_mbps + " Mb/s") : "–"), h("td", { class: "mono" }, i.mac || ""), h("td", { class: "mono" }, (i.addresses || []).join(", ")))))));
-        else if (d.op === "ports") body = h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Port", "Link", "In octets", "In pkts", "In errors", "In discards", "Out octets", "Out pkts", "Out errors", "Out discards", "Flaps"].map((t, i) => h("th", { class: i ? "num" : "" }, t)))),
-          h("tbody", {}, (r.data || []).map((i) => { const c = i.counters || {};
-            return h("tr", {}, h("td", { class: "mono" }, i.name), h("td", { class: "num" }, yes(i.oper_up)),
-              ...["in_octets", "in_packets", "in_errors", "in_discards", "out_octets", "out_packets", "out_errors", "out_discards", "flaps"].map((k) => h("td", { class: "num" }, c[k] || 0))); }))));
-        else if (d.op === "resources") body = h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Resource", "Used", "Detail"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, [
-            ...(r.data.cpu ? [["CPU", r.data.cpu.now_percent.toFixed(0) + " %", [r.data.cpu.one_min_percent ? "1 min " + r.data.cpu.one_min_percent + " %" : "", r.data.cpu.five_min_percent ? "5 min " + r.data.cpu.five_min_percent + " %" : ""].filter(Boolean).join("  ")]] : []),
-            ...(r.data.memory || []).map((m) => ["Memory " + (m.name || ""), m.used_percent.toFixed(0) + " %", m.total ? Math.round(m.used / 1048576) + " of " + Math.round(m.total / 1048576) + " MiB" : ""]),
-            ...(r.data.storage || []).map((m) => ["Storage " + m.name, m.used_percent.toFixed(0) + " %", ""]),
-            ...(r.data.sensors || []).map((m) => [m.kind + " " + m.name, m.state || "", m.reading == null ? "" : m.reading + " " + (m.units || "")]),
-          ].map((x) => h("tr", {}, h("td", {}, x[0]), h("td", {}, x[1]), h("td", {}, x[2]))))));
-        else if (d.op === "vlans") body = (r.data || []).length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["VLAN", "Name", "Status", "Ports"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, r.data.map((v) => h("tr", {}, h("td", { class: "num" }, v.id), h("td", {}, v.name || ""), h("td", {}, v.status || ""), h("td", { class: "mono" }, (v.ports || []).join(", ")))))))
-          : h("p", { class: "muted" }, "No VLANs.");
-        else if (d.op === "routes") body = (r.data || []).length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Prefix", "Protocol", "Next hop", "Interface", "Distance", "Metric", "VRF"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, r.data.map((x) => h("tr", {}, h("td", { class: "mono" }, x.prefix), h("td", {}, x.protocol || ""), h("td", { class: "mono" }, x.next_hop || ""), h("td", { class: "mono" }, x.interface || ""),
-            h("td", { class: "num" }, x.distance || ""), h("td", { class: "num" }, x.metric || ""), h("td", {}, x.vrf || ""))))))
-          : h("p", { class: "muted" }, "No routes.");
-        else if (d.op === "neighbors") body = (r.data || []).length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-          h("thead", {}, h("tr", {}, ["Local port", "Neighbor", "Its port", "Its address", "Description"].map((t) => h("th", {}, t)))),
-          h("tbody", {}, r.data.map((n) => h("tr", {}, h("td", { class: "mono" }, n.local_port), h("td", {}, n.remote_name || ""), h("td", { class: "mono" }, n.remote_port || ""), h("td", { class: "mono" }, n.remote_addr || ""), h("td", { class: "wrap muted" }, n.remote_desc || ""))))))
-          : h("p", { class: "muted" }, "No neighbors.");
-        else {
-          const text = typeof r.data === "string" ? r.data : plainText(r.data);
-          body = h("div", {}, h("div", { class: "toolbar" }, copyBtn(() => text),
-            h("button", { class: "btn small", type: "button", onclick: () => saveText(r.device + (d.op === "config" ? ".conf" : ".txt"), text) }, "Download")),
-            h("pre", { class: "devtext" }, text));
-        }
-        out.append(h("div", { class: "card" }, resultHead(r), h("div", { class: "body" }, body)));
-      }
-    }
-    async function ask() {
-      clear(err);
-      const q = new URLSearchParams({ target: targetIn.value.trim() || "all", op: opSel.value });
-      if (opSel.value === "show") q.set("cmd", cmdIn.value.trim());
-      if (opSel.value === "api") q.set("path", cmdIn.value.trim());
-      askBtn.disabled = true; askBtn.textContent = "Asking…";
-      try { drawResults((await api("GET", "/api/devices/query?" + q.toString())).data); }
-      catch (e) { if (e.message !== "unauthenticated") err.textContent = e.message; }
-      askBtn.disabled = false; askBtn.textContent = "Ask";
-    }
-    // Change ports in plain English (CLI: --device-change; MCP: device_change).  Plan shows what each port holds and would hold; Apply
-    // asks, then makes the change.  The Target above picks the devices.
-    function drawChange(d) {
-      clear(chgOut);
-      for (const r of d.results) {
-        const c = (r.data && r.data.changes) || [];
-        const same = (r.data && r.data.unchanged) || [];
-        chgOut.append(h("div", { class: "card" }, resultHead(r), h("div", { class: "body" }, !r.ok ? h("p", { class: "bad-text" }, r.error)
-          : [c.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
-              h("thead", {}, h("tr", {}, ["Port", "Field", "Before", "After"].map((t) => h("th", {}, t)))),
-              h("tbody", {}, c.map((x) => h("tr", {}, h("td", { class: "mono" }, x.port), h("td", {}, x.field), h("td", { class: "wrap" }, x.before || "–"), h("td", { class: "wrap" }, x.after || "–"))))))
-              : null,
-            h("p", { class: "muted" }, (d.dry_run ? c.length + " would change" : c.length + " changed") + (same.length ? ", " + same.length + " already as asked" : "") + ".")])));
-      }
-    }
-    async function change(dry) {
-      clear(chgErr);
-      const body = { target: targetIn.value.trim() || "all", text: chgIn.value.trim(), dry_run: dry };
-      planBtn.disabled = applyBtn.disabled = true;
-      try {
-        const d = (await api("POST", "/api/devices/change", body)).data;
-        drawChange(d);
-        if (dry) {
-          const n = d.results.reduce((a, r) => a + (r.ok ? r.data.changes.length : 0), 0);
-          planned = n && d.failed < d.asked ? { target: body.target, text: body.text, n, devs: d.asked - d.failed } : null;
-        } else planned = null;
-        if (!dry && d.failed) chgErr.textContent = d.failed + " of " + d.asked + " devices failed.";
-      } catch (e) { if (e.message !== "unauthenticated") chgErr.textContent = e.message; planned = null; }
-      planBtn.disabled = false; applyBtn.disabled = !planned;
-    }
-    const changeCard = () => {
-      chgIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Change in plain English", placeholder: "change the description for ports gi1/0/1-24 to read \"devices\"" });
-      chgIn.addEventListener("input", () => { planned = null; applyBtn.disabled = true; });
-      planBtn = h("button", { class: "btn primary", type: "submit" }, "Plan");
-      applyBtn = h("button", { class: "btn", type: "button", disabled: true, onclick: () => {
-        if (!planned) return;
-        if (confirm("Change " + planned.n + " port settings on " + planned.devs + " device" + (planned.devs === 1 ? "" : "s") + ", as planned?\n\nA device that refuses is put back as it was.")) change(false);
-      } }, "Apply");
-      chgErr = h("span", { class: "bad-text", role: "alert" });
-      chgOut = h("div", {});
-      return h("div", {}, h("div", { class: "card" }, h("header", {}, h("h2", {}, "Change ports")), h("div", { class: "body" },
-        h("form", { class: "toolbar devask", onsubmit: (ev) => { ev.preventDefault(); if (chgIn.value.trim()) change(true); } },
-          h("label", { class: "f wide" }, h("span", {}, "Change (uses the Target above)"), chgIn), planBtn, applyBtn, chgErr))), chgOut);
-    };
-    // Advanced change (CLI: --device-raw, --device-lines; MCP: device_change_raw): the platform's own write.  Plan reads what the path holds now;
-    // Apply asks, then sends it.  The Target above picks the devices.
-    const rawCard = () => {
-      let rawPlanned = false;
-      const mIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Method", placeholder: "PATCH  (PAN-OS: edit)" });
-      const pIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Path", placeholder: "/restconf/data/Cisco-IOS-XE-native:native/ntp  or an XPath" });
-      const bIn = h("textarea", { rows: 4, spellcheck: "false", "aria-label": "Body", placeholder: "Body: JSON, XML or name=value&name=value" });
-      const lIn = h("textarea", { rows: 4, spellcheck: "false", "aria-label": "Configuration lines", placeholder: "Arista EOS and NX-OS: configuration lines, one per row" });
-      const sv = h("input", { type: "checkbox", "aria-label": "Save so it survives a reboot" });
-      const rout = h("div", {}), rerr = h("span", { class: "bad-text", role: "alert" });
-      const plan = h("button", { class: "btn primary", type: "submit" }, "Plan");
-      const apply = h("button", { class: "btn", type: "button", disabled: true }, "Apply");
-      const reset = () => { rawPlanned = false; apply.disabled = true; };
-      [mIn, pIn, bIn, lIn, sv].forEach((e) => e.addEventListener("input", reset));
-      const args = (dry) => {
-        const a = { target: targetIn.value.trim() || "all", save: sv.checked, dry_run: dry };
-        if (lIn.value.trim()) a.lines = lIn.value.split("\n"); else { a.method = mIn.value.trim(); a.path = pIn.value.trim(); a.body = bIn.value; }
-        return a;
-      };
-      async function go(dry) {
-        clear(rerr);
-        plan.disabled = apply.disabled = true;
-        try {
-          const d = (await api("POST", "/api/devices/raw", args(dry))).data;
-          clear(rout);
-          for (const r of d.results) {
-            rout.append(h("div", { class: "card" }, resultHead(r), h("div", { class: "body" }, !r.ok ? h("p", { class: "bad-text" }, r.error)
-              : [r.data.before ? [h("p", { class: "muted" }, d.dry_run ? "What the path holds now:" : "What it held before:"), h("pre", { class: "wrap" }, r.data.before)] : null,
-                 h("p", { class: "muted" }, (d.dry_run ? "Planned" : r.data.saved ? "Applied and saved" : "Applied") + (r.data.note ? ". " + r.data.note : "."))])));
-          }
-          rawPlanned = dry && d.failed < d.asked;
-          if (!dry && d.failed) rerr.textContent = d.failed + " of " + d.asked + " devices failed.";
-        } catch (e) { if (e.message !== "unauthenticated") rerr.textContent = e.message; rawPlanned = false; }
-        plan.disabled = false; apply.disabled = !rawPlanned;
-      }
-      apply.addEventListener("click", () => {
-        if (rawPlanned && confirm("Send this change to the devices the Target picks, as planned?\n\nA POST or a DELETE cannot be undone by the director.")) go(false);
-      });
-      return h("div", { class: "card" }, h("header", {}, h("h2", {}, "Advanced change")), h("div", { class: "body" },
-        h("form", { class: "toolbar devask", onsubmit: (ev) => { ev.preventDefault(); go(true); } },
-          h("label", { class: "f" }, h("span", {}, "Method"), mIn), h("label", { class: "f wide" }, h("span", {}, "Path"), pIn),
-          h("label", { class: "f wide" }, h("span", {}, "Body"), bIn), h("label", { class: "f wide" }, h("span", {}, "Lines (EOS, NX-OS)"), lIn),
-          h("label", { class: "f" }, h("span", {}, "Save"), sv), plan, apply, rerr), rout));
-    };
-    // Capture packets (CLI: --device-capture; MCP: device_capture): a few seconds on the devices the Target picks, shown as a summary.
-    const captureCard = () => {
-      const iIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Interface", placeholder: "default" });
-      const fIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Filter", placeholder: "udp and port 53" });
-      const sIn = h("input", { type: "number", min: "1", max: "30", value: "5", "aria-label": "Seconds" });
-      const cout = h("div", {}), cerr = h("span", { class: "bad-text", role: "alert" });
-      const go = h("button", { class: "btn primary", type: "submit" }, "Capture");
-      async function run() {
-        clear(cerr); go.disabled = true; go.textContent = "Capturing…";
-        try {
-          const d = (await api("POST", "/api/devices/capture", { target: targetIn.value.trim() || "all", interface: iIn.value.trim() === "default" ? "" : iIn.value.trim(), filter: fIn.value.trim(), seconds: parseInt(sIn.value, 10) || 5 })).data;
-          clear(cout);
-          for (const r of d.results) {
-            const x = r.data || {};
-            cout.append(h("div", { class: "card" }, resultHead(r), h("div", { class: "body" }, !r.ok ? h("p", { class: "bad-text" }, r.error)
-              : [h("p", { class: "muted" }, x.packets + " packets, " + x.bytes + " bytes on " + x.interface + " in " + x.seconds + " s" + (x.note ? ". " + x.note : "")),
-                 h("p", { class: "muted" }, (x.protocols || []).map((p) => p.name + " " + p.packets).join(", ")),
-                 h("pre", { class: "wrap" }, (x.talkers || []).map((p) => p.name + "  " + p.packets).concat([""], x.first || []).join("\n"))])));
-          }
-        } catch (e) { if (e.message !== "unauthenticated") cerr.textContent = e.message; }
-        go.disabled = false; go.textContent = "Capture";
-      }
-      return h("div", { class: "card" }, h("header", {}, h("h2", {}, "Capture packets")), h("div", { class: "body" },
-        h("form", { class: "toolbar devask", onsubmit: (ev) => { ev.preventDefault(); run(); } },
-          h("label", { class: "f" }, h("span", {}, "Interface"), iIn), h("label", { class: "f wide" }, h("span", {}, "Filter"), fIn),
-          h("label", { class: "f" }, h("span", {}, "Seconds"), sIn), go, cerr), cout));
-    };
+    let tiles, inv;
     let lastAt = 0;
     async function load() {
       const d = (await api("GET", "/api/devices")).data;
@@ -2206,8 +2104,8 @@
       const below = d.remote_errors || {};
       clear(inv).append(all.length ? h("div", { class: "scroll" }, h("table", { class: "tight" },
         h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Via", "Tags", ""].map((t) => h("th", {}, t)))),
-        h("tbody", {}, all.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Click to ask only this device; right-click for the network tools",
-          onclick: () => { targetIn.value = x.name; }, oncontextmenu: rowMenu(toolItems(x.address)) },
+        h("tbody", {}, all.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Right-click for the network tools",
+          oncontextmenu: rowMenu(toolItems(x.address)) },
           h("td", { class: "nname" }, x.name), h("td", { title: [hl(x).detail || "not checked yet", below[x.name] ? "Below it: " + below[x.name] : ""].filter(Boolean).join(". ") },
             pill(...({ ok: ["answering", "ok tiny"], warn: ["refusing", "warn tiny"], bad: ["unreachable", "bad tiny"], paused: ["disabled", "tiny"] }[hl(x).status] || ["not checked", "tiny"]))),
           h("td", {}, platformName(x.platform)), h("td", { class: "mono" }, x.address + (x.port ? ":" + x.port : "")),
@@ -2218,31 +2116,9 @@
     return {
       mount(main) {
         inv = h("div", { class: "body" }, "Loading…");
-        targetIn = h("input", { type: "text", value: "all", autocomplete: "off", spellcheck: "false", "aria-label": "Target", placeholder: "all, a name, tag:site=dc1, platform:iosxe" });
-        opSel = h("select", { "aria-label": "What to ask" }, OPS.map(([v, t]) => h("option", { value: v }, t)));
-        cmdIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Command", placeholder: "show version", hidden: true });
-        opSel.addEventListener("change", () => {
-          cmdIn.hidden = opSel.value !== "show" && opSel.value !== "api";
-          cmdIn.placeholder = opSel.value === "api" ? "/restconf/data/Cisco-IOS-XE-interfaces-oper:interfaces  or  /api/v2/monitor/system/status  or  /api/mo/sys.json  or  /rest/v10.09/system  or  /wapi/v2.12/network  or  /eapi/show/version  or  /api/zones/list" : "show version";
-        });
-        askBtn = h("button", { class: "btn primary", type: "submit" }, "Ask");
-        err = h("span", { class: "bad-text", role: "alert" });
-        form = h("form", { class: "toolbar devask", onsubmit: (ev) => { ev.preventDefault(); ask(); } },
-          h("label", { class: "f" }, h("span", {}, "Target"), targetIn), h("label", { class: "f" }, h("span", {}, "Ask for"), opSel), cmdIn, askBtn, err);
-        out = h("div", {});
-        const addrIn = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Address or name", placeholder: "10.0.0.2 or host.example.com" });
-        const tool = (label, fn) => h("button", { class: "btn", type: "button", onclick: () => { const a = addrIn.value.trim(); if (a) fn(a); } }, label);
-        const tools = h("div", { class: "toolbar" }, h("label", { class: "f" }, h("span", {}, "Address"), addrIn),
-          tool("Ping", (a) => netTool("ping", a)), tool("Traceroute", (a) => netTool("trace", a)), tool("Scan", scanPopup), tool("Lookup", lookupPopup), tool("Whois", whoisPopup));
         tiles = h("div", { class: "qtiles" });
-        main.append(tiles, h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, "Devices")), inv), h("div", { class: "card" }, h("div", { class: "body" }, form)), out,
-          state.session && state.session.read_only ? null : changeCard(),
-          state.session && state.session.read_only ? null : rawCard(),
-          state.session && state.session.read_only ? null : captureCard(),
-          h("div", { class: "card" }, h("header", {}, h("h2", {}, tc("Network tools"))), h("div", { class: "body" }, tools)));
+        main.append(tiles, h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, "Devices")), inv));
         load().catch((e) => { if (e.message !== "unauthenticated") clear(inv).append(h("p", { class: "bad-text" }, e.message)); });
-        const pre = state.prefill.devices;   // Topology ▸ right-click a gateway ▸ Ask its devices
-        if (pre) { state.prefill.devices = null; targetIn.value = pre.target; opSel.value = pre.op; ask(); }
       },
       async poll() { if (Date.now() - lastAt >= 10000) await load(); },   // the tiles and the table follow the devices, as the Node page follows the machine
     };
