@@ -1,5 +1,23 @@
 # Changelog
 
+## [v190] - 2026-11-16 — Topology after a reload: no waiting on other nodes; a log line for what is slow
+
+### Changed
+- `GET /api/canvas` (what Topology polls; blank, with no nodes and the devices gray, until it answers) waited, one after the other, for the primary's device health (up to 5 s), for each node that serves a gateway this node does not (up to 4 s each) and for the nodes' callers (2 s). On a node that is not the primary the sum could be 15 s after a page load. Now a request waits at most 2 s for the device health when this node has none yet, and at most 1.5 s for a node's picture it has none of yet; anything older is used at once while a new one is fetched in the background (`replicaHealth`, `peerCanvasOf`). The next poll, two seconds later, has what the wait missed.
+- A node's picture of its gateways is kept for 3 s (it was asked again on every poll).
+
+### Added
+- Log lines for the slow part, when the cause is not what the above covers: `web: /api/canvas took 14.2s for "user" (this node …, the nodes that serve its gateways …, their callers …)` for an answer that took over 2 s; `devices: the primary took … to answer for the device health`; `topology: node … took … to give its picture of its gateways`.
+
+### Verified
+- Tests: the second asker of the health waits for the fetch in flight and the primary is asked once; a primary that never answers holds a request for no longer than the bound; an older answer is used at once and the refreshed one by the next request.
+- `gofmt -l .`, `go vet ./...`, `go test -race ./...`, no-cgo, 5-arch cross-compile.
+
+### Not verified
+- Not run against a real cluster, so it is not confirmed that these waits are the 15 s seen on a reload. If it is still slow, the `web: /api/canvas took` line says which part. `liveBGPPeers` (vtysh) and the local part of the canvas are not bounded here; they show in the same line as "this node".
+
+---
+
 ## [v189] - 2026-11-16 — Topology no longer starts gray on a node that is not the primary
 
 ### Fixed

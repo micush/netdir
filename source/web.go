@@ -354,10 +354,21 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /api/devices", w.authed(w.handleDevices))
 	mux.HandleFunc("GET /api/devices/query", w.authed(w.handleDeviceQuery))
 	mux.HandleFunc("GET /api/canvas", w.authed(func(rw http.ResponseWriter, r *http.Request, s *session) {
+		t0 := time.Now()
 		groups := w.status.canvasGroups()
+		tLocal := time.Since(t0)
+		var tVia, tPeers time.Duration
 		if r.URL.Query().Get("own") == "" { // ?own=1: this node's own view, as asked by another node or by the sidebar
+			t1 := time.Now()
 			w.status.viaServing(r.Context(), groups)
+			tVia = time.Since(t1)
+			t2 := time.Now()
 			w.status.addPeerClients(r.Context(), groups)
+			tPeers = time.Since(t2)
+		}
+		if total := time.Since(t0); total > 2*time.Second { // the page is blank (no nodes, devices gray) until this answers: say which part took the time
+			warnf("web: /api/canvas took %s for %q (this node %s, the nodes that serve its gateways %s, their callers %s)", total.Round(100*time.Millisecond), s.user,
+				tLocal.Round(100*time.Millisecond), tVia.Round(100*time.Millisecond), tPeers.Round(100*time.Millisecond))
 		}
 		if sc := scopeOf(s); sc.limited() {
 			keep := groups[:0]

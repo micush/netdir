@@ -65,33 +65,84 @@ func (g *CanvasGateway) takeFrom(p CanvasGateway, from CanvasNode) {
 	g.Via, g.ViaAddr = from.Name, from.Addr
 }
 
+// peerCanvases keeps, for a few seconds, the picture each serving node gave of its own gateways, so a poll asks no node that was
+// asked a moment ago, and a slow node never holds the page up: a stale picture is used while a new one is fetched in the background.
+var (
+	peerCanvasMu sync.Mutex
+	peerCanvases = map[string]*peerCanvas{}
+	// viaColdWait is how long a request waits for a node it has no picture from yet; then it shows this node's own view.
+	viaColdWait = 1500 * time.Millisecond
+)
+
+const peerCanvasFor = 3 * time.Second
+
+type peerCanvas struct {
+	at       time.Time
+	data     []CanvasGateway
+	fetching bool
+	done     chan struct{}
+}
+
+func (s *StatusServer) peerCanvasOf(n CanvasNode) []CanvasGateway {
+	peerCanvasMu.Lock()
+	e := peerCanvases[n.Addr]
+	if e == nil {
+		e = &peerCanvas{}
+		peerCanvases[n.Addr] = e
+	}
+	if time.Since(e.at) >= peerCanvasFor && !e.fetching {
+		e.fetching = true
+		e.done = make(chan struct{})
+		done := e.done
+		go func() {
+			t0 := time.Now()
+			cctx, cancel := context.WithTimeout(context.Background(), viaFetchTimeout)
+			defer cancel()
+			resp, err := s.mg.cl.Relay(cctx, n.Addr, proxyReq{User: "topology", Method: http.MethodGet, Path: "/api/canvas?own=1"})
+			var out struct {
+				Data []CanvasGateway `json:"data"`
+			}
+			good := err == nil && resp.Status == http.StatusOK && json.Unmarshal(resp.Body, &out) == nil
+			if took := time.Since(t0); took > time.Second {
+				warnf("topology: node %s took %s to give its picture of its gateways (answered: %v)", n.Addr, took.Round(100*time.Millisecond), good)
+			}
+			peerCanvasMu.Lock()
+			defer peerCanvasMu.Unlock()
+			e.fetching = false
+			close(done)
+			if good {
+				e.data, e.at = out.Data, time.Now()
+			} else {
+				e.at = time.Now().Add(peerCanvasFor - time.Second) // ask again in a second, not at once
+			}
+		}()
+	}
+	data, done, at := e.data, e.done, e.at
+	peerCanvasMu.Unlock()
+	if data == nil && done != nil {
+		select {
+		case <-done:
+		case <-time.After(viaColdWait):
+		}
+		peerCanvasMu.Lock()
+		data, at = e.data, e.at
+		peerCanvasMu.Unlock()
+	}
+	if time.Since(at) > time.Minute {
+		return nil // too old to say how the gateway is doing now
+	}
+	return data
+}
+
 // viaServing replaces, in place, each gateway this node does not serve with the picture of a node that does.
 func (s *StatusServer) viaServing(ctx context.Context, groups []CanvasGateway) {
 	if s.mg == nil || s.mg.cl == nil {
 		return
 	}
-	fetched := map[string][]CanvasGateway{} // by node address; nil: could not be asked
-	ask := func(n CanvasNode) []CanvasGateway {
-		if l, done := fetched[n.Addr]; done {
-			return l
-		}
-		cctx, cancel := context.WithTimeout(ctx, viaFetchTimeout)
-		defer cancel()
-		resp, err := s.mg.cl.Relay(cctx, n.Addr, proxyReq{User: "topology", Method: http.MethodGet, Path: "/api/canvas?own=1"})
-		var out struct {
-			Data []CanvasGateway `json:"data"`
-		}
-		if err == nil && resp.Status == http.StatusOK && json.Unmarshal(resp.Body, &out) == nil {
-			fetched[n.Addr] = out.Data
-		} else {
-			fetched[n.Addr] = nil
-		}
-		return fetched[n.Addr]
-	}
 	for i := range groups {
 	peers:
 		for _, n := range servingPeers(groups[i]) {
-			for _, p := range ask(n) {
+			for _, p := range s.peerCanvasOf(n) {
 				if p.GroupID == groups[i].GroupID {
 					groups[i].takeFrom(p, n)
 					break peers

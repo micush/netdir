@@ -55,54 +55,52 @@ func deviceHealth(look bool) map[string]device.Health {
 	return replicaHealth(look, fetchPrimaryHealth)
 }
 
-// replicaHealth is the primary's health as this node last heard it; fetch asks the primary.
+// healthColdWait is how long a request waits for the primary's answer when this node has none at all yet.  Longer than that the page
+// is answered without it: the devices show "not checked" for a poll, not the whole page for as long as a slow primary takes.
+var healthColdWait = 2 * time.Second
+
+// replicaHealth is the primary's health as this node last heard it; fetch asks the primary.  An answer older than healthCacheFor is
+// used at once while a new one is fetched in the background; with no answer yet, the request waits for the fetch, up to healthColdWait.
 func replicaHealth(look bool, fetch func(bool) (map[string]device.Health, bool)) map[string]device.Health {
 	healthCache.mu.Lock()
-	fresh := time.Since(healthCache.at) < healthCacheFor
-	if fresh {
-		d := healthCache.data
-		healthCache.mu.Unlock()
-		if d == nil {
-			d = map[string]device.Health{}
-		}
-		return d
-	}
-	if healthCache.fetching {
-		// Another request is already asking the primary.  With an older answer in hand, use it; with none (the first look after this
-		// node was quiet, and the Topology page asks the canvas and the devices at once) wait for that fetch, or every device is
-		// shown as "not checked" until the next poll.
-		d, done := healthCache.data, healthCache.done
-		healthCache.mu.Unlock()
-		if d == nil {
-			select {
-			case <-done:
-			case <-time.After(healthFetchTimeout + time.Second):
+	d := healthCache.data
+	if time.Since(healthCache.at) >= healthCacheFor && !healthCache.fetching {
+		healthCache.fetching = true
+		healthCache.done = make(chan struct{})
+		done := healthCache.done
+		go func() {
+			t0 := time.Now()
+			data, ok := fetch(look)
+			if took := time.Since(t0); took > time.Second {
+				warnf("devices: the primary took %s to answer for the device health (answered: %v)", took.Round(100*time.Millisecond), ok)
 			}
 			healthCache.mu.Lock()
-			d = healthCache.data
-			healthCache.mu.Unlock()
-		}
-		if d == nil {
-			d = map[string]device.Health{}
-		}
-		return d
+			defer healthCache.mu.Unlock()
+			healthCache.fetching = false
+			close(done)
+			if ok {
+				healthCache.data, healthCache.at = data, time.Now()
+			} else if healthCache.data == nil {
+				healthCache.data = map[string]device.Health{}
+				healthCache.at = time.Now().Add(healthCacheFor - 2*time.Second) // ask again in a couple of seconds, not at once
+			}
+		}()
 	}
-	healthCache.fetching = true
-	healthCache.done = make(chan struct{})
+	done := healthCache.done
 	healthCache.mu.Unlock()
-
-	data, ok := fetch(look)
-	healthCache.mu.Lock()
-	defer healthCache.mu.Unlock()
-	healthCache.fetching = false
-	close(healthCache.done)
-	if ok {
-		healthCache.data, healthCache.at = data, time.Now()
-	} else if healthCache.data == nil {
-		healthCache.data = map[string]device.Health{}
-		healthCache.at = time.Now().Add(healthCacheFor - 2*time.Second) // ask again in a couple of seconds, not at once
+	if d == nil {
+		select {
+		case <-done:
+		case <-time.After(healthColdWait):
+		}
+		healthCache.mu.Lock()
+		d = healthCache.data
+		healthCache.mu.Unlock()
 	}
-	return healthCache.data
+	if d == nil {
+		d = map[string]device.Health{}
+	}
+	return d
 }
 
 func fetchPrimaryHealth(look bool) (map[string]device.Health, bool) {

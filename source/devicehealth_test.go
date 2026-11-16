@@ -149,3 +149,59 @@ func TestReplicaHealthSecondAskerWaitsForTheFetch(t *testing.T) {
 		t.Fatalf("%d fetches for two askers", fetches)
 	}
 }
+
+func resetHealthCache(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		healthCache.mu.Lock()
+		healthCache.data, healthCache.at, healthCache.fetching = nil, time.Time{}, false
+		healthCache.mu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+}
+
+// A primary that is slow to answer must not hold a request longer than healthColdWait: the page is answered without the health (the
+// devices read "not checked" for a poll) instead of staying blank until the primary has answered.
+func TestReplicaHealthColdWaitIsBounded(t *testing.T) {
+	resetHealthCache(t)
+	old := healthColdWait
+	healthColdWait = 100 * time.Millisecond
+	t.Cleanup(func() { healthColdWait = old })
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	fetch := func(bool) (map[string]device.Health, bool) { <-release; return nil, false }
+	t0 := time.Now()
+	m := replicaHealth(true, fetch)
+	if took := time.Since(t0); took > time.Second {
+		t.Fatalf("waited %s for a primary that does not answer", took)
+	}
+	if m == nil || len(m) != 0 {
+		t.Fatalf("want an empty map, got %v", m)
+	}
+}
+
+// With an older answer in hand a request uses it at once; the new one is fetched in the background and used by the next request.
+func TestReplicaHealthStaleAnswerIsUsedWhileRefreshing(t *testing.T) {
+	resetHealthCache(t)
+	healthCache.mu.Lock()
+	healthCache.data = map[string]device.Health{"sw1": {Status: "ok"}}
+	healthCache.at = time.Now().Add(-time.Minute)
+	healthCache.mu.Unlock()
+	release, fetched := make(chan struct{}), make(chan struct{})
+	fetch := func(bool) (map[string]device.Health, bool) {
+		<-release
+		defer close(fetched)
+		return map[string]device.Health{"sw1": {Status: "bad"}}, true
+	}
+	t0 := time.Now()
+	if m := replicaHealth(true, fetch); m["sw1"].Status != "ok" || time.Since(t0) > time.Second {
+		t.Fatalf("want the older answer at once, got %v after %s", m, time.Since(t0))
+	}
+	close(release)
+	<-fetched
+	time.Sleep(50 * time.Millisecond)
+	if m := replicaHealth(true, fetch); m["sw1"].Status != "bad" {
+		t.Fatalf("the refreshed answer was not used: %v", m)
+	}
+}
