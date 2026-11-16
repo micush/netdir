@@ -1,5 +1,22 @@
 # Changelog
 
+## [v183] - 2026-11-16 — Renaming a login renames it on every device that uses it
+
+### Changed
+- Configure ▸ Devices: a device holds its login by name, so renaming a login in the Logins table left every device that used it pointing at a name that no longer existed, and the save was refused (`device X: credential "old" is not in the credentials list`) until each device's Login was changed by hand. Now, when a login's name is entered, every row of the Devices table whose Login is the old name takes the new one at once, and the form's autosave then carries both in the same save. A rename follows from the name the login had when the page was drawn (or last renamed), so renaming it twice in one visit works, and a swap of two names is done in one step. A name another login already has is not followed (the daemon still refuses that save as "listed twice"); fixing it to a free name then follows from the real old name. Editing a password, user name or token moves nothing.
+- `webui/app.js` only: `rowTable` gains `track` (the Logins table sets it), `renames()`, `commit()` and `retarget()`, and `fieldset` gives its row tables back through `table(key)`. The daemon, the config format (`credential` is still the login's name) and the API are unchanged, so a hand-edited config or an API client still has to rename a login's references itself. `webui/help.js` (Configure ▸ Devices) says it.
+
+### Verified
+- `gofmt -l .` empty; `go build`; `go vet ./...`; `go test -race -count=1 ./...` (netdir 134 s, netdir/device 11 s) all pass; `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test ./...` pass; `linux/amd64`, `arm64`, `arm`, `386` and `riscv64` build. `node --check` passes on `webui/app.js` and `webui/help.js`.
+- A throwaway jsdom test (scratch directory, not in the repo) loads the real `app.js` and `help.js` against a mocked API, opens Configure ▸ Devices and edits the Logins table: a rename updates the Devices table's Login column and the autosave PUT carries the new name on every device that used it with the secrets untouched; a second rename continues from the first; a rename onto an existing name moves nothing and fixing it follows; a password edit moves nothing. The same test against the v182 `app.js` fails 7 of its 13 checks.
+
+### Not verified
+- Not clicked through in a real browser (Chromium, light and dark): nothing about the layout changed, and only the jsdom test above drove the page.
+- The real PAM login and the multi-daemon cluster checks were not run: no auth, session, cluster or Go code changed.
+- Not covered on purpose: a rename made outside the web GUI (a hand-edited `netdir.conf`, `PUT /api/config`) is not followed.
+
+---
+
 ## [v182] - 2026-11-16 — Make the scan command findable
 
 ### Fixed

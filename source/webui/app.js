@@ -2358,7 +2358,7 @@
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
-    const data = (lines || []).map((l) => ({ v: spec.parse(l), off: !!(spec.isOff && spec.isOff(l)) }));
+    const data = (lines || []).map((l) => { const v = spec.parse(l); return { v, off: !!(spec.isOff && spec.isOff(l)), ...(spec.track ? { orig: String(v[0] || "").trim() } : {}) }; });
     let page = 0, size = small ? 1e9 : 50, dragging = null;
     const tbody = h("tbody", {});
     const tbl = h("table", { class: "policy zones rows" + (N === 1 ? " one" : "") },
@@ -2382,6 +2382,7 @@
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
     const cells = (row) => row.v.map((x) => x.trim());
+    const names = () => { const n = {}; for (const r of data) { const x = r.v[0].trim(); if (x) n[x] = (n[x] || 0) + 1; } return n; };   // how many rows carry each first-cell name
     const mark = (tr, row) => { tr.classList.toggle("incomplete", !!spec.mark(cells(row))); };
 
     function render(follow) {
@@ -2533,6 +2534,12 @@
     render();
     return {
       el: box,
+      // a tracked table (spec.track): the rows that had one name and now have another (original -> now); a new, deleted, unnamed or doubly named row has none
+      renames: () => { const n = names(); return new Map(data.filter((r) => r.orig && r.v[0].trim() && r.v[0].trim() !== r.orig && n[r.v[0].trim()] === 1).map((r) => [r.orig, r.v[0].trim()])); },
+      // what each row is called now is what it was called: renames start again from here
+      commit: () => { const n = names(); for (const r of data) if (r.v[0].trim() && n[r.v[0].trim()] === 1) r.orig = r.v[0].trim(); },
+      // a column's values that are keys of the map take the map's value (the Login column follows a renamed login)
+      retarget: (col, map) => { let k = 0; for (const r of data) { const x = (r.v[col] || "").trim(); if (map.has(x)) { r.v[col] = map.get(x); k++; } } if (k) render(); return k; },
       get: () => (spec.obj ? data.filter((r) => !(spec.drop || spec.mark)(cells(r))).map((r) => spec.obj(cells(r)))
         : data.flatMap((r) => ((spec.drop || spec.mark)(cells(r)) ? [] : spec.format(cells(r)).map((x) => (r.off ? x + " disabled" : x))))),
     };
@@ -2609,7 +2616,7 @@
     },
     // the logins the devices use: a user name and password, or an API token (FortiOS, PAN-OS, Technitium, Observium, IP Fabric, Centreon)
     devcreds: {
-      key: "devcreds", empty: "No logins.", wide: true,
+      key: "devcreds", empty: "No logins.", wide: true, track: true,   // track: a renamed login is followed by the devices that use it (see devicesOut)
       cols: [{ name: "Name", ph: "lab" }, { name: "User name", ph: "netdir" }, { name: "Password", secret: true }, { name: "Token", secret: true, ph: "FortiOS, PAN-OS, Meraki, MCP key" }],
       parse: (c) => (typeof c === "string" ? [c.split(/\s+/)[0] || "", "", "", ""] : [c.name || "", c.username || "", c.password || "", c.token || ""]),
       format: (c) => [{ name: c[0], ...(c[1] ? { username: c[1] } : {}), ...(c[2] ? { password: c[2] } : {}), ...(c[3] ? { token: c[3] } : {}) }],
@@ -2846,7 +2853,7 @@
     return [r ? r + "." : "", d].filter(Boolean).join(" ");
   }
   function fieldset(specs, obj, asCards) {
-    const getters = {};
+    const getters = {}, tables = {};
     let grid = h("div", { class: "grid" });
     const wrap = asCards ? h("div", {}) : grid;
     for (const f of specs) {
@@ -2878,6 +2885,7 @@
       if (f.t === "rows") {
         const rt = rowTable(ROW_TABLES[f.rows], v || []);
         getters[f.k] = rt.get;
+        tables[f.k] = rt;
         grid.append(h("div", { class: "f wide" }, h("span", {}, f.l, sharedTag(f)), rt.el, f.hint ? h("span", { class: "hint" }, f.hint) : null));
         continue;
       }
@@ -2915,7 +2923,7 @@
       }
       grid.append(h("label", { class: "f" + (f.wide ? " wide" : "") + (f.brk ? " brk" : "") }, h("span", {}, f.l, sharedTag(f)), input, (f.hint || rangeText(f)) ? h("span", { class: "hint" }, [f.hint, rangeText(f)].filter(Boolean).join(" ")) : null, weak));
     }
-    return { el: wrap, get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
+    return { el: wrap, table: (k) => tables[k], get: () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()])) };
   }
 
   // Configure ▸ Settings, Gateways, MCP, Devices, Web GUI, Monitoring, Alerts and Backup: one page each, all made from the one form
@@ -3385,6 +3393,12 @@
       // the Login column of the devices table offers the names in the Logins table below it, as they stand now (unsaved rows too)
       const loginList = h("datalist", { id: "device-logins" });
       ROW_TABLES.devices.onList = () => { let names = []; try { names = (devcreds.get().device_credentials || []).map((c) => c.name).filter(Boolean); } catch (_) { /* a row that is not finished */ } loginList.replaceChildren(...[...new Set(names)].sort().map((n) => h("option", { value: n }))); };
+      // a login renamed in the Logins table: every device that used it under its old name takes the new one (this runs before the form saves)
+      devcreds.el.addEventListener("change", () => {
+        const lt = devcreds.table("device_credentials"), dt = devices.table("devices"), ren = lt.renames();
+        if (ren.size) dt.retarget(ROW_TABLES.devices.cols.findIndex((c) => c.name === "Login"), ren);
+        lt.commit();
+      });
       const devcheck = fieldset(DEVCHECK_FIELDS, { device_check_s: set.device_check_s, device_facts_min: set.device_facts_min, device_live_check_s: set.device_live_check_s, device_live_facts_min: set.device_live_facts_min });
       const devcheckShared = () => { const c = devcheck.get(), o = {}; for (const k of ["device_live_check_s", "device_live_facts_min", "device_check_s", "device_facts_min"]) if (c[k] > 0) o[k] = c[k]; return o; };
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
