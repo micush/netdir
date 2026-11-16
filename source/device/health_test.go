@@ -256,3 +256,53 @@ func TestMonitorSNMPDeviceIsNotDialled(t *testing.T) {
 		t.Fatalf("a wrong community: %+v", h)
 	}
 }
+
+// A device that refused a request (a wrong password) is asked again only every FactsEvery; Recheck asks it now, so a corrected
+// login shows at once, and a disabled device is still not contacted.
+func TestMonitorRecheck(t *testing.T) {
+	calls := 0
+	d, srv := stub(t, func(r *http.Request) bool { u, p, _ := r.BasicAuth(); return u == "admin" && p == "pw" }, map[string]string{
+		"/restconf/data/Cisco-IOS-XE-native:native/hostname": `{"x:hostname":"sw1"}`,
+	})
+	srv.Config.Handler = countCalls(srv.Config.Handler, &calls)
+	d.Name, d.Platform, d.Credential = "sw1", "iosxe", "lab"
+	bad := []Credential{{Name: "lab", Username: "admin", Password: "wrong-secret"}}
+	good := []Credential{{Name: "lab", Username: "admin", Password: "pw"}}
+	m := NewMonitor()
+	m.Timeout = time.Second
+	now := time.Unix(1_800_000_000, 0)
+	m.Check(context.Background(), []Device{d}, bad, now)
+	if h := m.Snapshot()["sw1"]; h.Status != "warn" {
+		t.Fatalf("a wrong password: %+v", h)
+	}
+	// the login is corrected; a minute later the round does not ask the device again
+	m.Check(context.Background(), []Device{d}, good, now.Add(time.Minute))
+	if h := m.Snapshot()["sw1"]; h.Status != "warn" {
+		t.Fatalf("the round asked again before FactsEvery: %+v", h)
+	}
+	// Recheck does, and what it finds is the state from then on
+	h := m.Recheck(context.Background(), d, good[0], now.Add(time.Minute))
+	if h.Status != "ok" || h.Facts == nil || h.Facts.Hostname != "sw1" || h.FactsErr != "" || h.LastOK != now.Add(time.Minute).Unix() {
+		t.Fatalf("after the recheck: %+v", h)
+	}
+	if got := m.Snapshot()["sw1"]; got.Status != "ok" {
+		t.Fatalf("the monitor kept the old state: %+v", got)
+	}
+	// and a login that is still wrong shows as refusing again, without the password
+	h = m.Recheck(context.Background(), d, bad[0], now.Add(2*time.Minute))
+	if h.Status != "warn" || strings.Contains(h.Detail, "wrong-secret") || h.Facts == nil {
+		t.Fatalf("a recheck with the wrong password: %+v", h)
+	}
+	// a disabled device is not contacted, however it is asked
+	off := d
+	off.Name, off.Disabled = "off", true
+	before := calls
+	if h := m.Recheck(context.Background(), off, good[0], now); h.Status != "paused" || calls != before {
+		t.Fatalf("a disabled device was contacted: %+v (%d requests)", h, calls-before)
+	}
+	// a device whose login is not in the list says so
+	h = m.Recheck(context.Background(), d, Credential{}, now.Add(3*time.Minute))
+	if h.Status != "warn" || !strings.Contains(h.Detail, "not in the list") {
+		t.Fatalf("no login: %+v", h)
+	}
+}

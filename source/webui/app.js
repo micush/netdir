@@ -576,7 +576,7 @@
       switch (state.tab) {
       case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
       case "cfg_groups": return "config_groups";
-      case "cfg_devices": return "config_devices";
+      case "cfg_devices": return state.devTab === 2 ? "config_checks" : state.devTab === 1 ? "config_logins" : "config_devices";
       case "cfg_web": return "config_web";
       case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
       case "anycaststatus": return "anycaststatus_" + (state.anycastMonTab === 1 ? "ospf" : "bgp");
@@ -1328,7 +1328,7 @@
     const devItems = (g, name) => {
       const d = devByName(name);
       return [
-        ["Network tools", null, "", toolItems(d.address).filter((x) => x !== "-")],
+        ["Network tools", null, "", toolItems(d.address, name).filter((x) => x !== "-")],
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus", "device42", "proxmox", "vcenter"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
         ...(d.platform === "panorama" || d.platform === "panos" ? [["Troubleshoot user or host", () => troubleForm(name, "panorama")]] : []),
@@ -2047,12 +2047,23 @@
   function lookupPopup(name) {
     textPopup("Lookup " + name, async (put) => put((await api("GET", "/api/dnslookup/full?lookup=" + encodeURIComponent(name))).data.text));
   }
+  // Recheck: the device is asked again now, whatever its state (a login or a firewall rule was corrected); Run again asks once more
+  function recheckPopup(name) {
+    const WORDS = { ok: "answering", warn: "refusing", bad: "unreachable", paused: "disabled" };
+    textPopup("Recheck " + name, async (put) => {
+      const hl = (await api("POST", "/api/devices/recheck", { name })).data.health;
+      const word = WORDS[hl.status] || hl.status;
+      put(name + ": " + word + (hl.detail && hl.detail !== word ? "\n" + hl.detail : ""));   // "answering" needs no second line
+      if (state.tab === "devices") VIEWS.devices.refresh().catch(() => {});   // the Monitor page shows it at once
+    });
+  }
   function whoisPopup(name) {
     textPopup("Whois " + name, async (put) => put(whoisText((await api("GET", "/api/whois?lookup=" + encodeURIComponent(name))).data)));
   }
 
 
-  const toolItems = (addr) => [["Ping", () => netTool("ping", addr)], ["Traceroute", () => netTool("trace", addr)], ["Scan", () => scanPopup(addr)], "-", ["Lookup", () => lookupPopup(addr)], ["Whois", () => whoisPopup(addr)]];
+  const toolItems = (addr, device) => [["Ping", () => netTool("ping", addr)], ["Traceroute", () => netTool("trace", addr)], ["Scan", () => scanPopup(addr)], "-", ["Lookup", () => lookupPopup(addr)], ["Whois", () => whoisPopup(addr)],
+    ...(device ? ["-", ["Recheck", () => recheckPopup(device)]] : [])];   // device: the inventory name of a device of this gateway (not one below another Network Director)
 
   // Devices  (MCP: list_devices, device_facts, …; API: /api/devices, /api/devices/query)
   // The inventory, and a form that asks the devices a target picks for one thing at once.  Every device answers on its own row:
@@ -2082,7 +2093,7 @@
       clear(list).append(shown.length ? h("div", { class: "scroll" }, h("table", { class: "tight", onmouseover: cutTip },
         h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Via", "Tags", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, shown.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Right-click for the network tools",
-          oncontextmenu: rowMenu(toolItems(x.address)) },
+          oncontextmenu: rowMenu(toolItems(x.address, x.remote ? "" : x.name)) },
           h("td", { class: "nname" }, x.name), h("td", { title: [hl(x).detail || "not checked yet", below[x.name] ? "Below it: " + below[x.name] : ""].filter(Boolean).join(". ") },
             pill(...(STATE[hl(x).status] || ["not checked", "tiny"]))),
           h("td", {}, platformName(x.platform)), h("td", { class: "mono" }, x.address + (x.port ? ":" + x.port : "")),
@@ -2141,6 +2152,7 @@
         load().catch((e) => { if (e.message !== "unauthenticated") clear(list).append(h("p", { class: "bad-text" }, e.message)); });
       },
       async poll() { if (Date.now() - lastAt >= 10000) await load(); },   // the tiles and the table follow the devices, as the Node page follows the machine
+      refresh: () => load(),   // now, not in 10 s (a recheck just changed a device's state)
     };
   })();
 
@@ -2324,7 +2336,7 @@
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
   // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
-  const SMALL_TABLES = new Set(["ldapservers", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl", "devcreds"]);
+  const SMALL_TABLES = new Set(["ldapservers", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl"]);
   // The devices a key or an allowed source may use: a pill for each device name or tag:TAG, and the two special ones, all (no pills) and none.
   // The choices are the devices of the inventory and their tags; any other name can be typed (a device added later).
   let devChoices = { names: [], tags: [], gateways: [] };   // gateways: [{id, name}]
@@ -2423,7 +2435,8 @@
     const box = h("div", { class: "policy-box rows" + (spec.wide ? " wide" : "") }, ...(small ? [] : [bar]), wrap);
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
-    const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x) => x.toLowerCase().includes(q))) : data; };
+    const plain = spec.cols.map((c) => !c.secret);   // the filter never looks into a password or a token
+    const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x, i) => plain[i] && x.toLowerCase().includes(q))) : data; };
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
     const cells = (row) => row.v.map((x) => x.trim());
@@ -3586,6 +3599,28 @@
         show(state.monTab >= 0 && state.monTab < TABS.length ? state.monTab : 0);
         return h("div", {}, strip, ...panes);
       };
+      // the Devices page is three tabs: Devices, Logins and Checks (every table stays in the page, so a save reads them all)
+      const devicesTabs = () => {
+        const TABS = [["Devices", section("Devices", devices.el, loginList)], ["Logins", section("Logins", devcreds.el)], ["Checks", section("Checks", devcheck.el)]];
+        const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
+        const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
+        function show(i, focus) {
+          state.devTab = i;
+          refreshHelp();
+          panes.forEach((p, j) => { p.hidden = j !== i; });
+          buttons.forEach((b, j) => { b.setAttribute("aria-selected", j === i ? "true" : "false"); b.tabIndex = j === i ? 0 : -1; b.classList.toggle("on", j === i); });
+          if (focus) buttons[i].focus();
+        }
+        const strip = h("div", { class: "dtabs", role: "tablist", "aria-label": "Device settings" }, buttons);
+        strip.addEventListener("keydown", (e) => {
+          const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+          if (!d) return;
+          e.preventDefault();
+          show((state.devTab + d + TABS.length) % TABS.length, true);
+        });
+        show(state.devTab >= 0 && state.devTab < TABS.length ? state.devTab : 0);
+        return h("div", {}, strip, ...panes);
+      };
       // Syslog: the state of the connection is shown under the settings, with a button that sends a test message
       const syslogState = h("div", { class: "hint" });
       const syslogMsg = h("span", { class: "hint" });
@@ -3642,7 +3677,7 @@
       const panels = [
         ["general", "Settings", settingsTabs()],
         ["groups", "Gateway groups", h("div", {}, groupsEl)],
-        ["devices", "Devices", h("div", {}, section("Devices", devices.el, loginList), section("Logins", devcreds.el), section("Checks", devcheck.el))],
+        ["devices", "Devices", devicesTabs()],
         ["web", "Web GUI", h("div", {}, section("Web GUI", web.el), certBox)],
         ["sso", "SSO", section("Single sign-on",
           sso.el)],

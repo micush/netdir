@@ -187,6 +187,22 @@ func (m *Monitor) checkList(ctx context.Context, devs []Device, cred map[string]
 	wg.Wait()
 }
 
+// Recheck checks one device now, whatever state it is in and whenever it was last asked: its facts are asked again at once (a
+// device that refused a request is otherwise asked again only every FactsEvery, and one that is not looked at every six hours),
+// and the answer is its health from then on.  It is what someone who corrected a login or a firewall rule asks for.  The device
+// need not be in the inventory the monitor last saw; a disabled one is not contacted.
+func (m *Monitor) Recheck(ctx context.Context, d Device, c Credential, now time.Time) Health {
+	m.mu.Lock()
+	h := m.state[d.Name]
+	m.mu.Unlock()
+	h.FactsAt = 0 // never asked: the facts are due
+	h = m.checkOne(ctx, d, c, h, now)
+	m.mu.Lock()
+	m.state[d.Name] = h
+	m.mu.Unlock()
+	return h
+}
+
 // udpPlatforms are the platforms whose driver talks UDP (SNMP): there is no port to connect to, so the check is the request itself.
 var udpPlatforms = map[string]bool{"ios": true}
 

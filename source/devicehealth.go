@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ const (
 	healthCacheFor     = 10 * time.Second
 	healthFetchTimeout = 5 * time.Second
 	healthInactiveWait = 15 * time.Second // how often a node that is not the primary asks itself whether it has become it
+	recheckTimeout     = 40 * time.Second // one device asked again: the dial, then the facts (device.Monitor.Timeout is 4 s, the facts get five times that)
 )
 
 var (
@@ -119,4 +121,72 @@ func (w *WebServer) handleDeviceHealth(rw http.ResponseWriter, r *http.Request, 
 		devHealth.Touch()
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"health": devHealth.Snapshot(), "checks_here": checksHere()}})
+}
+
+// handleDeviceRecheck: POST /api/devices/recheck {"name"} — ask that device again now, whatever its state: its facts are asked at
+// once (one that refused a request is otherwise asked again every few minutes, and one nobody looks at every six hours) and the
+// answer is its state from then on.  The page's right-click ▸ Network tools ▸ Recheck, after a login or a firewall rule was
+// corrected.  Only the primary does the checks, so another node hands the request to it.  A read-only account cannot ask (it is
+// a POST: authed refuses it); a caller limited to some devices (devscope.go) can ask only for those.
+func (w *WebServer) handleDeviceRecheck(rw http.ResponseWriter, r *http.Request, s *session) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 4096)).Decode(&in); err != nil || in.Name == "" {
+		jsonError(rw, http.StatusBadRequest, "name: the device to ask again")
+		return
+	}
+	devs, creds := w.status.sup.deviceInventory()
+	var dev *device.Device
+	for _, d := range scopeOf(s).filter(devs) {
+		if d.Name == in.Name {
+			dev = &d
+			break
+		}
+	}
+	if dev == nil {
+		jsonError(rw, http.StatusNotFound, "no such device: "+in.Name)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), recheckTimeout)
+	defer cancel()
+	if !checksHere() {
+		snap := healthMg.cl.Snapshot()
+		if snap.PrimaryAddr == "" || snap.PrimaryAddr == snap.SelfAddr {
+			jsonError(rw, http.StatusServiceUnavailable, "the cluster has no primary to ask the device just now")
+			return
+		}
+		user := "devices"
+		if f := strings.Fields(s.user); len(f) > 0 { // "user via node" when this request was itself relayed: the user is the first word
+			user = f[0]
+		}
+		body, _ := json.Marshal(map[string]string{"name": in.Name})
+		resp, err := healthMg.cl.Relay(ctx, snap.PrimaryAddr, proxyReq{User: user, Method: http.MethodPost, Path: "/api/devices/recheck", CT: "application/json", Body: body, RO: w.ro(s)})
+		if err != nil {
+			jsonError(rw, http.StatusBadGateway, "the primary could not be asked: "+err.Error())
+			return
+		}
+		healthCache.mu.Lock()
+		healthCache.at = time.Time{} // the next look at the devices asks the primary again, not this node's few-second-old copy
+		healthCache.mu.Unlock()
+		ct := resp.CT
+		if ct == "" {
+			ct = "application/json"
+		}
+		rw.Header().Set("Content-Type", ct)
+		rw.WriteHeader(resp.Status)
+		rw.Write(resp.Body)
+		return
+	}
+	var cred device.Credential
+	for _, c := range creds {
+		if c.Name == dev.Credential {
+			cred = c
+			break
+		}
+	}
+	devHealth.Touch() // someone is looking: the rounds that follow are the short ones
+	h := devHealth.Recheck(ctx, *dev, cred, time.Now())
+	h.Facts = nil // the page wants the state and why, not the device's facts
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"name": dev.Name, "health": h}})
 }

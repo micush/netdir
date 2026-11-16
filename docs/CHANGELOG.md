@@ -1,5 +1,41 @@
 # Changelog
 
+## [v186] - 2026-11-16 — Configure ▸ Devices in three tabs; filter and pages on Logins
+
+### Changed
+- Configure ▸ Devices is three tabs, **Devices | Logins | Checks**, like Monitoring (SNMP | Metrics). Every table stays in the page, so the autosave still reads and saves all three together; the login-rename cascade (v183) works with the Devices tab hidden.
+- The **Logins** table has the filter box, the page box and the rows-per-page box that Devices has (it was a small table with none). The filter looks at every column except **Password** and **Token**, so typing part of a secret finds nothing.
+- `webui/help.js`: the one `config_devices` topic is now `config_devices`, `config_logins` and `config_checks`, and the tab shown picks the topic. The four interval fields were nested inside the Logins entry and never listed; they are now on Checks. `help_test.go` and `help_fields_test.go` follow.
+
+### Verified
+- jsdom: three tabs, one shown at a time; Logins with 121 rows: 50 to a page, 3 pages, filter by name and by user name, no match on a password or a token; a rename made on Logins reaches the devices on the hidden Devices tab; the autosave carries devices and logins; Checks has its four boxes. The v183 and v184 tests still pass.
+- `gofmt -l .` empty; `go vet ./...`; the help tests.
+
+### Not verified
+- Not looked at in a real browser in light and dark; the code adds no styles (the tabs and the bar are the existing classes).
+
+---
+
+## [v185] - 2026-11-16 — Recheck a device now
+
+### Added
+- Right-click a device ▸ **Network tools ▸ Recheck** (Topology) or right-click its row ▸ **Recheck** (Monitor ▸ Devices): that device is asked again at once, whatever its state, and a popup says what it answered (`answering`, `refusing` or `unreachable`, and why); *Run again* asks once more, and the Monitor page shows the new state without waiting. It is for after a login or a firewall rule was corrected: a device that *refuses* a request (the amber one) was asked again only every `device_live_facts_min` minutes (5) while someone had Monitor ▸ Devices or Topology open, and every six hours when nobody did, so a corrected login could stay amber for minutes. A device that is unreachable was already asked every round. A disabled device is not contacted (it says `disabled`). Not offered for a device below another Network Director (its state is that director's), nor to an account that can only look.
+- `POST /api/devices/recheck {"name"}` answers `{"data":{"name","health":{"status","detail","checked",…}}}` (no facts, no secrets); 400 without a name, 404 for a device that is not there or not in the caller's scope; refused to read-only accounts like every POST. Only the primary of a cluster does the checks, so any other node hands the request to it over the cluster channel (`/api/devices` is already relayable, so the node picker works too) and forgets its few-second copy of the health. `device.Monitor.Recheck` is the check itself (the facts are asked again whatever `FactsAt` says).
+- `webui/help.js`: Topology and Monitor ▸ Devices say it.
+
+### Changed
+- `webui/app.js`: `toolItems(addr, device)` adds Recheck for a device of this gateway (the Monitor table passes none for a remote row); `recheckPopup`; `VIEWS.devices.refresh()`. Nothing else about the menus or the pages changed.
+
+### Verified
+- `gofmt -l .` empty; `go build`; `go vet ./...`; `go test -race -count=1 ./...` (netdir 132 s, netdir/device 10 s); `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test ./...`; `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` build; `node --check` on `app.js` and `help.js`. New tests: `TestMonitorRecheck` (a wrong password shows `warn`; a round a minute after the login was corrected still says `warn`, as the bug was; Recheck says `ok`; a still-wrong login says `warn` again without the password; a disabled device is not contacted; a missing login says so), `TestHandleDeviceRecheck` (400, 404, a dead port, a disabled device, a caller limited to some devices), `TestRecheckIsAPostRefusedToReadOnly`.
+- Live, real daemon with a real PAM login and a stub device that answers 401 until it is "corrected", in headless Chromium: the device shows `refusing`; after the stub is corrected it still does; Topology right-click ▸ Network tools ▸ Recheck and the Monitor row's Recheck both say `answering`, the Topology node turns from amber to green and the Monitor table follows at once; an unreachable device says `the API port does not answer`. Then two daemons in a cluster (a replica joined to the primary by `--cluster-join`): the same Recheck on the **replica** reaches the primary, the replica's page shows `answering` at once, and the primary's own page shows it too. The test user, groups (`netdir`, and the `netdir-ro` the daemon makes) and PAM file were removed afterwards.
+- The v183 login-rename and v184 filter/pages jsdom tests still pass.
+
+### Not verified
+- The Recheck popup in dark mode, and the Topology submenu in dark mode, were not looked at (the code adds no styles; the popup is the one Ping and Whois use). A read-only account was tested by the unit test only, not live. A node picked in the picker (a request relayed by the picker to a non-primary node, then on to the primary) was not run: the same two relays, each live-tested on its own. No certificate, update or history check was run: none of that code changed.
+
+---
+
 ## [v184] - 2026-11-16 — Filter and pages on Monitor ▸ Devices
 
 ### Added
