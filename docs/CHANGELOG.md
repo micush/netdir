@@ -1,5 +1,15 @@
 # Changelog
 
+## [v182] - 2026-11-16 — Make the scan command findable
+
+### Fixed
+- An MCP client asked to "scan the tv library" on a multi-media[encoder] started a real encode with `start_job` (stopped again, queue left holding the scan's files): `show scan` (v181) was not named in the `device_show` tool description, which lists the show names for no mediaencoder, and the `device_change_raw` description listed `start_job` without saying what it does.
+- `device_show` now names the mediaencoder reads and says `show scan target=movies|tv|/dir` is the scan-only command and to use it instead of `start_job`. `device_change_raw` says `start_job` starts a real encode job and points to `show scan`. The platform help says the same.
+
+### Verified
+- Against the live encoders (both v25): `show scan target=tv` on nvenc1-mme checked 4494 files and reported 114.8 GB to encode, and started nothing.
+- `VERSION` is `182`. Checks as for v181.
+
 ## [v181] - 2026-11-16 — Ask multi-media[encoder] what it would encode
 
 ### Added
