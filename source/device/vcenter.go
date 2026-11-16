@@ -463,7 +463,7 @@ func (v *vcenter) APICatalog(context.Context) (any, error) {
 		"how": "Paths below /vcenter, /appliance, /cis, /content, /esx and /vstats (/api is added; an older vCenter is asked at /rest). Lists take filters such as " +
 			"?names=, ?power_states=, ?clusters=. Sessions, users, accounts, tokens, passwords, certificates and keys, KMS, guest processes and files, and console tickets " +
 			"are refused. Changes are device_change_raw below /vcenter, /cis and /content: POST /vcenter/vm/ID/power?action=start|stop|reset|suspend, PATCH hardware, " +
-			"tags and so on; VMs are created, cloned and deleted, and their CPU, memory and disks changed, here; deleting a host, cluster, datacenter, datastore, folder, resource pool, network or a machine's disk is refused.",
+			"tags and so on; VMs are created, cloned and deleted, and their CPU, memory and disks changed, here; deleting a host, cluster, datacenter, datastore, folder, resource pool, network or a machine's disk is refused only when the daemon runs with NETDIR_DEVICE_GUARDS=1.",
 		"examples": ex,
 		"tip":      "show vm NAME (device_show) answers everything about one virtual machine in one call; the full API is at https://developer.broadcom.com/xapis/vsphere-automation-api/latest/.",
 	}, nil

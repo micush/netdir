@@ -2100,7 +2100,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161", mediaencoder: "8765" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2555,7 +2555,7 @@
     ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", device42: "Device42", smax: "Micro Focus SMAX", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
-    netdir: "MCP Network Director", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
+    netdir: "MCP Network Director", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
   };
   const platformName = (p) => PLATFORM_LABEL[p] || p;
   const PLATFORMS = Object.keys(PLATFORM_LABEL).sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b]));   // as the person reads them

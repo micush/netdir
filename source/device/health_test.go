@@ -178,7 +178,7 @@ func TestMonitorInactiveDoesNotCheck(t *testing.T) {
 }
 
 func TestDefaultPortIsDialedByTheCheck(t *testing.T) {
-	for p, want := range map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380, "iosxe": 443, "vcenter": 443} {
+	for p, want := range map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380, "mediaencoder": 8765, "iosxe": 443, "vcenter": 443} {
 		if got := DefaultPort(p); got != want {
 			t.Errorf("%s: %d, want %d", p, got, want)
 		}

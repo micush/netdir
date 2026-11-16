@@ -1,5 +1,69 @@
 # Changelog
 
+## [v181] - 2026-11-16 — Ask multi-media[encoder] what it would encode
+
+### Added
+- **`show scan target=movies|tv|/absolute/dir`** for the `mediaencoder` platform (`device/mediaencoder.go`, needs multi-mediaencoder v25): calls the encoder's read-only `scan_library` tool and returns what a job on that target would encode (counts, bytes to encode, the file lists, which already-optimal files a real job would rename). Nothing is encoded, renamed or changed on the encoder, no job is started, and it is a read, so it works with `NETDIR_DEVICE_GUARDS=1` on. It can take a while on a large library.
+- `target` is checked before anything is sent: `movies`, `tv` or an absolute path (spaces allowed, no control characters, 1024 bytes at most); a missing or relative target is refused without a call. `scan_library` is not accepted as a `CALL` action.
+- README and the platform help say so. `TestMediaEncoderScan` in `device/mediaencoder_test.go`.
+- `VERSION` is `181`.
+
+## [v180] - 2026-11-16 — Delete the multi-media[encoder] quarantine from netdir
+
+### Added
+- **`purge_quarantine` for the `mediaencoder` platform** (`device/mediaencoder.go`, needs multi-mediaencoder v24): `device_change_raw` with method `CALL`, path `purge_quarantine`. With no body it deletes every file in the encoder's quarantine (the originals kept after an encode); `{"older_than_days": N}` deletes only older ones. The encoder has a real dry run for this tool, so a dry run here (or `"dry_run": true` in the body) asks it what would be deleted, and `Before` holds its list; nothing is deleted. The answer holds the count and the space freed.
+- `show quarantine` and the API route `/api/quarantine` (the quarantine's size per folder, the oldest age and what the automatic purge would delete next).
+- Arguments are checked before anything is sent: `older_than_days` a number from 0 to 3650, `dry_run` a boolean, no other key.
+- With `NETDIR_DEVICE_GUARDS=1` only a dry run of `purge_quarantine` is accepted (it joins `clear_log`, `clear_history` and `clean_temp_files`).
+- README, the platform help and the `device_change_raw` description say so. Tests in `device/mediaencoder_test.go`: show and API, the dry run (the tool is called with `dry_run: true`), delete all, `older_than_days` passed on, a body `dry_run`, every bad argument refused without a call, guards on and off.
+
+### Changed
+- `VERSION` is `180`.
+
+### Verified
+- `gofmt -l .` clean, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, the cgo-off `go vet`/`go test`, `sh tools/leaktest.sh`, `node --check webui/help.js`, cross-compiles for `linux/amd64`, `arm64`, `arm`, `386`, `riscv64`.
+- **Against a real multi-mediaencoder v24 daemon** with quarantine files of two ages: a throwaway program using the driver ran `show quarantine`, a dry run (listed both files, deleted none) and `CALL purge_quarantine` with no body: both files were deleted (1.2 MB), the marker file stayed and the encoder's log read "requested by mcp". The daemon and its files were removed afterwards.
+
+### Not verified
+- Only against the encoder's quarantine on a local file system: not on NFS or SMB, and not with `quarantine_dir` set to another disk.
+- The wording of the GUI help was syntax-checked, not looked at in Chromium.
+
+
+## [v179] - 2026-11-16 — A driver for multi-media[encoder] (`mediaencoder`)
+
+### Added
+- **Platform `mediaencoder`** (`device/mediaencoder.go`): the multi-media[encoder] NVENC HEVC re-encoding daemon (multi-mediaencoder v23 and later), reached through its own MCP endpoint (`POST /mcp` on its web port, default 8765) with the encoder's MCP token as the credential's token. Standard library only. Like `dnsdir`, `ntpdir` and `netdir` it only calls the other end's tools; it needs no change to the encoder.
+- **Reads.** Facts: release (from `initialize`, which must say it is a `multi-mediaencoder`), the cluster name and node count when the encoder's cluster is on, the GPU model. Resources: CPU, load, memory, swap and the GPU's load, NVENC/NVDEC, memory, temperature, power and fan (the newest `get_metrics` sample). Config: `get_config`. Show: `show status|live-session|queue|log|history|history-log|metrics|cluster|cluster-check|schedules|config` with `lines=` (1 to 2000) and `id=` checked before anything is sent. API: the encoder's own routes that have a read tool (`/api/status`, `/api/live-session`, `/api/queue`, `/api/log?n=`, `/api/sessions`, `/api/sessions/ID/lines`, `/api/sys`, `/api/gpu`, `/api/cluster`, `/api/cluster/check`, `/api/schedules`, `/api/config`), plus a catalog. Interfaces and Neighbors answer `ErrUnsupported` (not a network device).
+- **Changes** (`RawChange`, so `device_change_raw`, rw): method `SET` (a JSON object of settings, through `set_config`) and method `CALL` with the action as the path: `start_job`, `stop_job`, `stop_cluster_jobs`, `drain_node`, `create_schedule`, `update_schedule`, `toggle_schedule`, `run_schedule`, `delete_schedule`, `clear_queue`, `clear_log`, `clear_history`, `clean_temp_files`. The encoder has no dry run, so a dry run checks the request here, reads how things stand (the settings it would replace, the status, the schedules or the cluster) and sends nothing that changes. `Before` holds what was replaced; nothing is put back. With `NETDIR_DEVICE_GUARDS=1`: `clear_log`, `clear_history`, `clean_temp_files` and setting `allowed_groups`, `session_hours` or `port` are refused.
+- `cluster_secret`, `plex_token` and `mcp_token` are never set from here (refused before anything is sent) and the encoder leaves them out of its answers; there is no tool for its certificate, Plex sign-in or tokens. The token is in no error text.
+- Registered everywhere a platform is: default port 8765 (`device.go`, the GUI's `PORT_DEF`), the GUI's platform names, the add-device and platform help (`webui/help.js`), the CLI help (`main.go`), the `device_change_raw` description (`devraw.go`), the README (drivers table, platform list, a `mediaencoder` section), `netdir.conf.example`, `tools/devprobe/lab.json.example` (with an `enckey` login), `CLAUDE.md`, the no-restart note in `rawreboot.go`, and the "every platform is writable" and default-port tests.
+- Tests: `device/mediaencoder_test.go` against a TLS stub of the encoder's endpoint: registration and port, facts, resources arithmetic (MiB to bytes, sensors, three memory pools), every show name and the arguments refused without a call, the API routes and the paths refused, wrong token (401, token not in the error), MCP switched off (404 gets a plain message), another MCP server refused, SET and CALL (dry runs send nothing that changes; secrets, unknown actions, a bad id, lines and other methods refused before a call; the encoder's own refusal comes back as the error; guards on and off).
+
+### Changed
+- `VERSION` is `179`.
+
+### Verified
+- `gofmt -l .` clean, `go build`, `go vet ./...`, `go test -race -count=1 ./...` (main package and `./device`), after `apt-get install libpam0g-dev`. `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...` pass (stub path). `sh tools/leaktest.sh` passes (the new platform needed no change there: it has the same set of optional interfaces as `nios` and `technitium`). `node --check` on `webui/app.js` and `webui/help.js`.
+- **Against a real multi-mediaencoder v23 daemon** (built from its source and started with a scratch directory and a generated token): `go run ./tools/devprobe` with `-op facts` (release v23), `config` (its three secrets absent), `show status|metrics|schedules|log lines=3|cluster`, `interfaces` (unsupported), and a wrong token (401). A throwaway Go program using the driver ran `SET` (dry run and applied: `config.json` held the new values), a `SET` the encoder refused (HTTP 400 and its text came back as the error), `CALL create_schedule`, `CALL start_job` (the encoder's log shows the scan "by mcp") and a `start_job` on a missing directory (400 with the encoder's message), plus `/api/schedules` through the API reader. The daemon, its files and the program were removed afterwards.
+- Cross-compiled `linux/amd64`, `arm64`, `arm`, `386` and `riscv64`.
+
+### Not verified
+- **Resources on an unwatched encoder: it is empty by the encoder's design.** Version 23 of the encoder samples its host and GPU only while a browser has its page open, so `get_metrics` has no samples otherwise. The driver says so in `Details.Unavailable` instead of guessing. The numbers (CPU, memory, GPU) were verified only against the stub, never against a sampled encoder or a real NVIDIA GPU. Making the encoder sample when an MCP client asks is a change in the encoder, not here.
+- Facts has no host name unless the encoder's cluster is on (its MCP server has no tool that returns one) and no uptime or serial.
+- Not run: the cluster, web GUI, install, federation or live multi-node checks of this file's process: nothing in those code paths changed. The new GUI text was syntax-checked, not looked at in Chromium; the only GUI changes are two entries in lookup tables (a port and a platform name).
+- The driver reaches the encoder only over HTTPS (the encoder's default); an encoder started with `-no-tls` cannot be reached. Not tested through a reverse proxy or with a CA-signed certificate (`ca_pem`).
+
+
+## [v178] - 2026-11-15 — Tested on real equipment; the documentation says what v172 did
+
+### Verified
+- The maintainer ran the features of v170 to v177 on real equipment and they worked: clearing port counters, saving the configuration, the typed port changes on Junos, NX-OS, FortiOS and BIG-IP, VM and container create, delete and resize, `rw` without the refusal lists, the `linux` and `windows` drivers, and the Proxmox and vCenter imports. The "Not verified" notes of those releases below are what was true when each was cut. (Which models and versions were used was not recorded here.)
+
+### Changed
+- **Documentation**: every place that said a change is refused, never done or never touched (README, the help, the vCenter API catalog) now says it is refused only with `NETDIR_DEVICE_GUARDS=1`, the switch v172 added; the help opens its platform list with one note saying so. The README's description of what a raw change still checks is rewritten to the plain-path and well-formed-body checks that remain. A port that holds the gateway's address is shut down when the lists are off, as v172 made it; the README no longer says it is never shut down.
+- The README and the help no longer say the `linux` and `windows` drivers were not run on real hosts.
+- No code changed except the text of one API catalog answer (vCenter). A check of every refusal site in the drivers found each one inside a guard that `NETDIR_DEVICE_GUARDS` switches off; the only ones that stay on are the well-formedness checks (method, path shape, JSON where JSON is wanted).
+
 ## [v177] - 2026-11-15 — Import the virtual machines of a vCenter
 
 ### Added
