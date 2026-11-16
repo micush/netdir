@@ -1,5 +1,34 @@
 # Changelog
 
+## [v188] - 2026-11-16 — A refused save no longer leaves the Configure page stuck
+
+### Fixed
+- Configure pages (Devices and the others made by `makeConfigView`): when the daemon refused a save with "the configuration changed after this page loaded it" (409), the message said the page now showed what is saved, but the page kept its old copy and its old `base`, so every later edit was refused the same way and nothing could be saved until the person reloaded the browser. The page now reads the saved configuration again on that refusal (as the Topology page already did) and then shows the message; the next edit goes out with the fresh base. The edit that was refused is not kept, as the message says: make it again.
+- The daemon is unchanged: it still refuses a save made from an older copy.
+
+### Verified
+- jsdom with a mock that keeps the base: a save with a stale base is refused once, the page shows "Not saved", and the next edit is sent with the new base and saved (port 9443). The same test fails on v187 (the next edit is sent with the old base again). The v183/v184/v186 jsdom tests still pass.
+- `gofmt -l .`, `go vet ./...`, help tests.
+
+### Not verified
+- What changed the configuration in the first place was not found: another page or user, an import, or, in a cluster, another node's save (a node that is not the primary compares the page's base with its own copy, which can be a moment behind the primary's). The refusal is correct; only the recovery was wrong. A full `go test -race` run was not repeated (no Go file changed).
+
+---
+
+## [v187] - 2026-11-16 — Edit device kept a wrong port
+
+### Fixed
+- Topology ▸ right-click a device ▸ **Edit** opened with the Port box reset to 443 (or the platform's default) whenever the saved port was *any* platform's default, e.g. 8443 on a switch (8443 is the Proxmox Datacenter Manager default). The Port box showed the old value and a Save wrote it over the real one. The port now follows the platform only while it is still the default of the platform the form had before, or empty; a port the device really has is kept when the form opens, and a port typed by hand is still kept when the platform changes. (`webui/app.js`, `deviceForm`.)
+
+### Verified
+- jsdom, with a config kept by the mock: a port changed on Configure ▸ Devices is saved (`port: 8443`), shows in the Topology tooltip after Add ▸ Device ▸ from inventory, and the Edit box showed 443 before the fix and 8443 after; changing the platform in the form still fills in the new platform's default (eos → proxmox 8006 → pbs 8007) and keeps a typed port.
+- `gofmt -l .` empty; `go vet ./...`; help tests. The v183/v184/v186 jsdom tests still pass.
+
+### Not verified
+- The gateway stores only a device's name; its port, address and login always come from the inventory, so adding from inventory copies nothing and the Go side was not changed. A full `go test -race` run was not repeated (no Go file changed since v186).
+
+---
+
 ## [v186] - 2026-11-16 — Configure ▸ Devices in three tabs; filter and pages on Logins
 
 ### Changed

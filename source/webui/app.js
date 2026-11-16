@@ -1359,8 +1359,11 @@
           const def = SERVICE_ADDR[els.platform.value] || "", cur = els.address.value.trim();
           if (!cur || Object.values(SERVICE_ADDR).includes(cur)) els.address.value = def;
           els.address.placeholder = def || "10.0.0.2";
-          const pd = portDef(els.platform.value), pc = els.port.value.trim();
-          if (!pc || Object.values(PORT_DEF).concat("443").includes(pc)) els.port.value = pd;   // a port typed by hand is kept
+          // the port follows the platform only while it is still the default of the platform the form had before (or empty): a port the
+          // device really has (8443 on a switch, say, which is another platform's default) is kept when the form opens
+          const pd = portDef(els.platform.value), pc = els.port.value.trim(), before = els.platform._was || (d ? d.platform : PLATFORMS[0]);
+          if (!pc || pc === portDef(before)) els.port.value = pd;   // a port typed by hand is kept
+          els.platform._was = els.platform.value;
         } },
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
         { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443" },
@@ -3740,7 +3743,13 @@
         setTimeout(() => refreshSNMP(), 1500);   // snmpd was (re)started by the save
         setTimeout(() => refreshSyslog(), 800);  // so was the connection to the syslog server
         setTimeout(() => refreshLLDP(), 1500);   // and lldpd started or stopped
-      } catch (e) { if (e.message !== "unauthenticated") say("bad", "Not saved: " + e.message); }
+      } catch (e) {
+        if (e.message === "unauthenticated") return;
+        if (e.status === 409) {   // the saved configuration is newer than this page's copy: take it (as the message says), or every later save is refused too
+          try { await load(); } catch (_) { /* the message below still tells what happened */ }
+        }
+        say("bad", "Not saved: " + e.message);
+      }
     }
 
     return {
