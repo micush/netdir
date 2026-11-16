@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"netdir/device"
 )
@@ -101,5 +102,50 @@ func TestRecheckIsAPostRefusedToReadOnly(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/devices/recheck", nil)
 	if !readOnlyDenied(r) {
 		t.Fatal("a read-only account can ask a device again")
+	}
+}
+
+// A node that is not the primary hears the health from the primary.  The Topology page asks for it twice at once (the canvas and the
+// devices): the second asker used to get an empty answer while the first was still fetching, and every device was drawn "not checked".
+func TestReplicaHealthSecondAskerWaitsForTheFetch(t *testing.T) {
+	healthCache.mu.Lock()
+	healthCache.data, healthCache.at, healthCache.fetching = nil, time.Time{}, false
+	healthCache.mu.Unlock()
+	t.Cleanup(func() {
+		healthCache.mu.Lock()
+		healthCache.data, healthCache.at, healthCache.fetching = nil, time.Time{}, false
+		healthCache.mu.Unlock()
+	})
+	started, release := make(chan struct{}), make(chan struct{})
+	fetches := 0
+	fetch := func(bool) (map[string]device.Health, bool) {
+		fetches++
+		close(started)
+		<-release
+		return map[string]device.Health{"sw1": {Status: "ok"}}, true
+	}
+	first := make(chan map[string]device.Health)
+	go func() { first <- replicaHealth(true, fetch) }()
+	<-started // the first asker is now fetching
+	second := make(chan map[string]device.Health)
+	go func() { second <- replicaHealth(true, fetch) }()
+	select {
+	case m := <-second:
+		t.Fatalf("the second asker returned %v before the fetch ended", m)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	for i, ch := range []chan map[string]device.Health{first, second} {
+		select {
+		case m := <-ch:
+			if m["sw1"].Status != "ok" {
+				t.Fatalf("asker %d got %v", i+1, m)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("asker %d never answered", i+1)
+		}
+	}
+	if fetches != 1 {
+		t.Fatalf("%d fetches for two askers", fetches)
 	}
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [v189] - 2026-11-16 — Topology no longer starts gray on a node that is not the primary
+
+### Fixed
+- On a cluster node that is not the primary, the first look at the devices after a quiet time showed every device gray ("not checked yet") for several seconds. The node has no health of its own and asks the primary for it; the Topology page asks twice at once (the canvas and the devices), and the second request, finding a fetch already under way and nothing cached, was answered with an empty list at once. The second request now waits for that fetch (at most its 5 s timeout plus 1 s), so both get the primary's answer. With an older answer cached it is still used at once. (`devicehealth.go`: `deviceHealth` now hands the replica part to `replicaHealth`.)
+
+### Verified
+- `TestReplicaHealthSecondAskerWaitsForTheFetch`: two askers, a slow fetch; the second returns only after it ends, with the same answer, and the primary is asked once. The test fails with the old logic (the second asker returned `map[]` before the fetch ended).
+- `gofmt -l .`, `go vet ./...`, `go test -race ./...`, no-cgo, 5-arch cross-compile.
+
+### Not verified
+- Not run against a real cluster. A daemon that has just (re)started has no health anywhere until its first round of checks has run (323 devices, 16 at a time, each asked for its facts: some 15 to 20 s); that wait is unchanged, and still shows gray on the primary and on the nodes that ask it.
+
+---
+
 ## [v188] - 2026-11-16 — A refused save no longer leaves the Configure page stuck
 
 ### Fixed

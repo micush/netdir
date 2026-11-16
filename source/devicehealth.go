@@ -31,6 +31,7 @@ var (
 		at       time.Time
 		data     map[string]device.Health
 		fetching bool
+		done     chan struct{} // closed when the fetch in flight ends
 	}
 )
 
@@ -51,9 +52,14 @@ func deviceHealth(look bool) map[string]device.Health {
 		}
 		return devHealth.Snapshot()
 	}
+	return replicaHealth(look, fetchPrimaryHealth)
+}
+
+// replicaHealth is the primary's health as this node last heard it; fetch asks the primary.
+func replicaHealth(look bool, fetch func(bool) (map[string]device.Health, bool)) map[string]device.Health {
 	healthCache.mu.Lock()
 	fresh := time.Since(healthCache.at) < healthCacheFor
-	if fresh || healthCache.fetching {
+	if fresh {
 		d := healthCache.data
 		healthCache.mu.Unlock()
 		if d == nil {
@@ -61,13 +67,35 @@ func deviceHealth(look bool) map[string]device.Health {
 		}
 		return d
 	}
+	if healthCache.fetching {
+		// Another request is already asking the primary.  With an older answer in hand, use it; with none (the first look after this
+		// node was quiet, and the Topology page asks the canvas and the devices at once) wait for that fetch, or every device is
+		// shown as "not checked" until the next poll.
+		d, done := healthCache.data, healthCache.done
+		healthCache.mu.Unlock()
+		if d == nil {
+			select {
+			case <-done:
+			case <-time.After(healthFetchTimeout + time.Second):
+			}
+			healthCache.mu.Lock()
+			d = healthCache.data
+			healthCache.mu.Unlock()
+		}
+		if d == nil {
+			d = map[string]device.Health{}
+		}
+		return d
+	}
 	healthCache.fetching = true
+	healthCache.done = make(chan struct{})
 	healthCache.mu.Unlock()
 
-	data, ok := fetchPrimaryHealth(look)
+	data, ok := fetch(look)
 	healthCache.mu.Lock()
 	defer healthCache.mu.Unlock()
 	healthCache.fetching = false
+	close(healthCache.done)
 	if ok {
 		healthCache.data, healthCache.at = data, time.Now()
 	} else if healthCache.data == nil {
