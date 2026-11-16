@@ -1,5 +1,25 @@
 # Changelog
 
+## [v184] - 2026-11-16 — Filter and pages on Monitor ▸ Devices
+
+### Added
+- Monitor ▸ Devices: the Devices card has the filter box, the page box and the rows-per-page box of the tables under Configure ▸ Devices (same classes, so the same look in light and dark): the filter keeps the devices that hold every word typed, in any column (name, state as `answering`, `refusing`, `unreachable`, `disabled` or `not checked`, platform, address, the directors between, tags); the count reads `1–50 of 130` (`(filtered from N)` while a filter is on); « ‹ page › » and 25, 50 (the start), 100, 250 or 500 rows to a page; the pager hides when there is one page, and the box hides when the inventory is empty. A filter with no match says so in the card.
+- The page polls the devices every few seconds. The bar is built once and a poll redraws only the table, so what is typed, the page, the page size and the focus stay; a page past the end after the list shrinks is pulled back to the last. The tiles still count every device, not the filtered ones.
+- `webui/help.js` (Monitor ▸ Devices) says it.
+
+### Changed
+- `webui/app.js` only (`VIEWS.devices`); the table's columns, the state pills, the right-click menu and the tooltips are as they were. No change to the daemon, the API or the config.
+
+### Verified
+- `gofmt -l .` empty; `go build`; `go vet ./...`; `go test -race -count=1 ./...` (netdir 130 s, netdir/device 11 s); `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test ./...`; `linux/amd64`, `arm64`, `arm`, `386`, `riscv64` build. `node --check` on `webui/app.js` and `webui/help.js`.
+- A throwaway jsdom test (scratch directory, not in the repo) loads the real `app.js` against a mocked API with 131 devices: the first page, next, last, the page box, 25, 50 and 100 rows to a page, the filter by name, platform, state, tag and address, several words, no match, clearing it, and a poll while a filter is typed and the focus is in the box (text, page and focus stay; the tiles count all); the list shrinking while on the last page; an empty inventory. The same test against the v183 `app.js` fails at once (no bar). The v183 login-rename test still passes.
+- Looked at in headless Chromium (light and dark), unfiltered and filtered, and the "?" panel of the page in both.
+
+### Not verified
+- Not run against a live daemon with real devices: the page was served from the real `webui/` files with a mocked API. The real PAM login and the cluster checks were not run: no auth, session, cluster or Go code changed.
+
+---
+
 ## [v183] - 2026-11-16 — Renaming a login renames it on every device that uses it
 
 ### Changed
