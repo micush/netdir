@@ -205,3 +205,27 @@ func TestReplicaHealthStaleAnswerIsUsedWhileRefreshing(t *testing.T) {
 		t.Fatalf("the refreshed answer was not used: %v", m)
 	}
 }
+
+// A fetch that failed on a node with nothing yet is tried again in about 2 s, not after the 18 s it was once set to.
+func TestReplicaHealthRetriesSoonAfterAFailedFirstFetch(t *testing.T) {
+	resetHealthCache(t)
+	healthColdWait = 500 * time.Millisecond
+	t.Cleanup(func() { healthColdWait = 2 * time.Second })
+	calls := 0
+	fetch := func(bool) (map[string]device.Health, bool) {
+		calls++
+		if calls == 1 {
+			return nil, false
+		}
+		return map[string]device.Health{"sw1": {Status: "ok"}}, true
+	}
+	if m := replicaHealth(true, fetch); len(m) != 0 {
+		t.Fatalf("first answer %v", m)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	replicaHealth(true, fetch) // starts the retry (the old answer is used at once)
+	time.Sleep(200 * time.Millisecond)
+	if m := replicaHealth(true, fetch); m["sw1"].Status != "ok" {
+		t.Fatalf("not retried after a failed first fetch: %v (calls %d)", m, calls)
+	}
+}

@@ -80,7 +80,20 @@ type peerCanvas struct {
 	at       time.Time
 	data     []CanvasGateway
 	fetching bool
+	tried    bool // a fetch has ended (well or not): later requests do not wait for the next one
 	done     chan struct{}
+}
+
+// askPeerCanvas asks a node, over the cluster channel, for its own picture of its gateways.
+var askPeerCanvas = func(s *StatusServer, ctx context.Context, addr string) ([]CanvasGateway, bool) {
+	resp, err := s.mg.cl.Relay(ctx, addr, proxyReq{User: "topology", Method: http.MethodGet, Path: "/api/canvas?own=1"})
+	var out struct {
+		Data []CanvasGateway `json:"data"`
+	}
+	if err != nil || resp.Status != http.StatusOK || json.Unmarshal(resp.Body, &out) != nil {
+		return nil, false
+	}
+	return out.Data, true
 }
 
 func (s *StatusServer) peerCanvasOf(n CanvasNode) []CanvasGateway {
@@ -98,28 +111,24 @@ func (s *StatusServer) peerCanvasOf(n CanvasNode) []CanvasGateway {
 			t0 := time.Now()
 			cctx, cancel := context.WithTimeout(context.Background(), viaFetchTimeout)
 			defer cancel()
-			resp, err := s.mg.cl.Relay(cctx, n.Addr, proxyReq{User: "topology", Method: http.MethodGet, Path: "/api/canvas?own=1"})
-			var out struct {
-				Data []CanvasGateway `json:"data"`
-			}
-			good := err == nil && resp.Status == http.StatusOK && json.Unmarshal(resp.Body, &out) == nil
+			data, good := askPeerCanvas(s, cctx, n.Addr)
 			if took := time.Since(t0); took > time.Second {
 				warnf("topology: node %s took %s to give its picture of its gateways (answered: %v)", n.Addr, took.Round(100*time.Millisecond), good)
 			}
 			peerCanvasMu.Lock()
 			defer peerCanvasMu.Unlock()
-			e.fetching = false
+			e.fetching, e.tried = false, true
 			close(done)
 			if good {
-				e.data, e.at = out.Data, time.Now()
+				e.data, e.at = data, time.Now()
 			} else {
-				e.at = time.Now().Add(peerCanvasFor - time.Second) // ask again in a second, not at once
+				e.at = time.Now().Add(-(peerCanvasFor - time.Second)) // counts as 2 s old: asked again in a second, not at once
 			}
 		}()
 	}
-	data, done, at := e.data, e.done, e.at
+	data, done, at, tried := e.data, e.done, e.at, e.tried
 	peerCanvasMu.Unlock()
-	if data == nil && done != nil {
+	if data == nil && !tried && done != nil { // only the very first ask is waited for: a node that does not answer is not waited for again
 		select {
 		case <-done:
 		case <-time.After(viaColdWait):
@@ -152,66 +161,14 @@ func (s *StatusServer) viaServing(ctx context.Context, groups []CanvasGateway) {
 	}
 }
 
-// The callers each serving node has seen, asked of it and kept for a few seconds (the Topology page polls).
-var (
-	peerCallersMu sync.Mutex
-	peerCallers   = map[string]struct {
-		at   time.Time
-		byGW map[int][]string
-	}{}
-)
-
-const peerCallersFor = 5 * time.Second
-
 // addPeerClients makes each gateway's Clients the callers of every node that serves it, counted once each: this node's own
-// (already in the gateway) and those the other nodes report in their own view (?own=1).  A node that cannot be asked counts as it was.
+// (already in the gateway) and those the other nodes report in their own view (?own=1), from the picture peerCanvasOf keeps of each
+// (so a node that is slow or does not answer is asked once in a while, in the background, and never holds a poll up).  A node that
+// cannot be asked counts as it was.
 func (s *StatusServer) addPeerClients(ctx context.Context, groups []CanvasGateway) {
 	if s.mg == nil || s.mg.cl == nil || !s.mg.cl.Enabled() {
 		return
 	}
-	peers := map[string]bool{}
-	for _, g := range groups {
-		for _, n := range g.Nodes {
-			if !n.Self && n.Reachable && !n.Excluded && (n.Gw == "ok" || n.Gw == "degraded") {
-				peers[n.Addr] = true
-			}
-		}
-	}
-	var wg sync.WaitGroup
-	for addr := range peers {
-		peerCallersMu.Lock()
-		c, ok := peerCallers[addr]
-		peerCallersMu.Unlock()
-		if ok && time.Since(c.at) < peerCallersFor {
-			continue
-		}
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			defer cancel()
-			resp, err := s.mg.cl.Relay(cctx, addr, proxyReq{User: "topology", Method: http.MethodGet, Path: "/api/canvas?own=1"})
-			var out struct {
-				Data []CanvasGateway `json:"data"`
-			}
-			if err != nil || resp.Status != http.StatusOK || json.Unmarshal(resp.Body, &out) != nil {
-				return
-			}
-			by := map[int][]string{}
-			for _, p := range out.Data {
-				by[p.GroupID] = p.MCPCallers
-			}
-			peerCallersMu.Lock()
-			peerCallers[addr] = struct {
-				at   time.Time
-				byGW map[int][]string
-			}{time.Now(), by}
-			peerCallersMu.Unlock()
-		}(addr)
-	}
-	wg.Wait()
-	peerCallersMu.Lock()
-	defer peerCallersMu.Unlock()
 	for i := range groups {
 		set := map[string]bool{}
 		for _, c := range groups[i].MCPCallers {
@@ -221,9 +178,11 @@ func (s *StatusServer) addPeerClients(ctx context.Context, groups []CanvasGatewa
 			if n.Self || !n.Reachable || n.Excluded || (n.Gw != "ok" && n.Gw != "degraded") {
 				continue
 			}
-			if c, ok := peerCallers[n.Addr]; ok && time.Since(c.at) < 10*peerCallersFor {
-				for _, id := range c.byGW[groups[i].GroupID] {
-					set[id] = true
+			for _, p := range s.peerCanvasOf(n) {
+				if p.GroupID == groups[i].GroupID {
+					for _, id := range p.MCPCallers {
+						set[id] = true
+					}
 				}
 			}
 		}

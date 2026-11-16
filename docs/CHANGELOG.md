@@ -1,5 +1,19 @@
 # Changelog
 
+## [v191] - 2026-11-16 — Topology: a node that does not answer cost every poll 2 s; a failed health fetch left 18 s of gray
+
+### Fixed
+- The log of v190 (`/api/canvas took 2s … their callers 2s`, on every poll) showed it: `addPeerClients` asked each serving node for its callers with a 2 s limit and, when a node did not answer, kept nothing, so every poll waited the 2 s again (and a page load, with several requests at once, several times over). It now reads the picture `peerCanvasOf` keeps of each node (one background ask at a time, kept 3 s, retried a second after a failure), waits at most 1.5 s for a node it has never heard from and never again for one that did not answer.
+- After a failed first fetch of the device health on a node that is not the primary, the retry time was set 8 s into the *future* (the comment says "ask again in a couple of seconds"): the cache counted as fresh and empty for about 18 s, every device gray. It now counts as 8 s old (asked again in 2 s). The same slip is corrected for the nodes' pictures (`peerCanvasOf`).
+
+### Verified
+- Tests: a node that does not answer is waited for once and not again, a retry of it starts in the background and holds no request; a failed first health fetch is retried within about 2 s (fails with the old timing); plus the v189/v190 tests. `gofmt -l .`, `go vet ./...`, `go test -race ./...`, no-cgo, 5-arch cross-compile.
+
+### Not verified
+- Not run against a real cluster. Why one node does not answer `GET /api/canvas?own=1` within 2 s was not found (it may itself be slow: its own log, with v190 or later, says `web: /api/canvas took …` and which part); it is no longer waited for.
+
+---
+
 ## [v190] - 2026-11-16 — Topology after a reload: no waiting on other nodes; a log line for what is slow
 
 ### Changed

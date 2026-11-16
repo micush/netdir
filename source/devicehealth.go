@@ -82,7 +82,7 @@ func replicaHealth(look bool, fetch func(bool) (map[string]device.Health, bool))
 				healthCache.data, healthCache.at = data, time.Now()
 			} else if healthCache.data == nil {
 				healthCache.data = map[string]device.Health{}
-				healthCache.at = time.Now().Add(healthCacheFor - 2*time.Second) // ask again in a couple of seconds, not at once
+				healthCache.at = time.Now().Add(-(healthCacheFor - 2*time.Second)) // counts as 8 s old: asked again in 2 s, not at once (it was set that far into the future: 18 s of nothing)
 			}
 		}()
 	}
