@@ -1,5 +1,20 @@
 # Changelog
 
+## [v192] - 2026-11-16 — Topology: a gateway with more than 36 devices draws them as small squares
+
+### Added
+- A gateway with more than 36 devices is drawn with a small square for each device, joined to the gateway by a thin line and coloured by its state, instead of 300 full-size boxes. The full-size square (name, address, platform) shows beside the one the pointer or the keyboard focus is on. Devices that are amber or red are always full size. While the filter box has text, the matches are full size and every other device stays a small square. Clicking, Shift/Ctrl-click, right-click and the tooltip work on a small square as on a box. Drag-to-reorder is off in this drawing (as it already is while a filter is on).
+- 36 devices or fewer: the drawing is exactly as before.
+- Help (Topology, filter box) describes it.
+
+### Verified
+- jsdom: 320 devices give amber/red boxes plus 302 squares with a line each; the hover card shows the hovered device, hides again and is the last thing drawn; the filter gives full-size matches and squares for the rest, and clearing it restores the squares; 36 and 12 devices give all boxes. Chromium screenshots (light and dark) of all four states.
+
+### Not verified
+- Behaviour on a real gateway with ~320 devices and a live poll; touch screens (no hover, so a tap selects the device and its tooltip is the only full view).
+
+---
+
 ## [v191] - 2026-11-16 — Topology: a node that does not answer cost every poll 2 s; a failed health fetch left 18 s of gray
 
 ### Fixed

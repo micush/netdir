@@ -295,6 +295,7 @@ svg.cv { max-width: none; outline: none; cursor: grab; user-select: none; -webki
 .cv-wrap.panning, .cv-wrap.panning * { cursor: grabbing !important; user-select: none; }
 svg.cv .edge { stroke: var(--muted); stroke-opacity: .4; stroke-width: 2; }   /* the border colour is too faint on the page itself */
 svg.cv .edge.spread { stroke: var(--accent); stroke-opacity: 1; stroke-width: 4; }
+svg.cv .edge.thin { stroke-width: 1; stroke-opacity: .25; }   /* the lines to the small squares: many, so lighter */
 svg.cv .edge.down { stroke: var(--bad); stroke-opacity: 1; stroke-dasharray: 7 5; }
 svg.cv .shape { cursor: pointer; outline: none; }
 svg.cv .shape.drag { cursor: grab; }
@@ -307,6 +308,13 @@ svg.cv .shape.st-warn circle, svg.cv .shape.st-warn rect, svg.cv .shape.st-warn 
 svg.cv .shape.st-bad circle, svg.cv .shape.st-bad rect, svg.cv .shape.st-bad polygon { fill: var(--bad-bg); stroke: var(--bad); }
 svg.cv .shape.st-paused circle, svg.cv .shape.st-paused rect, svg.cv .shape.st-paused polygon { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 7 5; }
 svg.cv .shape.st-paused text.t1 { fill: var(--muted); }
+/* more than 36 devices: a small square each, filled with its colour; the full-size one beside the pointer is .hovcard (it never takes the pointer) */
+svg.cv .shape.dotsq rect { stroke-width: 1; fill: var(--muted); stroke: var(--surface-2); }
+svg.cv .shape.dotsq.st-ok rect { fill: var(--ok); } svg.cv .shape.dotsq.st-warn rect { fill: var(--amber); } svg.cv .shape.dotsq.st-bad rect { fill: var(--bad); }
+svg.cv .shape.dotsq.st-paused rect { fill: none; stroke: var(--muted); stroke-dasharray: none; }
+svg.cv .shape.dotsq.sel rect, svg.cv .shape.dotsq:hover rect { stroke: var(--accent); stroke-width: 2.5; }
+svg.cv .shape.dotsq:focus-visible rect { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; }
+svg.cv .shape.hovcard { pointer-events: none; }
 svg.cv .shape.sel circle, svg.cv .shape.sel rect, svg.cv .shape.sel polygon { stroke-width: 5; }
 svg.cv .shape:focus-visible circle, svg.cv .shape:focus-visible rect, svg.cv .shape:focus-visible polygon { stroke-width: 5; stroke-dasharray: 6 3; }
 svg.cv text { fill: var(--text); font: 600 13px system-ui, sans-serif; pointer-events: none; }

@@ -857,9 +857,19 @@
         const d = devByName(n), t = [d.name, d.address, platformName(d.platform)].join(" ").toLowerCase();
         return words.every((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w)));
       };
-      const devs = (g.devices || []).filter((n) => devByName(n) && devMatch(n)), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
+      // Up to DOT_FROM devices each is a square with its name, as always.  More than that, each is a small square joined to the gateway, and the
+      // full-size square comes when the pointer is on it, or when the filter matches it (the matches are drawn full size above the others).
+      const allDevs = (g.devices || []).filter((n) => devByName(n)), DOT_FROM = 36, dotMode = allDevs.length > DOT_FROM;
+      const problem = (n) => { const i = st.devs[n], d = devByName(n); return !d.disabled && !devPausedHere(n) && !!i && (i.status === "warn" || i.status === "bad"); };   // amber or red
+      const devs = !dotMode ? allDevs.filter(devMatch) : words.length ? allDevs.filter(devMatch) : allDevs.filter(problem), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
+      const fullSet = new Set(devs), dotted = dotMode ? allDevs.filter((n) => !fullSet.has(n)) : [], devOrder = devs.concat(dotted);
+      const DS = 12, DP = 18, DOT_COLS = 48;   // a small square, the distance from one to the next, the most across
       const SY = Math.max(CY + R, sideBottom) + 70, devRows = Math.ceil(devs.length / DEV_ROW), perRow = Math.min(DEV_ROW, devs.length);
-      const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, perRow * COLW + 20), H = devs.length ? SY + devRows * SH + (devRows - 1) * RG + 12 : Math.max(CY + R, sideBottom) + 16;
+      const W = Math.max(2 * R + 140, 2 * Math.max(rightX, leftX) + 20, perRow * COLW + 20, dotted.length ? Math.min(40, dotted.length) * DP + 40 : 0);
+      const dotCols = Math.max(1, Math.min(dotted.length, DOT_COLS, Math.floor((W - 40) / DP)));
+      const bigBottom = SY + devRows * SH + (devRows - 1) * RG, dotTop = devs.length ? bigBottom + 36 : SY, dotRows = Math.ceil(dotted.length / dotCols);
+      const H = dotted.length ? dotTop + dotRows * DP + 12 : devs.length ? bigBottom + 12 : Math.max(CY + R, sideBottom) + 16;
+      const dotAt = (k) => ({ x: (W - (dotCols * DP - (DP - DS))) / 2 + (k % dotCols) * DP, y: dotTop + Math.floor(k / dotCols) * DP });
       const cx = W / 2;
       // the slot of device k: x and y of its square (a short last row is centred)
       const devAt = (k) => { const r = Math.floor(k / DEV_ROW), n = Math.min(DEV_ROW, devs.length - r * DEV_ROW); return { x: (W - n * COLW) / 2 + (k % DEV_ROW) * COLW + (COLW - SW) / 2, y: SY + r * (SH + RG) }; };
@@ -872,9 +882,9 @@
         e.stopPropagation();
         if (kind === "dev" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
           const cur = cv.multi ? new Set(cv.multi) : new Set(cv.sel && cv.sel.kind === "dev" ? [cv.sel.addr] : []);
-          if (e.shiftKey && cv.sel && cv.sel.kind === "dev" && devs.includes(cv.sel.addr)) {
-            const a = devs.indexOf(cv.sel.addr), b = devs.indexOf(addr);
-            for (let i = Math.min(a, b); i <= Math.max(a, b); i++) cur.add(devs[i]);
+          if (e.shiftKey && cv.sel && cv.sel.kind === "dev" && devOrder.includes(cv.sel.addr)) {
+            const a = devOrder.indexOf(cv.sel.addr), b = devOrder.indexOf(addr);
+            for (let i = Math.min(a, b); i <= Math.max(a, b); i++) cur.add(devOrder[i]);
           } else if (cur.has(addr)) cur.delete(addr); else cur.add(addr);
           cv.multi = cur.size > 1 ? cur : null;
           cv.sel = cur.size ? { kind, addr: cur.has(addr) ? addr : [...cur][cur.size - 1] } : null;
@@ -1001,7 +1011,30 @@
           label(mx, y + 19, fitPx(name, SW - 20, "600 13px system-ui, sans-serif"), "t1"),
           label(mx, y + 35, fitPx(d.address + " · " + platformName(d.platform), SW - 20, "400 11px system-ui, sans-serif"), "t2")));
       });
+      // the small squares (more than DOT_FROM devices): each joined to the gateway; one full-size square, drawn last so nothing covers it, is shown
+      // beside the one the pointer (or the keyboard) is on
+      const hov = sv("g", { class: "shape hovcard", visibility: "hidden" }, sv("rect", { x: 0, y: 0, width: SW, height: SH, rx: 4 }), label(SW / 2, 19, "", "t1"), label(SW / 2, 35, "", "t2"));
+      const hovT1 = hov.querySelector("text.t1"), hovT2 = hov.querySelector("text.t2");
+      const hideHov = () => hov.setAttribute("visibility", "hidden");
+      dotted.forEach((name, i) => {
+        const d = devByName(name), { x, y } = dotAt(i), mx = x + DS / 2, info = st.devs[name], c = d.disabled || devPausedHere(name) ? "paused" : info ? info.status : "idle";
+        const showHov = () => {
+          const hx = Math.max(4, Math.min(W - SW - 4, mx - SW / 2)), hy = Math.max(2, Math.min(H - SH - 2, y + DS / 2 - SH / 2));
+          hov.setAttribute("class", "shape hovcard st-" + c);
+          hov.setAttribute("transform", `translate(${hx} ${hy})`);
+          hovT1.textContent = fitPx(name, SW - 20, "600 13px system-ui, sans-serif");
+          hovT2.textContent = fitPx(d.address + " · " + platformName(d.platform), SW - 20, "400 11px system-ui, sans-serif");
+          hov.setAttribute("visibility", "visible");
+        };
+        lines.push(sv("line", { x1: cx, y1: CY + R, x2: mx, y2: y, class: "edge thin" + (c === "bad" ? " down" : "") }));
+        shapes.push(sv("g", { class: "shape dotsq st-" + c + (sel("dev", name) ? " sel" : ""), "data-col": "dev:" + name, tabindex: "0", role: "button", "aria-label": "Device " + name,
+          onclick: pick("dev", name), oncontextmenu: rightClick("dev", name), onmouseenter: showHov, onmouseleave: hideHov, onfocus: showHov, onblur: hideHov,
+          onkeydown: (e) => { if (e.key === "Enter") pick("dev", name)(e); } },
+          sv("title", {}, devTip(d, info)),
+          sv("rect", { x, y, width: DS, height: DS, rx: 2 })));
+      });
       svg.append(...lines, ...shapes);
+      if (dotted.length) svg.append(hov);
       // The scrolling box (.cv-wrap) is made once and kept: only the drawing inside it is swapped on each refresh, so its
       // scrollbars neither blink nor get pulled from under the pointer while they are being dragged.
       let wrap = oldWrap && svgHost.contains(oldWrap) ? oldWrap : null;
