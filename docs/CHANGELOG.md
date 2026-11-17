@@ -1,5 +1,33 @@
 # Changelog
 
+## [v211] - 2026-11-17 — an MCP caller may read any path of a device's API; the answer is what is filtered
+
+### Changed
+- `device_api_get` no longer refuses a path for the words in it (`vpn`, `ipsec`, `ike`, `crypto`, `users`, `snmp`, `aaa`, `admin`, keys, certificates, your own secret words, a whole configuration). That list was a second guard on top of the filter on every answer, and it kept an assistant from reading what holds no secret (a tunnel's status, the VPN event log, an interface called `vpn`) on every platform. The answer is filtered as before: keys, passwords, communities, pre-shared keys, PEM blocks and the words of Configure ▸ Privacy ▸ Secret words read `(hidden)`, in JSON, text and XML, whatever path the answer came from. The per-platform VPN openings of v209 and v210 are no longer needed and are removed.
+- Still refused: what is not a read of that API in the form the device takes (PAN-OS: one `<show>` command, an XPath, or a log search; a log search is one request), a Catalyst's model sources, and the checks inside a driver (Backup Server's accounts and consoles, Junos's configuration RPCs).
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; a test reads the VPN, user and SNMP configuration paths and checks that pre-shared keys, shared secrets, passwords and communities are hidden in JSON and in PAN-OS XML; the tests that expected the word refusals now expect the reads.
+
+### Not verified
+- That every secret in every platform's answers is recognised: the filter works by name, so a secret kept under a name nobody listed is shown. Add such names under Configure ▸ Privacy ▸ Secret words. Keep logins on the devices read-only and least-privilege.
+
+---
+
+## [v210] - 2026-11-17 — VPN status readable on every platform that has a status path
+
+### Fixed
+- v209 opened a FortiGate's VPN status; the same words (`vpn`, `ipsec`, `ike`, `crypto`) blocked VPN status on the other platforms too. Now readable over MCP, as exact paths only: **Meraki** `organizations/ID/appliance/vpn/statuses` and `/stats`; **Catalyst (IOS-XE)** the `Cisco-IOS-XE-crypto-oper` operational model; **Junos** the RPCs `get-ike-security-associations-information`, `get-ipsec-security-associations-information` and `get-ipsec-statistics-information`; **BIG-IP** `/mgmt/tm/net/ipsec/ike-sa` and `ipsec-sa` (and `/stats`); **PAN-OS** `show vpn ike-sa`, `ipsec-sa` and `flow` (arguments are still checked). The configuration of a tunnel (pre-shared keys: Meraki third-party peers, BIG-IP `ike-peer`, PAN-OS `show vpn gateway`/`tunnel`, `cmdb vpn`, native `crypto`) stays refused.
+- Not opened: **Nexus** and **Aruba CX**, where no status path is known to be free of the tunnel's configuration.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; a test per platform checks the status paths are allowed and the configuration, `..` tricks and other commands are not.
+
+### Not verified
+- Against real devices. The Meraki, Junos and PAN-OS names are from their documented APIs; the IOS-XE model name and the BIG-IP `ike-sa`/`ipsec-sa` collections are from memory of the product and may differ by release (the device then answers with its own error).
+
+---
+
 ## [v209] - 2026-11-17 — FortiGate VPN status and VPN log can be read over MCP
 
 ### Fixed

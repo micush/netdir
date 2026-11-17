@@ -118,106 +118,17 @@ func RedactText(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-var deniedAny = []string{"snmp", "username", "aaa", "tacacs", "radius", "crypto", "password", "secret", "certificate", "keychain", "key-chain",
-	"ikev", "ipsec", "vpn", "license", "admin", "ldap", "saml", "oauth", "sso", "api-user", "central-management", "fortiguard", "wireless-controller", "switch-controller", "ssh", "pki",
-	// NX-OS's object model (userext: its users), PAN-OS's configuration (management users, authentication profiles and sequences,
-	// server profiles, high availability keys, the device-level settings)
-	"userext", "mgt-config", "local-user-database", "authentication-profile", "authentication-sequence", "kerberos", "server-profile",
-	"high-availability", "master-key", "deviceconfig",
-	// ArubaOS-CX (the whole configuration is fullconfigs, running-config and startup-config), Infoblox WAPI (admin users and groups
-	// are "admin*", authentication services and policies, DNSSEC and TSIG keys, file operations)
-	"fullconfigs", "running-config", "startup-config", "authservice", "authpolicy", "dnsseckey", "tsig", "fileop",
-	// Arista EOS (the commands a path of its eAPI names; see eosDeniedWord for the abbreviations the CLI accepts)
-	"session-config", "tech-support",
-	// F5 BIG-IP (TLS keys and certificates, UCS archives, file transfer, the authentication tree)
-	"ssl-key", "ssl-cert", "ucs", "file-transfer", "authn", "authz",
-	// Cisco Meraki (administrators are "admins", sign-in, license keys, API keys)
-	"loginsecurity", "licens", "apikey"}
-var deniedExact = map[string]bool{"line": true, "enable": true, "key": true, "keys": true, "user": true, "users": true, "banner": true, "authentication": true, "backup": true,
-	"ike": true, "accounts": true, "auth": true, "util": true, "login": true}
-
-// secretSegment refuses one word of a path (or of an XPath, or an element of a command) that names a place secrets are kept.
-func secretSegment(sg string) error {
-	if _, after, ok := strings.Cut(sg, ":"); ok { // module:container
-		sg = after
-	}
-	if deniedExact[sg] {
-		return fmt.Errorf("path: %q holds secrets (users, keys, certificates) and is not available over MCP", sg)
-	}
-	if holdsExtra(sg) {
-		return fmt.Errorf("path: %q holds a word you marked secret (Configure ▸ Privacy) and is not available over MCP", sg)
-	}
-	for _, d := range deniedAny {
-		w := sg
-		if d == "aaa" {
-			w = strings.ReplaceAll(sg, "aaaa", "") // AAAA is the DNS record type (Infoblox record:aaaa, sharedrecord:aaaa), not AAA
-		}
-		if strings.Contains(w, d) {
-			if d == "fullconfigs" || d == "running-config" || d == "startup-config" {
-				return fmt.Errorf("path: %q is the whole configuration: use the device_config tool, which hides its secrets", sg)
-			}
-			return fmt.Errorf("path: %q holds secrets (users, keys, certificates, SNMP, AAA) and is not available over MCP", sg)
-		}
-	}
-	return nil
-}
-
-// ownPathGuard are the platforms whose driver checks a path to read itself (the Proxmox family: accounts, consoles, keys and files are
-// refused there, by the segment that names them, and the secrets of an answer are hidden).  The words of the list below are those of the
-// other platforms' APIs and refuse what is no secret there: Backup Server's whole /admin tree (datastores, snapshots, jobs), a storage or
-// a datastore that is called backup.
-var ownPathGuard = map[string]bool{"proxmox": true, "pbs": true, "pdm": true}
-
 // CheckAPIPathMCPFor is CheckAPIPathMCP for the platform of the device that is asked.
-func CheckAPIPathMCPFor(platform, p string) error {
-	if ownPathGuard[platform] {
-		return nil
-	}
-	if platform == "fortios" && fortiVPNStatusRE.MatchString(strings.ToLower(strings.TrimSpace(strings.SplitN(p, "?", 2)[0]))) {
-		return nil
-	}
-	return CheckAPIPathMCP(p)
-}
+func CheckAPIPathMCPFor(platform, p string) error { return CheckAPIPathMCP(p) }
 
-// fortiVPNStatusRE are the FortiOS reads about VPN tunnels that hold no secret: the monitor (which tunnels are up, their traffic and
-// peers) and the VPN event log.  The "vpn" and "ipsec" words are refused elsewhere because the configuration of a tunnel (cmdb
-// vpn.ipsec) holds its pre-shared key; the monitor and the log do not.  Anything else under vpn stays refused.
-var fortiVPNStatusRE = regexp.MustCompile(`^/api/v2/(monitor/vpn/(ipsec(/select)?|ssl(/stats)?|ike(/gateway)?)|log/(disk|memory|fortianalyzer|forticloud)/event/vpn(/raw)?)/?$`)
-
-// CheckAPIPathMCP is CheckAPIPath for a caller that must not see secrets: the whole configuration, and the parts of the
-// API that hold users, keys, certificates, SNMP and AAA, are refused.  The named tools (ports, routing, firewall, ...) read
-// what they need and hide what is secret.
+// CheckAPIPathMCP checks that a path an MCP caller reads is a read of the device's API, in the form the device takes.  It does not
+// refuse a place for the words in it (vpn, users, snmp, keys...): what a device answers is filtered for secrets (Redact, RedactText,
+// and the words of Configure ▸ Privacy ▸ Secret words) whatever path it came from, so a path is no secret.
 func CheckAPIPathMCP(p string) error {
 	path, query, _ := strings.Cut(p, "?")
 	path = strings.ToLower(path)
 	if path == "/api" || path == "/api/" {
 		return checkPanosQueryMCP(query) // PAN-OS's XML API: the path is always /api/, what is asked for is in the query
-	}
-	segs := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '=' })
-	for i, sg := range segs {
-		if _, after, ok := strings.Cut(sg, ":"); ok { // module:container
-			sg = after
-		}
-		base := strings.TrimSuffix(strings.TrimSuffix(sg, ".json"), ".xml")
-		if sg == "native" && i == len(segs)-1 || sg == "cmdb" && i == len(segs)-1 ||
-			base == "sys" && i == len(segs)-1 && strings.HasPrefix(path, "/api/") { // NX-OS: sys is the root of the object model
-			return errors.New("path: a whole configuration holds the device's secrets and is not available over MCP; use the device_config tool (secrets hidden), or ask for a part (the other device_* tools, or a path below it)")
-		}
-		if err := secretSegment(sg); err != nil {
-			return err
-		}
-	}
-	if strings.HasPrefix(path, "/rpc/") { // Juniper Junos REST: the path is an RPC name
-		if err := junRPCDenied(strings.TrimPrefix(path, "/rpc/")); err != nil {
-			return err
-		}
-	}
-	if strings.HasPrefix(path, "/eapi/") { // Arista eAPI: the path is a CLI command, and the CLI accepts abbreviations ("show run")
-		for _, w := range strings.Split(strings.TrimPrefix(path, "/eapi/"), "/") {
-			if err := eosDeniedWord(w); err != nil {
-				return err
-			}
-		}
 	}
 	if strings.HasPrefix(path, "/restconf/tailf") {
 		return errors.New("path: model sources are text and not available over MCP")
@@ -260,13 +171,8 @@ func xpathSteps(x string) (names []string, preds []bool) {
 	return names, preds
 }
 
-// panWholeConfig are the containers of PAN-OS's configuration tree that hold the rest of it: asking for one (or for one of
-// their entries) is asking for the whole configuration, secrets included.
-var panWholeConfig = map[string]bool{"config": true, "devices": true, "shared": true, "vsys": true, "device-group": true, "template": true,
-	"template-stack": true, "panorama": true, "localhost.localdomain": true}
-
-// checkPanosQueryMCP applies the same rules to a PAN-OS XML API request: a show command or an XPath is read, never the whole
-// configuration, never a place secrets are kept, and never the "show config" family (which prints the configuration).
+// checkPanosQueryMCP checks a PAN-OS XML API request: one <show> command, an XPath, or a search of the logs.  What they answer is
+// filtered for secrets like every other answer.
 func checkPanosQueryMCP(query string) error {
 	q, err := url.ParseQuery(query)
 	if err != nil {
@@ -274,39 +180,15 @@ func checkPanosQueryMCP(query string) error {
 	}
 	switch q.Get("type") {
 	case "op":
-		names, err := panShowNames(q.Get("cmd"))
-		if err != nil {
+		if _, err := panShowNames(q.Get("cmd")); err != nil {
 			return err
 		}
-		for _, n := range names {
-			n = strings.ToLower(n)
-			if n == "config" {
-				return errors.New(`path: "show config" prints the configuration, which holds secrets: use the device_config tool, which hides them`)
-			}
-			if err := secretSegment(n); err != nil {
-				return err
-			}
-		}
 	case "config":
-		names, preds := xpathSteps(q.Get("xpath"))
-		if len(names) == 0 {
-			return errors.New("path: an xpath is needed (not the whole configuration over MCP)")
-		}
-		last := len(names) - 1
-		if panWholeConfig[names[last]] || names[last] == "entry" && last > 0 && preds[last] && panWholeConfig[names[last-1]] {
-			return errors.New("path: a whole configuration holds the device's secrets and is not available over MCP; ask for a part (the device_* tools, or an xpath below it)")
-		}
-		for _, n := range names {
-			if err := secretSegment(n); err != nil {
-				return err
-			}
+		if names, _ := xpathSteps(q.Get("xpath")); len(names) == 0 {
+			return errors.New("path: an xpath is needed")
 		}
 	case "log":
-		// a search of the logs: every log but the configuration log, whose entries carry the changed configuration (secrets too)
-		switch lt := q.Get("log-type"); {
-		case lt == "config":
-			return errors.New("path: the configuration log holds what was changed, secrets included, and is not available over MCP")
-		case !PanLogTypeOK(lt):
+		if lt := q.Get("log-type"); !PanLogTypeOK(lt) {
 			return errors.New("path: type=log needs a log-type (traffic, threat, url, system, globalprotect, userid, auth, ...)")
 		}
 		for k := range q {
@@ -316,28 +198,6 @@ func checkPanosQueryMCP(query string) error {
 		}
 	default:
 		return errors.New("path: over MCP the XML API reads type=op (a show command), type=config (a part of the configuration) or type=log (a search of the logs)")
-	}
-	return nil
-}
-
-// eosDeniedWords are the commands of the EOS CLI that print secrets or the whole configuration.
-var eosDeniedWords = []string{"running-config", "startup-config", "session-config", "tech-support", "snmp", "users", "aaa", "radius", "tacacs", "crypto", "kerberos", "certificate", "secret", "privilege"}
-
-// eosDeniedWord refuses a word of an eAPI command that is, or abbreviates, one of eosDeniedWords: the CLI takes any unique prefix
-// ("show run" is "show running-config"), which a match on the whole word would let through.  A word of one letter is not taken
-// for an abbreviation.
-func eosDeniedWord(w string) error {
-	w = strings.ToLower(strings.TrimSpace(w))
-	if u, err := url.PathUnescape(w); err == nil {
-		w = u
-	}
-	if len(w) < 2 {
-		return nil
-	}
-	for _, d := range eosDeniedWords {
-		if strings.HasPrefix(d, w) {
-			return fmt.Errorf("path: %q holds secrets or the whole configuration and is not available over MCP", w)
-		}
 	}
 	return nil
 }

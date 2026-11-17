@@ -8,8 +8,7 @@ import (
 
 // The words of your own that mark a secret (Configure ▸ Privacy ▸ Secret words, settings.privacy.secret_words), on top of the built-in
 // ones.  One list for every filter: a key whose name holds one has its value hidden (Redact), a word of a line of text that holds
-// one hides the rest of the line (RedactText), a member of a JSON text is hidden the same way, and a path or an XPath segment that
-// holds one is refused (secretSegment).  It does not depend on the privacy level: secrets are hidden at "none" too.
+// one hides the rest of the line (RedactText), and a member of a JSON text is hidden the same way.  It does not depend on the privacy level: secrets are hidden at "none" too.
 
 type extraSecrets struct {
 	words []string       // lower case

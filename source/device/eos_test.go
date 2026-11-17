@@ -329,14 +329,4 @@ func TestCheckAPIPathMCPEOSAndTechnitium(t *testing.T) {
 			t.Errorf("%s refused: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{
-		"/eapi/show/running-config", "/eapi/show/run", "/eapi/show/running", "/eapi/show/ru", "/eapi/show/startup-config", "/eapi/show/start", "/eapi/show/session-config", "/eapi/show/tech-support", "/eapi/show/tech",
-		"/eapi/show/snmp", "/eapi/show/sn", "/eapi/show/users", "/eapi/show/us", "/eapi/show/aaa", "/eapi/show/radius", "/eapi/show/tacacs", "/eapi/show/crypto", "/eapi/show/kerberos", "/eapi/show/privilege",
-		"/eapi/show/RUN", "/eapi/show/%72un",
-		"/api/admin/users/list", "/api/admin/sessions/list", "/api/user/session/get", "/api/user/profile/get",
-	} {
-		if err := CheckAPIPathMCP(bad); err == nil {
-			t.Errorf("%s allowed", bad)
-		}
-	}
 }

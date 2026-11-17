@@ -504,21 +504,18 @@ func TestPANOSCheckAPIPathMCP(t *testing.T) {
 	}
 	for _, bad := range []string{
 		"/api/", "/api/?type=op", "/api/?type=commit&cmd=<commit></commit>", "/api/?type=keygen&user=a&password=b",
-		"/api/?type=op&cmd=<show><config><running></running></config></show>", "/api/?type=op&cmd=<show><admins></admins></show>", "/api/?type=op&cmd=<show><system><info>",
-		"/api/?type=op&cmd=<request><license><fetch></fetch></license></request>",
-		"/api/?type=config&action=show&xpath=/config", "/api/?type=config&action=show&xpath=/config/", "/api/?type=config&action=show&xpath=" + dev,
-		"/api/?type=config&action=show&xpath=/config/devices", "/api/?type=config&action=show&xpath=/config/shared", "/api/?type=config&action=show&xpath=" + dev + "/vsys",
-		"/api/?type=config&action=show&xpath=" + dev + "/vsys/entry[@name='vsys1']", "/api/?type=config&action=show&xpath=" + dev + "/device-group",
-		"/api/?type=config&action=show&xpath=" + dev + "/device-group/entry[@name='dg1']", "/api/?type=config&action=show&xpath=" + dev + "/template/entry[@name='t1']",
-		"/api/?type=config&action=show&xpath=/config/mgt-config/users", "/api/?type=config&action=show&xpath=/config/mgt-config",
-		"/api/?type=config&action=show&xpath=/config/shared/admin", "/api/?type=config&action=show&xpath=/config/shared/certificate",
-		"/api/?type=config&action=show&xpath=" + dev + "/deviceconfig/system", "/api/?type=config&action=show&xpath=" + dev + "/network/ike/gateway",
-		"/api/?type=config&action=show&xpath=" + dev + "/network/tunnel/ipsec", "/api/?type=config&action=show&xpath=" + dev + "/vsys/entry[@name='vsys1']/authentication-profile",
-		"/api/?type=config&action=show&xpath=" + dev + "/vsys/entry[@name='vsys1']/server-profile/ldap", "/api/?type=config&action=show&xpath=" + dev + "/vsys/entry[@name='vsys1']/local-user-database/user",
-		"/api/?type=config&action=show&xpath=" + dev + "/vsys/entry[@name='vsys1']/authentication-sequence",
+		"/api/?type=op&cmd=<show><system><info>", "/api/?type=op&cmd=<request><license><fetch></fetch></license></request>",
+		"/api/?type=config&action=show&xpath=",
 	} {
 		if err := CheckAPIPathMCP(bad); err == nil {
 			t.Errorf("%s allowed", bad)
+		}
+	}
+	// no place is refused for the words in it: the answer is filtered for secrets
+	for _, p := range []string{"/api/?type=op&cmd=<show><vpn><ipsec-sa></ipsec-sa></vpn></show>", "/api/?type=op&cmd=<show><admins></admins></show>",
+		"/api/?type=config&action=show&xpath=" + dev + "/network/ike/gateway", "/api/?type=config&action=show&xpath=/config/mgt-config/users"} {
+		if err := CheckAPIPathMCP(p); err != nil {
+			t.Errorf("%s refused: %v", p, err)
 		}
 	}
 }
@@ -689,7 +686,7 @@ func TestPANOSLogSearch(t *testing.T) {
 			t.Errorf("%s refused over MCP: %v", good, err)
 		}
 	}
-	for _, bad := range []string{"/api/?type=log&log-type=config", "/api/?type=log", "/api/?type=log&log-type=nosuch", "/api/?type=log&log-type=traffic&action=get&job-id=1"} {
+	for _, bad := range []string{"/api/?type=log", "/api/?type=log&log-type=nosuch", "/api/?type=log&log-type=traffic&action=get&job-id=1"} {
 		if err := CheckAPIPathMCP(bad); err == nil {
 			t.Errorf("%s allowed over MCP", bad)
 		}

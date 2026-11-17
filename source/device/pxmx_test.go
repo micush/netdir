@@ -297,14 +297,6 @@ func TestPBSPathsAndDatastoreNames(t *testing.T) {
 			t.Errorf("%s: the MCP check refuses a datastore tree: %v", plat, err)
 		}
 	}
-	for _, p := range []string{"/admin/datastore", "/admin/datastore/backup/status", "/admin/gc", "/config/key"} {
-		if err := CheckAPIPathMCP(p); err == nil {
-			t.Errorf("another platform's path %s is no longer refused over MCP", p)
-		}
-		if err := CheckAPIPathMCPFor("iosxe", p); err == nil {
-			t.Errorf("iosxe %s is no longer refused over MCP", p)
-		}
-	}
 	p := &pxmx{spec: pbsSpec}
 	for _, ok := range []string{"/admin/datastore", "/admin/datastore/backup/status", "/admin/datastore/backup/snapshots", "/config/datastore/backup",
 		"/admin/gc", "/admin/sync", "/status/datastore-usage", "/nodes/localhost/tasks?errors=1", "/config/remote/access"} {

@@ -354,10 +354,4 @@ func TestNXOSCheckAPIPathMCP(t *testing.T) {
 			t.Errorf("%s refused: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"/api/mo/sys.json", "/api/mo/sys.json?rsp-subtree=full", "/api/node/mo/sys.json", "/api/class/aaaUser.json", "/api/class/aaaRadiusProvider.json",
-		"/api/mo/sys/userext.json", "/api/class/snmpCommSecP.json", "/api/mo/sys/snmp.json", "/api/class/pkiEp.json"} {
-		if err := CheckAPIPathMCP(bad); err == nil {
-			t.Errorf("%s allowed", bad)
-		}
-	}
 }

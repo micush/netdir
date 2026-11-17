@@ -52,13 +52,6 @@ func TestSecretWordsOfYourOwn(t *testing.T) {
 	if got := RedactText(`{"x_widgetcode": "abc123", "y": 1}`); strings.Contains(got, "abc123") {
 		t.Errorf("RedactText json: %q", got)
 	}
-	if err := secretSegment("widgetcodes"); err == nil {
-		t.Error("a path with the word was allowed")
-	}
-	SetSecretWords(nil)
-	if err := secretSegment("widgetcodes"); err != nil {
-		t.Errorf("after removing the word: %v", err)
-	}
 }
 
 // RedactConfig keeps a JSON configuration JSON, hides its secrets, and gives the same answer when applied twice.

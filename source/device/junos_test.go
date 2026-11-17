@@ -226,12 +226,6 @@ func TestJunos(t *testing.T) {
 	if c, err := api.APICatalog(ctx); err != nil || !strings.Contains(toJSON(c), "get-route-information") {
 		t.Errorf("catalog %v", err)
 	}
-	for _, p := range []string{"/rpc/get-configuration", "/rpc/get-system-password", "/rpc/get-interface-information"} {
-		err := CheckAPIPathMCP(p)
-		if (p == "/rpc/get-interface-information") != (err == nil) {
-			t.Errorf("CheckAPIPathMCP(%s) = %v", p, err)
-		}
-	}
 	// wrong password
 	bad := open(t, junStub(t, &junState{}), Credential{Username: "admin", Password: "no"})
 	if _, err := bad.Facts(ctx); err == nil || !strings.Contains(err.Error(), "401") {

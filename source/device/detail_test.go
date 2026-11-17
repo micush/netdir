@@ -224,11 +224,13 @@ func TestRedactText(t *testing.T) {
 }
 
 func TestCheckAPIPathMCP(t *testing.T) {
-	for _, bad := range []string{"/restconf/data/Cisco-IOS-XE-native:native", "/restconf/data/Cisco-IOS-XE-native:native?depth=9", "/restconf/data/Cisco-IOS-XE-native:native/snmp-server",
-		"/restconf/data/Cisco-IOS-XE-native:native/username=admin", "/restconf/data/Cisco-IOS-XE-native:native/aaa", "/restconf/tailf/modules/a/b",
-		"/api/v2/cmdb/user/local", "/api/v2/cmdb/system/snmp/community", "/api/v2/cmdb/vpn.ipsec/phase1-interface", "/api/v2/cmdb/system/admin", "/api/v2/cmdb"} {
-		if CheckAPIPathMCP(bad) == nil {
-			t.Errorf("%s allowed", bad)
+	if CheckAPIPathMCP("/restconf/tailf/modules/a/b") == nil {
+		t.Error("model sources allowed")
+	}
+	// a path is no secret: what the device answers is filtered, so no place is refused for the words in it
+	for _, p := range []string{"/restconf/data/Cisco-IOS-XE-native:native", "/restconf/data/Cisco-IOS-XE-native:native/snmp-server", "/api/v2/cmdb/vpn.ipsec/phase1-interface", "/api/v2/cmdb/system/admin"} {
+		if err := CheckAPIPathMCP(p); err != nil {
+			t.Errorf("%s: %v", p, err)
 		}
 	}
 	for _, good := range []string{"/restconf/data/Cisco-IOS-XE-interfaces-oper:interfaces", "/restconf/data/Cisco-IOS-XE-native:native/router", "/api/v2/monitor/system/status", "/api/v2/cmdb/firewall/policy"} {
