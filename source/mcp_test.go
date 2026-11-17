@@ -196,6 +196,24 @@ func TestDeviceCheckSettings(t *testing.T) {
 	}
 }
 
+// The Topology drawing's small-squares threshold: empty (the default, 36) or 1 to 5000.
+func TestTopologySquaresAboveSetting(t *testing.T) {
+	for _, n := range []int{-1, 5001} {
+		dc := newDaemonConfig()
+		dc.Settings.TopologySquaresAbove = n
+		if err := dc.Validate(); err == nil {
+			t.Errorf("accepted %d", n)
+		}
+	}
+	for _, n := range []int{0, 1, 36, 5000} {
+		dc := newDaemonConfig()
+		dc.Settings.TopologySquaresAbove = n
+		if err := dc.Validate(); err != nil {
+			t.Errorf("%d: %v", n, err)
+		}
+	}
+}
+
 // mcpClusterGone are the tools an MCP caller no longer has: anything about netdir's own cluster, configuration, alerts, schedules,
 // updates or host, and the raw route of the GUI's API.  What is left is the devices, the device list and status, the cluster
 // status (list_nodes, get_topology) and the network tools.

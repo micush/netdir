@@ -1,5 +1,44 @@
 # Changelog
 
+## [v194] - 2026-11-16 — The small-squares threshold moves to Configure ▸ Settings ▸ General
+
+### Changed
+- The "Squares above [36] devices" box is gone from the Topology page. The setting is now **Configure ▸ Settings ▸ General ▸ Topology ▸ Draw devices as small squares above** (`settings.topology_squares_above`, 1 to 5000, empty = 36). It is a shared setting: the whole cluster uses it, unlike v193's box, which was kept in one browser (that value is no longer read).
+- Help (Settings ▸ General and the Topology filter text) describes it.
+
+### Verified
+- Go: the setting is validated (0, 1, 36, 5000 accepted; -1 and 5001 refused); help-panel tests. jsdom: the General page shows the field with 36, a change saves `topology_squares_above`; the Topology drawing follows the setting (400 gives all boxes for 320 devices, 300 gives squares, none set gives squares).
+
+### Not verified
+- Several nodes in a real cluster copying the setting (it travels as any shared setting does).
+
+---
+
+## [v193] - 2026-11-16 — Tags: the Topology filter finds them, tag boxes suggest the tags in use, and a Tags tab to manage them
+
+### Added
+- The Topology filter box has the focus when a gateway's drawing is opened (once for each gateway; later redraws of the toolbar never take the focus from what is being typed).
+- Configure ▸ Devices has a fourth tab, **Tags**: every tag in use with the number of devices that carry it; change a tag's text to rename it (onto an existing tag: asks, then merges), **Remove** takes it off every device. It works on the devices table, so it saves like any other change.
+- Every Tags box (the Tags column of Configure ▸ Devices, and Add/Edit device on the Topology page) offers the tags already in use while the last word is typed: click one, or Down and Enter/Tab; Esc closes the list. Enter with nothing chosen still submits.
+
+- Topology: **Squares above [36] devices** box beside the filter: how many devices a gateway may have before each is drawn as a small square. Kept in this browser (not in the shared configuration), like the theme; 1 to 5000; 36 is the default.
+- A Tags box says so: several tags are separated by spaces.
+
+### Fixed
+- Topology, small squares: the full-size card for the square under the pointer is now drawn above it, not over it, so the squares beside and below it can still be reached.
+
+### Changed
+- The Topology filter box also searches tags with a plain word (`dc1 core`). The `source=` tag of an imported device is skipped by a plain word (it would match the server's name); `tag:` before a word still searches every tag.
+- Help: new topic for the Tags tab; the filter-box text updated.
+
+### Verified
+- jsdom: focus on load; plain word matches tags, two words, `source=` skipped, `tag:` finds it; four tabs; the suggestion list, Enter picks, no list when nothing matches; the Tags tab counts, rename, remove and the saved device tags. Go tests (help panels for the new tab).
+
+### Not verified
+- The suggestion list's position inside the Add/Edit device dialog in a real browser (it is placed from the box's position inside the dialog); the focus on load in Firefox.
+
+---
+
 ## [v192] - 2026-11-16 — Topology: a gateway with more than 36 devices draws them as small squares
 
 ### Added

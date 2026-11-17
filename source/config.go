@@ -484,6 +484,9 @@ type Settings struct {
 	// 1 to 60 minutes (0 is the default, 5).
 	DeviceLiveCheckSec int `json:"device_live_check_s,omitempty"`
 	DeviceLiveFactsMin int `json:"device_live_facts_min,omitempty"`
+	// TopologySquaresAbove is how many devices a gateway may have before the Topology drawing shows each as a small square
+	// (1 to 5000; 0 is the default, 36).
+	TopologySquaresAbove int `json:"topology_squares_above,omitempty"`
 	// Devices are the switches and firewalls the gateway manages, and DeviceCredentials the logins they use (devices.go,
 	// device/).
 	Devices           []device.Device     `json:"devices,omitempty"`
@@ -735,6 +738,9 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if n := dc.Settings.DeviceFactsMin; n != 0 && (n < 5 || n > 1440) {
 			return fmt.Errorf("settings.device_facts_min: 5 to 1440 minutes (empty is %d)", int(device.DefaultIdleFacts/time.Minute))
+		}
+		if n := dc.Settings.TopologySquaresAbove; n != 0 && (n < 1 || n > 5000) {
+			return fmt.Errorf("settings.topology_squares_above: 1 to 5000 devices (empty is 36)")
 		}
 		if n := dc.Settings.MCPMaxResultMB; n < 0 || n > mcpMaxResultMB {
 			return fmt.Errorf("mcp: the largest answer is 1 to %d MB", mcpMaxResultMB)

@@ -117,6 +117,45 @@
     return el;
   }
   const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
+  const DOT_DEFAULT = 36;   // Topology: a gateway with more devices than settings.topology_squares_above draws each as a small square
+  // A box of tags (words separated by spaces or commas) that offers the tags already in use while the last word is typed: a list under the box,
+  // chosen with the mouse, or with Down/Up and Enter or Tab.  Enter with nothing chosen is left alone (it still submits the form).
+  // `tagsNow()` gives every tag in use at that moment (a table may hold rows that are not saved yet).
+  function tagSuggest(input, tagsNow) {
+    let pop = null, items = [], at = -1;
+    const word = () => { const m = /[^\s,]*$/.exec(input.value); return m ? m[0] : ""; };
+    const close = () => { if (pop) { pop.remove(); pop = null; } items = []; at = -1; };
+    const pick = (t) => {
+      input.value = input.value.slice(0, input.value.length - word().length) + t + " ";
+      close();
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    };
+    const paint = () => { if (pop) [...pop.children].forEach((b, i) => b.classList.toggle("on", i === at)); };
+    const open = (all) => {
+      const w = word().toLowerCase(), have = new Set(input.value.split(/[\s,]+/).filter(Boolean).slice(0, -1).map((x) => x.toLowerCase()));
+      if (!w && !all) return close();
+      let tags = []; try { tags = tagsNow() || []; } catch (_) { /* a row that is not finished */ }
+      items = [...new Set(tags)].filter((t) => !have.has(t.toLowerCase()) && t.toLowerCase() !== w && t.toLowerCase().includes(w)).sort((a, b) => (b.toLowerCase().startsWith(w) ? 1 : 0) - (a.toLowerCase().startsWith(w) ? 1 : 0) || a.localeCompare(b)).slice(0, 8);
+      if (!items.length) return close();
+      if (!pop) pop = h("div", { class: "tagpop", role: "listbox", "aria-label": "Tags in use" });
+      clear(pop).append(...items.map((t) => h("button", { type: "button", role: "option", tabindex: "-1", onmousedown: (e) => { e.preventDefault(); pick(t); } }, t)));
+      const r = input.getBoundingClientRect();
+      pop.style.left = r.left + "px"; pop.style.top = r.bottom + 2 + "px"; pop.style.minWidth = r.width + "px";
+      (input.closest("dialog") || document.body).append(pop);
+      at = -1;
+    };
+    input.setAttribute("autocomplete", "off");
+    input.addEventListener("input", () => open(false));
+    input.addEventListener("blur", close);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" && !pop) { open(true); if (pop) { at = 0; paint(); e.preventDefault(); } return; }
+      if (!pop) return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); at = (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length; paint(); }
+      else if ((e.key === "Enter" || e.key === "Tab") && at >= 0) { e.preventDefault(); pick(items[at]); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+    });
+  }
 
   // morph makes the children of dst the same as the children of src, reusing the elements that are already there (only
   // their text and attributes are patched).  A page that is redrawn on a timer uses it so that what the browser keeps
@@ -576,7 +615,7 @@
       switch (state.tab) {
       case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
       case "cfg_groups": return "config_groups";
-      case "cfg_devices": return state.devTab === 2 ? "config_checks" : state.devTab === 1 ? "config_logins" : "config_devices";
+      case "cfg_devices": return state.devTab === 3 ? "config_tags" : state.devTab === 2 ? "config_checks" : state.devTab === 1 ? "config_logins" : "config_devices";
       case "cfg_web": return "config_web";
       case "anycast": return "anycast_" + (state.anycastTab === 1 ? "ospf" : "bgp");
       case "anycaststatus": return "anycaststatus_" + (state.anycastMonTab === 1 ? "ospf" : "bgp");
@@ -648,7 +687,9 @@
       const fin = h("input", { type: "text", class: "cv-filter", value: state.topoFilter || "", placeholder: "Filter devices", autocomplete: "off", spellcheck: "false", "aria-label": "Filter devices",
         oninput: () => { state.topoFilter = fin.value; if (state.onTopoFilter) state.onTopoFilter(); } });
       rows.push(h("div", { class: "tbrow tbfilter" }, fin));
-    }
+      // the box has the focus when a gateway's drawing is opened (once for each: later redraws of the bar never take the focus from what is being typed)
+      if (state.topoFocusGid !== state.topo.gid && (!document.activeElement || document.activeElement === document.body)) { state.topoFocusGid = state.topo.gid; setTimeout(() => { if (fin.isConnected && (!document.activeElement || document.activeElement === document.body)) fin.focus(); }, 0); }
+    } else state.topoFocusGid = null;
     if (state.nodes.length >= 2) {
       const sel = h("select", { id: "node-pick", "aria-label": "Node to configure and monitor", onchange: (e) => setTarget(e.target.value || null) });
       const self = selfNode();
@@ -851,15 +892,16 @@
       const sideBottom = Math.max(anys.length ? anyTop + anyH : 0, nodes.length ? nodeTop + nodeH : 0);
       // the gateway's devices: a row of squares under the circle (and under the nodes and pills when those reach lower)
       // the filter box: only the devices whose name, address or platform holds every word typed are drawn; `tag:` before a word asks the tags instead
-      // (an imported device carries source=SERVER, so tags are never searched by a plain word).  Dragging to reorder is off meanwhile.
+      // (a plain word searches the tags too, except `source=…`, which an imported device carries and which would match its server's name).
+      // Dragging to reorder is off meanwhile.
       const words = (state.topoFilter || "").toLowerCase().split(/\s+/).filter(Boolean);
       const devMatch = (n) => {
         const d = devByName(n), t = [d.name, d.address, platformName(d.platform)].join(" ").toLowerCase();
-        return words.every((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w)));
+        return words.every((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w) || (d.tags || []).some((x) => !x.toLowerCase().startsWith("source=") && x.toLowerCase().includes(w))));
       };
       // Up to DOT_FROM devices each is a square with its name, as always.  More than that, each is a small square joined to the gateway, and the
       // full-size square comes when the pointer is on it, or when the filter matches it (the matches are drawn full size above the others).
-      const allDevs = (g.devices || []).filter((n) => devByName(n)), DOT_FROM = 36, dotMode = allDevs.length > DOT_FROM;
+      const allDevs = (g.devices || []).filter((n) => devByName(n)), DOT_FROM = ((cv.cfg && cv.cfg.settings) || {}).topology_squares_above || DOT_DEFAULT, dotMode = allDevs.length > DOT_FROM;
       const problem = (n) => { const i = st.devs[n], d = devByName(n); return !d.disabled && !devPausedHere(n) && !!i && (i.status === "warn" || i.status === "bad"); };   // amber or red
       const devs = !dotMode ? allDevs.filter(devMatch) : words.length ? allDevs.filter(devMatch) : allDevs.filter(problem), COLW = 190, SW = 160, SH = 46, DEV_ROW = 6, RG = 20;   // at most six across, then a new row
       const fullSet = new Set(devs), dotted = dotMode ? allDevs.filter((n) => !fullSet.has(n)) : [], devOrder = devs.concat(dotted);
@@ -1019,7 +1061,7 @@
       dotted.forEach((name, i) => {
         const d = devByName(name), { x, y } = dotAt(i), mx = x + DS / 2, info = st.devs[name], c = d.disabled || devPausedHere(name) ? "paused" : info ? info.status : "idle";
         const showHov = () => {
-          const hx = Math.max(4, Math.min(W - SW - 4, mx - SW / 2)), hy = Math.max(2, Math.min(H - SH - 2, y + DS / 2 - SH / 2));
+          const hx = Math.max(4, Math.min(W - SW - 4, mx - SW / 2)), hy = Math.max(2, y - SH - 6);   // above the dot, so the dots beside and below it stay in reach
           hov.setAttribute("class", "shape hovcard st-" + c);
           hov.setAttribute("transform", `translate(${hx} ${hy})`);
           hovT1.textContent = fitPx(name, SW - 20, "600 13px system-ui, sans-serif");
@@ -1154,6 +1196,7 @@
           ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, PLATFORM_LABEL[o] || o)))
           : h("input", { type: f.secret ? "password" : "text", autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
+        if (f.suggest) tagSuggest(els[f.k], f.suggest);
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
         if (f.check) return h("label", { class: "f check wide" }, els[f.k], f.l);
@@ -1401,7 +1444,7 @@
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
         { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443" },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
-        { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core" },
+        { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core", hint: "Several tags: separate them with spaces.", suggest: () => inventory().flatMap((x) => x.tags || []) },
         { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip: self-signed certificate." },
         { k: "login", l: "Login", options: [...ls, NEW_LOGIN], v: d ? d.credential : ls.length ? ls[0] : NEW_LOGIN, on: show, initOn: true },
         { k: "user", l: "User name", v: "", ph: "netdir" },
@@ -2320,6 +2363,10 @@
     { shared: true, k: "metrics_acl", l: "Allowed sources", t: "rows", rows: "metricsacl", wide: true },
   ];
   // Configure ▸ Settings ▸ General ▸ Neighbor discovery (lldp.go)
+  // Configure ▸ Settings ▸ General ▸ Topology (settings.topology_squares_above): how many devices a gateway may have before the drawing turns each into a small square
+  const TOPO_FIELDS = [
+    { shared: true, k: "topology_squares_above", l: "Draw devices as small squares above", unit: "devices", t: "int", min: 1, max: 5000, def: 36, hint: "1 to 5000. Hover shows the full box." },
+  ];
   const LLDP_FIELDS = [
     { shared: true, k: "lldp", l: "Run LLDP on every node", t: "bool" },
   ];
@@ -2527,6 +2574,7 @@
           if (!row.v[i] && c.def) row.v[i] = c.def;   // the default shown as the value, not left empty
           inp.value = row.v[i] || "";
           inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
+          if (c.tags) tagSuggest(inp, () => (spec.tagsNow ? spec.tagsNow() : []));   // the Tags column offers the tags in use
           if (c.list) {   // a column that offers a list of names while typing (the datalist is filled when the box gets the focus: the names may be unsaved)
             inp.setAttribute("list", c.list);
             inp.addEventListener("focus", () => { if (spec.onList) spec.onList(c.list); });
@@ -2634,6 +2682,9 @@
       commit: () => { const n = names(); for (const r of data) if (r.v[0].trim() && n[r.v[0].trim()] === 1) r.orig = r.v[0].trim(); },
       // a column's values that are keys of the map take the map's value (the Login column follows a renamed login)
       retarget: (col, map) => { let k = 0; for (const r of data) { const x = (r.v[col] || "").trim(); if (map.has(x)) { r.v[col] = map.get(x); k++; } } if (k) render(); return k; },
+      // the words of a column of words (the Tags column): every word in use, and a way to rename or remove one in every row (fn gives the new word, or "" to drop it)
+      words: (col) => data.flatMap((r) => (r.v[col] || "").split(/[\s,]+/).filter(Boolean)),
+      mapWords: (col, fn) => { let k = 0; for (const r of data) { const w = (r.v[col] || "").split(/[\s,]+/).filter(Boolean), n = [...new Set(w.map(fn).filter(Boolean))]; if (n.join(" ") !== w.join(" ")) { r.v[col] = n.join(" "); k++; } } if (k) { render(); changed(); } return k; },
       get: () => (spec.obj ? data.filter((r) => !(spec.drop || spec.mark)(cells(r))).map((r) => spec.obj(cells(r)))
         : data.flatMap((r) => ((spec.drop || spec.mark)(cells(r)) ? [] : spec.format(cells(r)).map((x) => (r.off ? x + " disabled" : x))))),
     };
@@ -2689,7 +2740,7 @@
     devices: {
       key: "devices", empty: "No devices.", wide: true,
       cols: [{ name: "Name", ph: "core-sw1" }, { name: "Platform", opts: PLATFORMS }, { name: "Address", ph: "10.0.0.2" }, { name: "Port", ph: "443", def: "443" },
-        { name: "Login", ph: "a login's name", list: "device-logins" }, { name: "Tags", ph: "site=dc1 role=core" }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
+        { name: "Login", ph: "a login's name", list: "device-logins" }, { name: "Tags", ph: "site=dc1 role=core", tags: true }, { name: "Certificate", opts: ["skip check", "check"] }, { name: "Options", ph: "serial=Q2XX-XXXX-XXXX" }],
       parse: (d) => {
         if (typeof d === "string") { const f = d.split(/\s+/); return [f[0] || "", f[1] || PLATFORMS[0], f[2] || "", f[3] || "", f[4] || "", "", "skip check", ""]; }
         return [d.name || "", d.platform || PLATFORMS[0], d.address || "", d.port ? String(d.port) : portDef(d.platform), d.credential || "", (d.tags || []).join(" "), d.insecure || !d.ca_pem ? "skip check" : "check", Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ")];
@@ -3493,12 +3544,39 @@
         if (ren.size) dt.retarget(ROW_TABLES.devices.cols.findIndex((c) => c.name === "Login"), ren);
         lt.commit();
       });
+      // the tags of the devices table as it stands now (rows not saved yet too): offered while a Tags box is typed in, and listed on the Tags tab
+      const tagCol = ROW_TABLES.devices.cols.findIndex((c) => c.name === "Tags");
+      ROW_TABLES.devices.tagsNow = () => devices.table("devices").words(tagCol);
+      const tagsBody = h("div", {});
+      const drawTags = () => {
+        const dt = devices.table("devices"), count = new Map();
+        for (const w of dt.words(tagCol)) count.set(w, (count.get(w) || 0) + 1);
+        const tags = [...count.keys()].sort((a, b) => a.localeCompare(b));
+        clear(tagsBody);
+        if (!tags.length) { tagsBody.append(h("div", { class: "policy-empty" }, "No tags yet. Type tags (site=dc1 role=core) in the Tags column of the Devices tab.")); return; }
+        tagsBody.append(h("table", { class: "policy zones tagtable" }, h("thead", {}, h("tr", {}, ["Tag", "Devices", ""].map((t) => h("th", {}, t)))),
+          h("tbody", {}, tags.map((t) => {
+            const inp = h("input", { type: "text", value: t, "aria-label": "Rename the tag " + t, autocomplete: "off", spellcheck: "false" });
+            inp.addEventListener("change", () => {
+              const n = inp.value.trim().replace(/[\s,]+/g, "");
+              if (!n || n === t) { inp.value = t; return; }
+              if (count.has(n) && !confirm("There is a tag " + n + " already. Merge " + t + " into it?")) { inp.value = t; return; }
+              dt.mapWords(tagCol, (w) => (w === t ? n : w));
+            });
+            const del = h("button", { type: "button", class: "btn small danger", onclick: () => { if (confirm("Remove the tag " + t + " from " + count.get(t) + " device" + (count.get(t) === 1 ? "" : "s") + "?")) dt.mapWords(tagCol, (w) => (w === t ? "" : w)); } }, "Remove");
+            return h("tr", {}, h("td", {}, inp), h("td", { class: "num" }, String(count.get(t))), h("td", {}, del));
+          }))));
+      };
+      devices.el.addEventListener("change", drawTags);
+      drawTags();
       const devcheck = fieldset(DEVCHECK_FIELDS, { device_check_s: set.device_check_s, device_facts_min: set.device_facts_min, device_live_check_s: set.device_live_check_s, device_live_facts_min: set.device_live_facts_min });
       const devcheckShared = () => { const c = devcheck.get(), o = {}; for (const k of ["device_live_check_s", "device_live_facts_min", "device_check_s", "device_facts_min"]) if (c[k] > 0) o[k] = c[k]; return o; };
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
       const snmp = fieldset(SNMP_FIELDS, { snmp_communities: set.snmp_communities, snmp_acl: set.snmp_acl, snmp_contact: set.snmp_contact, location: (cfg.snmp || {}).location });
       const prom = fieldset(PROM_FIELDS, { metrics_acl: set.metrics_acl });
       const mcp = fieldset(MCP_FIELDS, { mcp_port: set.mcp_port, mcp_max_result_mb: set.mcp_max_result_mb, mcp_log: !!set.mcp_log, mcp_log_mb: set.mcp_log_mb, mcp_log_entry_kb: set.mcp_log_entry_kb, mcp_acl: set.mcp_acl, mcp_keys: set.mcp_keys });
+      const topo = fieldset(TOPO_FIELDS, { topology_squares_above: set.topology_squares_above });
+      const topoShared = () => { const n = topo.get().topology_squares_above; return n > 0 && n !== 36 ? { topology_squares_above: n } : {}; };
       const lldp = fieldset(LLDP_FIELDS, { lldp: !!set.lldp });
       const priv = privacyForm(set.privacy);
       const privShared = () => { const p = priv.get(); return p ? { privacy: p } : {}; };
@@ -3565,7 +3643,7 @@
         ...logs.get(),
         // keep what this form has no fields for (pauses, removed nodes, the order of the nodes, anycast addresses)
         groups: groups.map((g) => ({ ...(g.orig.paused ? { paused: true } : {}), ...(g.orig.paused_all ? { paused_all: true } : {}), ...(g.orig.excluded_nodes ? { excluded_nodes: g.orig.excluded_nodes } : {}), ...(g.orig.node_order ? { node_order: g.orig.node_order } : {}), ...(g.orig.paused_vips ? { paused_vips: g.orig.paused_vips } : {}), ...(g.orig.paused_vips_here ? { paused_vips_here: g.orig.paused_vips_here } : {}), ...(g.orig.extra_vips ? { extra_vips: g.orig.extra_vips } : {}), ...keptDevices(g.orig), ...g.fs.get() })),
-        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...devcheckShared(), ...snmpShared(), ...lldpShared(), ...privShared(), ...alertsShared(), ...backupShared() },
+        settings: { ...(set.schedule ? { schedule: set.schedule } : {}), ...devices.get(), ...devcreds.get(), ...devcheckShared(), ...snmpShared(), ...lldpShared(), ...topoShared(), ...privShared(), ...alertsShared(), ...backupShared() },
         // the certificate is managed under Web GUI; keep any file paths already in the config
         web: { cert_file: cfg.web.cert_file || "", key_file: cfg.web.key_file || "", ...web.get(), ...sso.get(), ...ldap.get() },
         cluster: cluster.get(),
@@ -3635,9 +3713,9 @@
         show(state.monTab >= 0 && state.monTab < TABS.length ? state.monTab : 0);
         return h("div", {}, strip, ...panes);
       };
-      // the Devices page is three tabs: Devices, Logins and Checks (every table stays in the page, so a save reads them all)
+      // the Devices page is four tabs: Devices, Logins, Checks and Tags (every table stays in the page, so a save reads them all)
       const devicesTabs = () => {
-        const TABS = [["Devices", section("Devices", devices.el, loginList)], ["Logins", section("Logins", devcreds.el)], ["Checks", section("Checks", devcheck.el)]];
+        const TABS = [["Devices", section("Devices", devices.el, loginList)], ["Logins", section("Logins", devcreds.el)], ["Checks", section("Checks", devcheck.el)], ["Tags", section("Tags", tagsBody)]];
         const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
         function show(i, focus) {
@@ -3682,7 +3760,7 @@
       // the Settings page is tabs (every card stays in the page, so a save reads all of them)
       const settingsTabs = () => {
         const TABS = [
-          ["general", "General", h("div", {}, section("Neighbor discovery", lldp.el, h("p", { class: "f" }, lldpState)))],
+          ["general", "General", h("div", {}, section("Neighbor discovery", lldp.el, h("p", { class: "f" }, lldpState)), section("Topology", topo.el))],
           ["logs", "Logs", h("div", {}, section("Log level", logs.el),
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
