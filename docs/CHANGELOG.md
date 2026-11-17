@@ -1,5 +1,19 @@
 # Changelog
 
+## [v209] - 2026-11-17 — FortiGate VPN status and VPN log can be read over MCP
+
+### Fixed
+- An assistant could not read a FortiGate's tunnel state or VPN event log: `device_api_get` refused every path with `vpn` or `ipsec` in it, as holding secrets ("path: "vpn" holds secrets…"). That is right for the configuration of a tunnel (`cmdb/vpn.ipsec`, which holds the pre-shared key) but not for the monitor and the log. These are now readable on a FortiGate: `/api/v2/monitor/vpn/ipsec` (and `/select`), `/api/v2/monitor/vpn/ssl` (and `/stats`), `/api/v2/monitor/vpn/ike` (and `/gateway`), and `/api/v2/log/{disk,memory,fortianalyzer,forticloud}/event/vpn` (and `/raw`). Only those exact paths; the answer is still scrubbed of secrets and of public addresses like every other read.
+- Still refused, on purpose: the VPN configuration (`cmdb/vpn…`), VPN certificates, SNMP, users, and any other path under `vpn`. Other platforms are unchanged.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; a test checks the allowed paths (also in capitals) and that the configuration, a certificate, `..` paths, tunnel-changing endpoints and other platforms stay refused.
+
+### Not verified
+- Against a real FortiGate: the paths are from FortiOS's monitor and log API names, and a release may name one otherwise (then the FortiGate answers with its own error). On PAN-OS the same block on `deviceconfig` and `vpn` is unchanged; say if its tunnel status (`show vpn ipsec-sa`) is needed too.
+
+---
+
 ## [v208] - 2026-11-17 — Add device ▸ Devices from inventory has a filter
 
 ### Added

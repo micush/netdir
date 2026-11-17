@@ -173,8 +173,16 @@ func CheckAPIPathMCPFor(platform, p string) error {
 	if ownPathGuard[platform] {
 		return nil
 	}
+	if platform == "fortios" && fortiVPNStatusRE.MatchString(strings.ToLower(strings.TrimSpace(strings.SplitN(p, "?", 2)[0]))) {
+		return nil
+	}
 	return CheckAPIPathMCP(p)
 }
+
+// fortiVPNStatusRE are the FortiOS reads about VPN tunnels that hold no secret: the monitor (which tunnels are up, their traffic and
+// peers) and the VPN event log.  The "vpn" and "ipsec" words are refused elsewhere because the configuration of a tunnel (cmdb
+// vpn.ipsec) holds its pre-shared key; the monitor and the log do not.  Anything else under vpn stays refused.
+var fortiVPNStatusRE = regexp.MustCompile(`^/api/v2/(monitor/vpn/(ipsec(/select)?|ssl(/stats)?|ike(/gateway)?)|log/(disk|memory|fortianalyzer|forticloud)/event/vpn(/raw)?)/?$`)
 
 // CheckAPIPathMCP is CheckAPIPath for a caller that must not see secrets: the whole configuration, and the parts of the
 // API that hold users, keys, certificates, SNMP and AAA, are refused.  The named tools (ports, routing, firewall, ...) read
