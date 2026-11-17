@@ -1,5 +1,19 @@
 # Changelog
 
+## [v204] - 2026-11-17 — dig works on nodes whose dig refuses "--"
+
+### Fixed
+- `net_dig` (and the dig in the GUI) put `--` before the name on dig's command line. Some dig builds answer "Invalid option: --" and show their usage text, so every query on those nodes failed, with or without a server. The name now goes on the command line bare. It cannot be taken for an option: every label of a checked name starts with a letter, a digit or `_`, and the tests check that `-x`, `-f…`, `+short` and `a.-b` are refused.
+- The other tools (ping, mtr, curl, nmap) still use `--`; those programs all accept it.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; a test of the command line.
+
+### Not verified
+- Against the dig on the affected nodes: I could not see which build they have. If a query still fails there, the error text will now be dig's own.
+
+---
+
 ## [v203] - 2026-11-17 — Two cut-off labels
 
 ### Fixed

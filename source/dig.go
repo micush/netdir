@@ -27,36 +27,9 @@ var digTypes = map[string]bool{"A": true, "AAAA": true, "MX": true, "NS": true, 
 var digLabelRe = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$`)
 
 func digRun(name, qtype, server string) (map[string]any, error) {
-	name = strings.TrimSuffix(strings.TrimSpace(name), ".")
-	qtype = strings.ToUpper(strings.TrimSpace(qtype))
-	server = strings.TrimSpace(server)
-	if qtype == "" {
-		qtype = "A"
-	}
-	if !digTypes[qtype] {
-		return nil, errors.New("type: A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, CAA, DS, DNSKEY, NAPTR, TLSA or SPF")
-	}
-	args := []string{"+time=3", "+tries=1"}
-	if server != "" {
-		a, err := netip.ParseAddr(server)
-		if err != nil || a.Zone() != "" {
-			return nil, errors.New("server: an IP address")
-		}
-		args = append(args, "@"+a.String())
-	}
-	if a, err := netip.ParseAddr(name); err == nil && a.Zone() == "" { // an address is asked for its name
-		args = append(args, "-x", a.String())
-		qtype = "PTR"
-	} else {
-		if name == "" || len(name) > 253 {
-			return nil, errors.New("name: a host or domain name, or an IP address")
-		}
-		for _, l := range strings.Split(name, ".") {
-			if !digLabelRe.MatchString(l) {
-				return nil, fmt.Errorf("name: %q is not a host or domain name or an IP address", name)
-			}
-		}
-		args = append(args, "--", name, qtype)
+	args, name, qtype, err := digArgs(name, qtype, server)
+	if err != nil {
+		return nil, err
 	}
 	path, err := exec.LookPath("dig")
 	if err != nil {
@@ -65,6 +38,47 @@ func digRun(name, qtype, server string) (map[string]any, error) {
 		}
 		return nil, errors.New("dig is not installed on this node (install the bind9-dnsutils package; bind-utils on the RHEL family)")
 	}
+	return digExec(path, args, name, qtype, strings.TrimSpace(server))
+}
+
+// digArgs checks the request and builds dig's command line.  There is no "--" before the name: some dig builds refuse it ("Invalid
+// option: --"), and a name cannot be taken for an option anyway: every label starts with a letter, a digit or "_".
+func digArgs(name, qtype, server string) (args []string, nameOut, qtypeOut string, err error) {
+	name = strings.TrimSuffix(strings.TrimSpace(name), ".")
+	qtype = strings.ToUpper(strings.TrimSpace(qtype))
+	server = strings.TrimSpace(server)
+	if qtype == "" {
+		qtype = "A"
+	}
+	if !digTypes[qtype] {
+		return nil, "", "", errors.New("type: A, AAAA, MX, NS, TXT, CNAME, SOA, PTR, SRV, CAA, DS, DNSKEY, NAPTR, TLSA or SPF")
+	}
+	args = []string{"+time=3", "+tries=1"}
+	if server != "" {
+		a, err := netip.ParseAddr(server)
+		if err != nil || a.Zone() != "" {
+			return nil, "", "", errors.New("server: an IP address")
+		}
+		args = append(args, "@"+a.String())
+	}
+	if a, err := netip.ParseAddr(name); err == nil && a.Zone() == "" { // an address is asked for its name
+		args = append(args, "-x", a.String())
+		qtype = "PTR"
+	} else {
+		if name == "" || len(name) > 253 {
+			return nil, "", "", errors.New("name: a host or domain name, or an IP address")
+		}
+		for _, l := range strings.Split(name, ".") {
+			if !digLabelRe.MatchString(l) {
+				return nil, "", "", fmt.Errorf("name: %q is not a host or domain name or an IP address", name)
+			}
+		}
+		args = append(args, name, qtype)
+	}
+	return args, name, qtype, nil
+}
+
+func digExec(path string, args []string, name, qtype, server string) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), digTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)

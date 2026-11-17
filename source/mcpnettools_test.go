@@ -146,7 +146,7 @@ func TestMCPNetToolsRun(t *testing.T) {
 	if txt := call("net_scan", `{"host":"10.1.1.1"}`); !strings.Contains(txt, `"state":"done"`) || !strings.Contains(txt, "22/tcp") {
 		t.Errorf("net_scan: %s", txt)
 	}
-	if txt := call("net_dig", `{"name":"example.com","type":"mx","server":"10.0.0.53","gateway":"161"}`); !strings.Contains(txt, "+time=3 +tries=1 @10.0.0.53 -- example.com MX") || !strings.Contains(txt, "x.x.x.x") {
+	if txt := call("net_dig", `{"name":"example.com","type":"mx","server":"10.0.0.53","gateway":"161"}`); !strings.Contains(txt, "+time=3 +tries=1 @10.0.0.53 example.com MX") || !strings.Contains(txt, "x.x.x.x") {
 		t.Errorf("net_dig: %s", txt)
 	}
 	if txt := call("net_dig", `{"name":"10.1.1.1"}`); !strings.Contains(txt, "-x 10.1.1.1") {
