@@ -352,7 +352,9 @@ func staleToUnknown(m map[string]device.Health, now time.Time, stale time.Durati
 }
 
 // lookAtDevices says that someone asked about the devices (an MCP or GUI request): the nodes check on the short intervals.
-func lookAtDevices() {
+var lookAtDevices = realLookAtDevices
+
+func realLookAtDevices() {
 	devHealth.Touch()
 	if clusterOn() {
 		go deviceHealth(true)
@@ -373,19 +375,10 @@ func recheckTarget(name string) string {
 	if !clusterOn() {
 		return ""
 	}
-	own := devHealth.Snapshot()[name].Checked
-	best, at := "", own
-	peerHealth.mu.Lock()
-	for addr, e := range peerHealth.m {
-		if h, ok := e.data[name]; ok && h.Checked > at {
-			best, at = addr, h.Checked
-		}
-	}
-	peerHealth.mu.Unlock()
-	if best != "" {
+	if best := checkerOf(name); best != "" {
 		return best
 	}
-	if own > 0 {
+	if devHealth.Snapshot()[name].Checked > 0 {
 		return ""
 	}
 	if healthMg == nil || healthMg.cl == nil {
@@ -396,6 +389,27 @@ func recheckTarget(name string) string {
 		return ""
 	}
 	return snap.PrimaryAddr
+}
+
+// checkerOf is the other node that checks a device: the one whose report of it is the newest, and newer than this node's own.  "" when
+// this node checks it, or when no other node has reported it lately (then this node asks the device itself).  A device request goes to
+// that node, so it is made from the site the device belongs to.
+func checkerOf(name string) string {
+	if !clusterOn() {
+		return ""
+	}
+	own := devHealth.Snapshot()[name].Checked
+	best, at := "", own
+	stale := devHealth.StaleAfter().Seconds()
+	now := time.Now().Unix()
+	peerHealth.mu.Lock()
+	for addr, e := range peerHealth.m {
+		if h, ok := e.data[name]; ok && h.Checked > at && float64(now-h.Checked) <= stale {
+			best, at = addr, h.Checked
+		}
+	}
+	peerHealth.mu.Unlock()
+	return best
 }
 
 // handleDeviceRecheck: POST /api/devices/recheck {"name"} — ask that device again now, whatever its state: its facts are asked at

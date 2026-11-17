@@ -73,7 +73,9 @@ type proxyReq struct {
 	Path   string `json:"path"` // /api/...?query
 	CT     string `json:"ct,omitempty"`
 	Body   []byte `json:"body,omitempty"`
-	RO     bool   `json:"ro,omitempty"` // the user is on a read-only account: the other node holds the line too
+	RO     bool   `json:"ro,omitempty"`  // the user is on a read-only account: the other node holds the line too
+	MCP    bool   `json:"mcp,omitempty"` // an MCP caller: never handed a device's secrets (devices.go sends a device request to the node that checks it)
+	Raw    bool   `json:"raw,omitempty"` // an MCP caller whose privacy level is none
 }
 
 type proxyResp struct {
@@ -103,7 +105,7 @@ func (c *Cluster) handleProxy(rw http.ResponseWriter, r *http.Request, caller Cl
 	if len(user) > maxUsernameLen || user == "" || strings.ContainsAny(user, " \r\n\t") {
 		user = "unknown"
 	}
-	s := &session{user: user + " via " + caller.Addr, readOnly: req.RO}
+	s := &session{user: user + " via " + caller.Addr, readOnly: req.RO, mcp: req.MCP, raw: req.Raw, hop: true}
 	ctx := context.WithValue(r.Context(), proxyCtxKey{}, s)
 	in, err := http.NewRequestWithContext(ctx, req.Method, req.Path, bytes.NewReader(req.Body))
 	if err != nil {

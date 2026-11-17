@@ -34,7 +34,7 @@ type deviceRawArgs struct {
 }
 
 func (m *Mgmt) deviceRaw(raw json.RawMessage, actor string) (any, error) {
-	return m.withBelow("device_change_raw", raw, actor, m.deviceRawHere)
+	return m.withBelow("device_change_raw", raw, actor, m.viaCheckers("raw", m.deviceRawHere))
 }
 
 // deviceRawHere is deviceRaw for this director's own devices.

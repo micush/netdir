@@ -33,7 +33,7 @@ type deviceCaptureArgs struct {
 }
 
 func (m *Mgmt) deviceCapture(raw json.RawMessage, actor string) (any, error) {
-	return m.withBelow("device_capture", raw, actor, m.deviceCaptureHere)
+	return m.withBelow("device_capture", raw, actor, m.viaCheckers("capture", m.deviceCaptureHere))
 }
 
 // deviceCaptureHere is deviceCapture for this director's own devices.

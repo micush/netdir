@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -440,5 +442,135 @@ func TestRecheckTargetIsTheNodeThatChecks(t *testing.T) {
 	peerHealth.mu.Unlock()
 	if got := recheckTarget("x"); got != "n2" {
 		t.Fatalf("recheck goes to %q, want n2 (the newest report)", got)
+	}
+}
+
+// A device request goes to the node that checks the device, as the caller made it, and a node that does not answer is skipped.
+func TestDeviceQueryGoesToTheNodeThatChecks(t *testing.T) {
+	now := time.Now().Unix()
+	stubCluster(t, false, []PeerView{peerOf("n2")}, func(string, bool) (map[string]device.Health, bool) {
+		return map[string]device.Health{"far": {Status: "ok", Checked: now}}, true
+	})
+	oldLook := lookAtDevices // a request starts a look at the devices in the background: not here, it would outlive the stand-in cluster
+	lookAtDevices = func() {}
+	t.Cleanup(func() { lookAtDevices = oldLook })
+	peerReport(peerOf("n2"), false)
+	time.Sleep(100 * time.Millisecond)
+	if got := checkerOf("far"); got != "n2" {
+		t.Fatalf("checker of far: %q, want n2", got)
+	}
+	if got := checkerOf("near"); got != "" {
+		t.Fatalf("a device no other node reports is asked from here, got %q", got)
+	}
+	dc := newDaemonConfig()
+	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "u", Password: "pw"}}
+	dc.Settings.Devices = []device.Device{{Name: "far", Platform: "iosxe", Address: "127.0.0.1", Port: 1, Credential: "lab"}}
+	attachDevices(dc)
+	w := &WebServer{status: &StatusServer{sup: &Supervisor{dc: dc}}}
+	ask := func(s *session) (map[string]any, string) {
+		rec := httptest.NewRecorder()
+		w.handleDeviceQuery(rec, httptest.NewRequest(http.MethodGet, "/api/devices/query?op=facts&target=all", nil), s)
+		var out struct{ Data map[string]any }
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Data, rec.Body.String()
+	}
+	oldRelay := relayDevices
+	t.Cleanup(func() { relayDevices = oldRelay })
+	var seen proxyReq
+	var seenAddr string
+	relayDevices = func(_ context.Context, addr string, req proxyReq) (*proxyResp, error) {
+		seen, seenAddr = req, addr
+		return &proxyResp{Status: 200, Body: []byte(`{"ok":true,"data":{"op":"facts","results":[{"device":"far","ok":true,"data":{"from":"n2"}}]}}`)}, nil
+	}
+	data, body := ask(&session{user: "ann", mcp: true, readOnly: true})
+	if seenAddr != "n2" || !seen.MCP || !seen.RO || seen.Raw || !strings.Contains(seen.Path, "target=far") || !strings.Contains(seen.Path, "op=facts") {
+		t.Fatalf("relayed to %q: %+v", seenAddr, seen)
+	}
+	if !strings.Contains(body, `"from":"n2"`) || data["asked"].(float64) != 1 {
+		t.Fatalf("the node's answer is not the result: %s", body)
+	}
+	// handed over by another node: not handed on again, whatever the reports say
+	seenAddr = ""
+	ask(&session{user: "ann via n3", hop: true})
+	if seenAddr != "" {
+		t.Fatalf("a request handed over by a node was handed on to %s", seenAddr)
+	}
+	// the node does not answer: this node asks the device itself (nothing listens on port 1: the answer is a failure, not the node's)
+	relayDevices = func(context.Context, string, proxyReq) (*proxyResp, error) { return nil, errors.New("down") }
+	_, body = ask(&session{user: "ann"})
+	if strings.Contains(body, `"from":"n2"`) || !strings.Contains(body, `"asked":1`) {
+		t.Fatalf("no fallback to this node: %s", body)
+	}
+}
+
+// A report that is too old does not send the request away: the node that checked may be gone.
+func TestCheckerOfIgnoresAStaleReport(t *testing.T) {
+	stubCluster(t, false, []PeerView{peerOf("n2")}, func(string, bool) (map[string]device.Health, bool) {
+		return map[string]device.Health{"far": {Status: "ok", Checked: time.Now().Add(-time.Hour).Unix()}}, true
+	})
+	peerReport(peerOf("n2"), false)
+	time.Sleep(100 * time.Millisecond)
+	if got := checkerOf("far"); got != "" {
+		t.Fatalf("an hour-old report sends the request to %q", got)
+	}
+}
+
+// A change is made by the node that checks each device; a node that does not answer is reported, never replaced by this node.
+func TestWritesGoToTheNodeThatChecks(t *testing.T) {
+	now := time.Now().Unix()
+	stubCluster(t, false, []PeerView{peerOf("n2")}, func(string, bool) (map[string]device.Health, bool) {
+		return map[string]device.Health{"far": {Status: "ok", Checked: now}}, true
+	})
+	peerReport(peerOf("n2"), false)
+	time.Sleep(100 * time.Millisecond)
+	dc := newDaemonConfig()
+	dc.Settings.Devices = []device.Device{{Name: "far", Platform: "iosxe"}, {Name: "near", Platform: "iosxe"}, {Name: "off", Platform: "iosxe", Disabled: true}}
+	attachDevices(dc)
+	var hereGot []string
+	here := func(raw json.RawMessage, actor string) (any, error) {
+		var a struct{ Target string }
+		json.Unmarshal(raw, &a)
+		hereGot = append(hereGot, a.Target)
+		var rs []map[string]any
+		for _, n := range strings.Split(a.Target, ",") {
+			rs = append(rs, map[string]any{"device": n, "ok": true})
+		}
+		return map[string]any{"op": "change", "dry_run": true, "asked": len(rs), "failed": 0, "results": rs}, nil
+	}
+	oldRelay := relayDevices
+	t.Cleanup(func() { relayDevices = oldRelay })
+	var seenAddr, seenPath, seenBody string
+	relayDevices = func(_ context.Context, addr string, req proxyReq) (*proxyResp, error) {
+		seenAddr, seenPath, seenBody = addr, req.Path, string(req.Body)
+		return &proxyResp{Status: 200, Body: []byte(`{"ok":true,"data":{"op":"change","dry_run":true,"asked":1,"failed":0,"results":[{"device":"far","ok":true,"data":"by n2"}]}}`)}, nil
+	}
+	v, err := routeByChecker(dc, "change", json.RawMessage(`{"target":"far,near","text":"x","dry_run":true}`), "ann", here)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := json.Marshal(v)
+	if seenAddr != "n2" || seenPath != "/api/devices/change" || !strings.Contains(seenBody, `"target":"far"`) || !strings.Contains(seenBody, `"text":"x"`) {
+		t.Fatalf("relayed to %q %s %s", seenAddr, seenPath, seenBody)
+	}
+	if len(hereGot) != 1 || hereGot[0] != "near" {
+		t.Fatalf("this node made %v, want only near", hereGot)
+	}
+	if !strings.Contains(string(out), `"asked":2`) || !strings.Contains(string(out), `by n2`) || !strings.Contains(string(out), `"dry_run":true`) {
+		t.Fatalf("answers not put together: %s", out)
+	}
+	// the node does not answer: the device is reported and never changed from here
+	hereGot = nil
+	relayDevices = func(context.Context, string, proxyReq) (*proxyResp, error) { return nil, errors.New("down") }
+	v, _ = routeByChecker(dc, "change", json.RawMessage(`{"target":"far","text":"x"}`), "ann", here)
+	out, _ = json.Marshal(v)
+	if len(hereGot) != 0 || !strings.Contains(string(out), `"failed":1`) || !strings.Contains(string(out), "did not confirm") {
+		t.Fatalf("a change was made from here, or not reported: %v %s", hereGot, out)
+	}
+	// a disabled device refuses the whole request, as before; a request handed over by a node is not handed on
+	hereGot, seenAddr = nil, ""
+	routeByChecker(dc, "change", json.RawMessage(`{"target":"far,off"}`), "ann", here)
+	(&Mgmt{}).viaCheckers("change", here)(json.RawMessage(`{"target":"far"}`), "ann via n3")
+	if seenAddr != "" || len(hereGot) != 2 {
+		t.Fatalf("handed on: %q %v", seenAddr, hereGot)
 	}
 }

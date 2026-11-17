@@ -1,5 +1,52 @@
 # Changelog
 
+## [v202] - 2026-11-17 — Version bump
+
+### Changed
+- The version number only; the program is the same as v201.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo and the cross-compiles, as for v201.
+
+---
+
+## [v201] - 2026-11-17 — Device changes and captures come from the device's own site too
+
+### Changed
+- In a cluster `device_change`, `device_change_raw` and `device_capture` (and the same from the GUI, the CLI and the API) are carried out by the node that checks each device, as the reads have been since v200. The node that got the request makes the change on its own devices, hands the others to the nodes that check them and puts the answers together (one answer per device, `dry_run` and `change` as before). The caller needs the same access as before; the node that makes the change logs it as "user via node".
+- Unlike a read, a device whose node does not answer is never done from the node that got the request: it is reported as "did not confirm … may or may not have been made", so a change that may have been made is not made twice. Look at the device before asking again.
+- A request that mentions a disabled device is refused as a whole, as before, and a capture on more than 10 devices too.
+- `device_troubleshoot_user` is still carried out by the node that got the request.
+
+### Fixed
+- On a gateway drawn as small squares (more devices than the threshold), a disabled or paused device was a hollow square that only took the pointer on its 1 px outline, so it was hard to hover. It now takes the pointer over its whole area.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; a test for the split, the put-together answer, no fallback and no second hand-over.
+
+### Not verified
+- A real cluster with nodes on separate sites; a change or capture through another node on a real device.
+
+---
+
+## [v200] - 2026-11-17 — Device requests come from the device's own site
+
+### Changed
+- In a cluster a device request (`device_facts`, `device_interfaces`, `device_ports`, `device_neighbors`, `device_routes`, `device_firewall`, `device_show`, `device_config` and the other reads, over MCP, the API and the GUI) is carried out by the node that checks the device, whichever node it arrives on. The node that got it hands the devices of another site to that node (`GET /api/devices/query` over the cluster channel) and puts the answers together. The caller's limits go along: an MCP caller stays one (no secrets; the privacy level too) and a read-only account stays read-only; what a key may not use is dropped before anything is sent.
+- A node that does not answer is skipped: the node that got the request asks those devices itself. A device that no other node has reported lately is asked from the node that got the request. A request that another node handed over is never handed on.
+- A request to a device that no other node checks, and any request outside a cluster, behaves as before.
+
+### Not changed
+- `device_change`, `device_change_raw` and `device_capture` (writes) and `device_troubleshoot_user` are still carried out by the node that got the request.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; tests for who checks a device, the hand-over with the caller's limits, no second hand-over, the fallback and a report too old to send the request away.
+
+### Not verified
+- A real cluster with the nodes on separate sites. A node on an older version ignores the MCP flags it is sent; netdir hides secrets in the answer again on the node that got the request.
+
+---
+
 ## [v199] - 2026-11-16 — AND, OR and ! in every filter box
 
 ### Added

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -183,6 +184,40 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 			w.status.sup.askBelow(r.Context(), picked, rem, creds, directorsHere(allDevs), op, cmd, to, got)
 		}()
 	}
+	// in a cluster a device is asked by the node that checks it: the devices of another site are handed to a node of that site, so the
+	// request comes from where the device is.  A node that does not answer is skipped: this node asks those devices itself.
+	var viaMu sync.Mutex
+	via := map[string]device.Result{}
+	var failedVia []device.Device
+	if !s.hop && clusterOn() {
+		var mine []device.Device
+		byNode := map[string][]device.Device{}
+		for _, d := range here {
+			if addr := checkerOf(d.Name); addr != "" {
+				byNode[addr] = append(byNode[addr], d)
+			} else {
+				mine = append(mine, d)
+			}
+		}
+		here = mine
+		for addr, ds := range byNode {
+			gwg.Add(1)
+			go func(addr string, ds []device.Device) {
+				defer gwg.Done()
+				got, err := askNodeDevices(r.Context(), addr, q, ds, s, w.ro(s), to)
+				viaMu.Lock()
+				defer viaMu.Unlock()
+				if err != nil {
+					warnf("devices: node %s could not be asked for %d devices (%v): asking them from here", addr, len(ds), err)
+					failedVia = append(failedVia, ds...)
+					return
+				}
+				for k, v := range got {
+					via[k] = v
+				}
+			}(addr, ds)
+		}
+	}
 	// an assistant often asks the same thing twice: what a device answered a moment ago is given again, with its age (answercache.go)
 	byLocal := map[string]device.Result{}
 	keys := map[string]string{}
@@ -219,6 +254,17 @@ func (w *WebServer) handleDeviceQuery(rw http.ResponseWriter, r *http.Request, s
 		return v, err
 	})
 	gwg.Wait()
+	for k, v := range via {
+		byLocal[k] = v
+	}
+	if len(failedVia) > 0 {
+		for _, x := range device.FanoutReuse(r.Context(), failedVia, creds, deviceParallel, to, func(ctx context.Context, d device.Driver) (v any, err error) {
+			device.RunRaw(s.raw, func() { v, err = runDeviceOp(ctx, d, op, cmd, s.readOnly, s.mcp && !s.raw) })
+			return v, err
+		}) {
+			byLocal[strings.ToLower(x.Device)] = x
+		}
+	}
 	for _, x := range local {
 		k := strings.ToLower(x.Device)
 		byLocal[k] = x
@@ -416,4 +462,55 @@ func runDeviceOp(ctx context.Context, d device.Driver, op, cmd string, readOnly,
 		return nil, errors.New("this platform's API runs no CLI commands; use facts, interfaces, ports, neighbors, routes or config (over MCP: device_config)")
 	}
 	return v, err
+}
+
+// relayDevices sends a request to another node (a variable so a test can stand in for the cluster).
+var relayDevices = func(ctx context.Context, addr string, req proxyReq) (*proxyResp, error) {
+	if healthMg == nil || healthMg.cl == nil {
+		return nil, errors.New("this node is not in a cluster")
+	}
+	return healthMg.cl.Relay(ctx, addr, req)
+}
+
+// askNodeDevices asks the node at addr the same device request for these devices (named exactly), as the caller made it: an MCP
+// caller stays one there (no secrets), a read-only account stays read-only.  Whatever the caller could not use was dropped here already.
+func askNodeDevices(ctx context.Context, addr string, q url.Values, devs []device.Device, s *session, ro bool, to time.Duration) (map[string]device.Result, error) {
+	v := url.Values{}
+	for k, vals := range q {
+		v[k] = vals
+	}
+	names := make([]string, 0, len(devs))
+	for _, d := range devs {
+		names = append(names, d.Name)
+	}
+	v.Set("target", strings.Join(names, ","))
+	user := "devices"
+	if f := strings.Fields(s.user); len(f) > 0 {
+		user = f[0]
+	}
+	cctx, cancel := context.WithTimeout(ctx, to+10*time.Second)
+	defer cancel()
+	resp, err := relayDevices(cctx, addr, proxyReq{User: user, Method: http.MethodGet, Path: "/api/devices/query?" + v.Encode(), RO: ro, MCP: s.mcp, Raw: s.raw})
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Results []device.Result `json:"results"`
+		} `json:"data"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body, &out); err != nil || resp.Status != http.StatusOK || !out.OK {
+		msg := out.Error
+		if msg == "" {
+			msg = "status " + strconv.Itoa(resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+	got := map[string]device.Result{}
+	for _, x := range out.Data.Results {
+		got[strings.ToLower(x.Device)] = x
+	}
+	return got, nil
 }

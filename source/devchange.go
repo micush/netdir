@@ -80,7 +80,7 @@ func describeChange(c device.Change) string {
 
 // deviceChange plans or makes the change on the devices the target picks.
 func (m *Mgmt) deviceChange(raw json.RawMessage, actor string) (any, error) {
-	return m.withBelow("device_change", raw, actor, m.deviceChangeHere)
+	return m.withBelow("device_change", raw, actor, m.viaCheckers("change", m.deviceChangeHere))
 }
 
 // deviceChangeHere is deviceChange for this director's own devices.

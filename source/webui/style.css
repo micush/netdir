@@ -311,7 +311,7 @@ svg.cv .shape.st-paused text.t1 { fill: var(--muted); }
 /* more than 36 devices: a small square each, filled with its colour; the full-size one beside the pointer is .hovcard (it never takes the pointer) */
 svg.cv .shape.dotsq rect { stroke-width: 1; fill: var(--muted); stroke: var(--surface-2); }
 svg.cv .shape.dotsq.st-ok rect { fill: var(--ok); } svg.cv .shape.dotsq.st-warn rect { fill: var(--amber); } svg.cv .shape.dotsq.st-bad rect { fill: var(--bad); }
-svg.cv .shape.dotsq.st-paused rect { fill: none; stroke: var(--muted); stroke-dasharray: none; }
+svg.cv .shape.dotsq.st-paused rect { fill: none; stroke: var(--muted); stroke-dasharray: none; pointer-events: all; }   /* a hollow square takes the pointer over its whole area, not only its 1 px outline */
 svg.cv .shape.dotsq.sel rect, svg.cv .shape.dotsq:hover rect { stroke: var(--accent); stroke-width: 2.5; }
 svg.cv .shape.dotsq:focus-visible rect { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: none; }
 svg.cv .shape.hovcard { pointer-events: none; }

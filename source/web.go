@@ -115,6 +115,7 @@ type session struct {
 	mcp      bool      // an MCP caller (mcp.go): never handed a device's secrets
 	raw      bool      // an MCP caller whose privacy level is none: configurations come as the device gives them
 	devs     *devScope // the devices an MCP caller may use (devscope.go); nil: all
+	hop      bool      // handed over by another node (proxy.go): it does not hand a device request on again
 	sso      bool      // signed in with Google or Entra ID (sso.go): user is an e-mail address, checked against the list of users
 }
 
