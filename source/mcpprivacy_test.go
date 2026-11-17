@@ -150,6 +150,7 @@ func TestMCPPrivacyLevels(t *testing.T) {
 		sup.mu.Lock()
 		sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "u", Password: "p"}}
 		sup.dc.Settings.Devices = []device.Device{{Name: "edge", Platform: "iosxe", Address: addr, Credential: "lab", Insecure: true}}
+		attachDevices(sup.dc)
 		sup.mu.Unlock()
 	}
 	list := func(post func(string, ...string) (int, map[string]any)) string {

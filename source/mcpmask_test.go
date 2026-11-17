@@ -75,6 +75,7 @@ func TestMCPMasksPublicAddresses(t *testing.T) {
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "u", Password: "p"}}
 	sup.dc.Settings.Devices = []device.Device{{Name: "edge", Platform: "iosxe", Address: "8.8.8.8", Credential: "lab", Insecure: true}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	_, m = post2(mcpCall("list_devices", `{}`))
 	txt, _ := toolResult(t, m)

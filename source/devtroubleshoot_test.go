@@ -124,8 +124,10 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 		{Name: "entra", Platform: "entra", Address: host, Port: pn, Credential: "app", Insecure: true, Options: map[string]string{"tenant": "t1", "login_host": srv.Listener.Addr().String()}},
 		{Name: "mer", Platform: "meraki", Address: host, Port: pn, Credential: "key", Insecure: true, Options: map[string]string{"org": "1"}},
 		{Name: "mer-sw", Platform: "meraki", Address: host, Port: pn, Credential: "key", Insecure: true, Options: map[string]string{"org": "1", "serial": "Q2AB-CDEF-GHIJ"}}}
+	attachDevices(dc)
 	if pan {
 		dc.Settings.Devices = append(dc.Settings.Devices, device.Device{Name: "pano", Platform: "panorama", Address: host, Port: pn, Credential: "pan", Insecure: true})
+		attachDevices(dc)
 	}
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)

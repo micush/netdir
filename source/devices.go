@@ -32,11 +32,19 @@ const (
 	deviceConfigTO = 90 * time.Second // a whole configuration can take a while on a big box
 )
 
-// devHealth keeps every device's health: each node checks every device on its own (device.Monitor), so the colours on
-// its Topology page are what it can reach.  Started in main.
+// devHealth keeps every device's health: the controller of a device's gateway checks it (devicehealth.go) and every node
+// shows the results of all of them.  Started in main.
 var devHealth = device.NewMonitor()
 
 // deviceInventory is a copy of the inventory and the credentials.
+// offWhy says why a device is refused: "is disabled …" or, for one on no gateway, "is on no gateway …".
+func offWhy(d device.Device) string {
+	if d.Unattached {
+		return "is on no gateway: add it to a gateway first (Topology ▸ right-click the gateway ▸ Add device)"
+	}
+	return "is disabled: enable it first (Configure ▸ Devices)"
+}
+
 func (s *Supervisor) deviceInventory() ([]device.Device, []device.Credential) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -116,6 +116,7 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 		return device.Device{Name: n, Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true, Tags: []string{tag}}
 	}
 	sup.dc.Settings.Devices = []device.Device{mk("sw1", "site=home"), mk("sw2", "site=lab"), mk("sw3", "site=lab")}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	auth := func(k string) []string { return []string{"Authorization", "Bearer " + k} }
 	call := func(k, tool, args string) (string, bool) {

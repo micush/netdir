@@ -456,12 +456,12 @@ func run(dc *DaemonConfig, confFile, sockPath, stateDir string) error {
 	go memguard.Run(ctx.Done())
 	healthMg = mg
 	devHealth.Tune = sup.deviceTuning
-	devHealth.Active = checksHere
-	go devHealth.Run(ctx, sup.deviceInventory)
 	go downstreamLoop(ctx, sup)
 	go mg.sched.Run(ctx)
 
 	st := NewStatusServer(sockPath, sup)
+	healthCfg, healthRows = sup.config, st.snapshot
+	go devHealth.Run(ctx, sup.ownedInventory)
 	st.mg = mg
 	mg.gwIPsFn = func() []string {
 		var out []string

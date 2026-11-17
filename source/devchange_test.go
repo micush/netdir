@@ -102,6 +102,7 @@ func chgEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...strin
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "sw-secret-pw"}}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true, Tags: []string{"site=home"}},
 		{Name: "fw1", Platform: "nios", Address: host, Port: p, Credential: "lab", Insecure: true}}
+	attachDevices(dc)
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}

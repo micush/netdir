@@ -138,6 +138,7 @@ func TestTroubleshootWithActiveDirectory(t *testing.T) {
 	dc, _, _ := e.mg.LiveConfig()
 	dc.Settings.DeviceCredentials = append(dc.Settings.DeviceCredentials, device.Credential{Name: "adc", Username: "svc@corp.example.com", Password: "S3CRET"})
 	dc.Settings.Devices = append(dc.Settings.Devices, device.Device{Name: "ad", Platform: "ad", Address: h, Port: pn, Credential: "adc", Insecure: true})
+	attachDevices(dc)
 	if err := e.mg.PutConfig(dc, "test", "ad"); err != nil {
 		t.Fatal(err)
 	}

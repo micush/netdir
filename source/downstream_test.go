@@ -94,6 +94,7 @@ func TestChainedDirectorsAnswerForDevicesBelow(t *testing.T) {
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
 	sup.dc.Settings.Devices = []device.Device{nd3, {Name: "sw1", Platform: "iosxe", Address: "10.0.0.1", Credential: "k", Insecure: true}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 
 	_, m := post(mcpCall("list_devices", `{}`))
@@ -162,12 +163,14 @@ func TestChangeGoesDownForANamedDevice(t *testing.T) {
 	}
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
 	dc.Settings.Devices = []device.Device{nd3}
+	attachDevices(dc)
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}
 	sup := e.ws.status.sup // the index is made from the supervisor's copy, the change reads the live one
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials, sup.dc.Settings.Devices = dc.Settings.DeviceCredentials, dc.Settings.Devices
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	if list, _ := sup.remoteDevices(5*time.Second, true); len(list) == 0 {
 		t.Fatal("no index")
@@ -211,6 +214,7 @@ func TestDirectorBelowThatIsDown(t *testing.T) {
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
 	sup.dc.Settings.Devices = []device.Device{{Name: "nd9", Platform: "netdir", Address: "127.0.0.1", Port: 1, Credential: "k", Insecure: true}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	list, errs := sup.remoteDevices(5*time.Second, true)
 	if len(list) != 0 || errs["nd9"] == "" {
@@ -274,6 +278,7 @@ func TestMCPReadsPBSAdminTree(t *testing.T) {
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
 	sup.dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	for path, want := range map[string]string{"/admin/datastore": `"store"`, "/admin/datastore/backup/snapshots": `"backup-id"`} {
 		_, m := post(mcpCall("device_api_get", `{"target":"pbs1","path":"`+path+`"}`))
@@ -323,6 +328,7 @@ func TestMCPWritesPBSWithRW(t *testing.T) {
 		}
 		dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
 		dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
+		attachDevices(dc)
 		if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 			t.Fatal(err)
 		}

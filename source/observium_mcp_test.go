@@ -49,6 +49,7 @@ func TestMCPObserviumShowDevice(t *testing.T) {
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "obskey", Token: "OBSTOKEN"}}
 	sup.dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium", Address: host, Port: p, Credential: "obskey", Insecure: true}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 
 	_, m := post(mcpCall("device_show", `{"target":"obs","command":"show device ipam2"}`))

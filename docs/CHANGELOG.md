@@ -1,5 +1,59 @@
 # Changelog
 
+## [v199] - 2026-11-16 — AND, OR and ! in every filter box
+
+### Added
+- Every filter box in the GUI (Topology, Monitor ▸ Devices, the Configure tables including Tags, the user lists, and the Log) reads `AND`, `OR` and `!`: `phx AND !dns` shows what has phx and not dns. `AND` is optional (`phx !dns` is the same), `OR` takes either side (AND binds first) and `!word`, or `NOT word`, leaves out whatever contains the word. Note: in the Log box a plain word `not` is now an operator, not a word to find. `tag:` words work with `!` on Topology (`!tag:site=dc1`).
+- The Log filter already had AND and OR on the server; it now has `!` and `NOT` too.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; the filter parser checked on its own in Node.
+
+### Not verified
+- Clicking through each box in a browser: the Topology and Monitor boxes were not driven by a test.
+
+---
+
+## [v198] - 2026-11-17 — The gateway's controller checks its devices
+
+### Changed
+- In a cluster a device's health is now checked by the **controller of its gateway**, not by the primary, so the checks stay local to the site. A device on several gateways is checked by only one: the lowest-numbered gateway that holds it and is not paused on every node. For a gateway with both address families the IPv4 controller stands for it (the IPv6 one when the gateway has no IPv4 address). A controller keeps the job for 10 seconds after it loses the election, so a flapping election does not move the checks.
+- Every node still shows every device: it reads the other nodes' results over the cluster channel (`GET /api/devices/health`, per node, cached 10 s, older answer used while a new one is fetched) and the newest result of a device wins. The device's tooltip (Topology and Monitor ▸ Devices) says **Checked by** which node did it.
+- A result older than a few check intervals reads "not checked" (grey), for instance when the node that checked has gone.
+- The primary also checks any device that no other node reports lately, so a gateway whose nodes are all down, or a device whose gateway is paused, is still covered.
+- Recheck and "someone is looking" go to the node that checks the device.
+- A node outside a cluster checks all its devices, as before.
+- Help (Configure ▸ Devices ▸ Checks) and the README say so.
+
+### Fixed
+- Stale comment on `devHealth`.
+
+### Verified
+- `go test -race ./...`, gofmt, vet, no-cgo and cross-compiles (see below); new tests for the owner gateway, controller detection, the hold, the primary fallback, merging and stale results, and the per-node fetch.
+
+### Not verified
+- A real multi-node cluster with controllers on different nodes: only the logic is tested, with a stubbed cluster. After an upgrade the node that checks a device may change; a node that now checks devices will log in to them.
+
+---
+
+## [v197] - 2026-11-16 — A device on no gateway is not used
+
+### Changed
+- A device that is on no gateway is treated as disabled: it is never contacted (no health checks, no facts), left out of `list_devices` and the other device tools, and refused by a change, a raw change, a capture or a troubleshoot with "device X is on no gateway: add it to a gateway first". Before, the inventory as a whole was used and a gateway only grouped devices for the drawing and for `gateway:N` limits.
+- Monitor ▸ Devices shows such a device with a **no gateway** pill (and the filter finds it by those words); its state reads "on no gateway: never contacted". Putting it on a gateway takes effect within a few seconds, as enabling a device does.
+- The inventory itself is not changed: the saved device keeps its own Disabled setting, and Configure ▸ Devices lists every device.
+- A configuration with no gateway at all has no device in use.
+- Help (Configure ▸ Devices) says so.
+
+### Verified
+- Go: a device on a gateway is live, on no gateway is disabled and unattached, on another gateway is live, with no gateways none is; the saved inventory is never changed; the refusal texts. The existing device tests now put their devices on a gateway first (`attachDevices` in the tests).
+
+### Not verified
+- A cluster with several nodes after an upgrade: devices that were on no gateway stop being contacted at once (the other nodes' colours follow when they run this version).
+- The `/metrics` device series for an unattached device (it reads the same inventory, so it reports it as disabled).
+
+---
+
 ## [v196] - 2026-11-16 — Tags are pills; the filter box takes the focus when switching gateways
 
 ### Fixed

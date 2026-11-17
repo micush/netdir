@@ -66,7 +66,7 @@ func (m *Mgmt) deviceCaptureHere(raw json.RawMessage, actor string) (any, error)
 	}
 	for _, d := range picked {
 		if d.Disabled {
-			return nil, fmt.Errorf("device %s is disabled: enable it first (Configure ▸ Devices)", d.Name)
+			return nil, fmt.Errorf("device %s %s", d.Name, offWhy(d))
 		}
 	}
 	rq := device.CaptureReq{Interface: a.Interface, Filter: a.Filter, Seconds: a.Seconds, Packets: a.Packets}

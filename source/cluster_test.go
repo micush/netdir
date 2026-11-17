@@ -1016,6 +1016,7 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 		bc = b.cfg()
 		for _, n := range []string{"imp1", "imp2", "imp3"} {
 			bc.Settings.Devices = append(bc.Settings.Devices, device.Device{Name: n, Platform: "tools", Address: "localhost", Disabled: true})
+			attachDevices(bc)
 		}
 		if err := b.mg.PutConfigBase(bc, "bob", "import", configBase(b.cfg())); err != nil {
 			t.Fatal(err)

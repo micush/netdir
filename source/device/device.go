@@ -46,6 +46,9 @@ type Device struct {
 	Options map[string]string `json:"options,omitempty"`
 	// Disabled devices stay in the inventory but are never contacted.
 	Disabled bool `json:"disabled,omitempty"`
+	// Unattached is set only on the copies the daemon works with (DaemonConfig.effectiveDevices), never saved: the device is on no
+	// gateway, so it reads as Disabled too (never contacted).
+	Unattached bool `json:"unattached,omitempty"`
 }
 
 // Credential is a login a device uses.  Username and Password for a platform that logs in; Token for one that takes

@@ -67,7 +67,7 @@ func (m *Mgmt) deviceRawHere(raw json.RawMessage, actor string) (any, error) {
 	}
 	for _, d := range picked {
 		if d.Disabled {
-			return nil, fmt.Errorf("device %s is disabled: enable it first (Configure ▸ Devices)", d.Name)
+			return nil, fmt.Errorf("device %s %s", d.Name, offWhy(d))
 		}
 	}
 	rq := device.Raw{Method: a.Method, Path: a.Path, Body: a.Body, Lines: a.Lines, Save: a.Save}

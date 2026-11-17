@@ -580,13 +580,22 @@ type DaemonConfig struct {
 	PausedDevicesHere []string `json:"paused_devices_here,omitempty"`
 }
 
-// effectiveDevices is the inventory as this node uses it: a device paused on this node (PausedDevicesHere) reads as disabled,
+// effectiveDevices is the inventory as this node uses it: a device on no gateway reads as disabled (and Unattached), and so does a device paused on this node (PausedDevicesHere),
 // so nothing here contacts it.  It is a copy; the saved inventory is not changed.
 func (dc *DaemonConfig) effectiveDevices() []device.Device {
 	out := append([]device.Device(nil), dc.Settings.Devices...)
+	onGateway := map[string]bool{}
+	for _, g := range dc.Groups {
+		for _, n := range g.Devices {
+			onGateway[n] = true
+		}
+	}
 	for i := range out {
 		if containsStr(dc.PausedDevicesHere, out[i].Name) {
 			out[i].Disabled = true
+		}
+		if !onGateway[out[i].Name] { // a device on no gateway is not looked at, not listed and not offered over MCP
+			out[i].Disabled, out[i].Unattached = true, true
 		}
 	}
 	return out

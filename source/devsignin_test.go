@@ -53,6 +53,7 @@ func TestEntraSigninOps(t *testing.T) {
 		{Name: "entra", Platform: "entra", Address: host, Port: pn, Credential: "browser", Insecure: true, Options: map[string]string{"login_host": srv.Listener.Addr().String()}},
 		{Name: "entra2", Platform: "entra", Address: host, Port: pn, Credential: "secret", Insecure: true},
 		{Name: "sw1", Platform: "eos", Address: host, Credential: "secret", Insecure: true}}
+	attachDevices(dc)
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}

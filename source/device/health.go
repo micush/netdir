@@ -28,6 +28,8 @@ type Health struct {
 	Checked  int64  `json:"checked,omitempty"`   // unix time of the last reach check
 	FactsAt  int64  `json:"facts_at,omitempty"`  // unix time of the last facts request, good or bad
 	FactsErr string `json:"facts_err,omitempty"` // why the last facts request failed
+	// By is the node that did the check; set by whoever reads the health (the daemon), never by the monitor.
+	By string `json:"by,omitempty"`
 }
 
 // dialFn opens the TCP connection of a reach check (replaceable in tests).
@@ -76,6 +78,25 @@ const (
 type Tuning struct {
 	Reach, Facts         time.Duration // while nobody is looking
 	LiveReach, LiveFacts time.Duration // while someone is
+}
+
+// StaleAfter is how old a check may be before it is no longer taken for the state: two rounds of the slowest interval (the one
+// while nobody is looking) and a little more.  It does not shorten when someone starts looking, or every colour would go grey at the
+// first look after a quiet time.
+func (m *Monitor) StaleAfter() time.Duration {
+	var t Tuning
+	if m.Tune != nil {
+		t = m.Tune()
+	}
+	r := m.ReachEvery
+	if t.LiveReach > 0 {
+		r = t.LiveReach
+	}
+	ir := m.IdleReach
+	if t.Reach > 0 {
+		ir = t.Reach
+	}
+	return 2*max(r, ir) + 30*time.Second
 }
 
 // Touch says that someone is looking at the devices.  The first look after a quiet time checks at once.
@@ -213,6 +234,9 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		}
 	}()
 	if d.Disabled {
+		if d.Unattached {
+			return Health{Status: "paused", Detail: "on no gateway: never contacted", Facts: h.Facts, LastOK: h.LastOK}
+		}
 		return Health{Status: "paused", Detail: "disabled: never contacted", Facts: h.Facts, LastOK: h.LastOK}
 	}
 	h.Checked = now.Unix()

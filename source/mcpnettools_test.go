@@ -24,6 +24,7 @@ func toolsEnv(t *testing.T, on ...string) (*webEnv, func(msg string, hdr ...stri
 	sup.mu.Lock()
 	sup.dc.Settings.MCPKeys = keys
 	sup.dc.Settings.Devices = []device.Device{{Name: "tools", Platform: "tools", Address: "localhost"}}
+	attachDevices(sup.dc)
 	for i := range sup.dc.Groups {
 		sup.dc.Groups[i].Devices = nil
 	}

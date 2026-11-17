@@ -121,6 +121,22 @@
   // A box of tags (words separated by spaces or commas) that offers the tags already in use while the last word is typed: a list under the box,
   // chosen with the mouse, or with Down/Up and Enter or Tab.  Enter with nothing chosen is left alone (it still submits the form).
   // `tagsNow()` gives every tag in use at that moment (a table may hold rows that are not saved yet).
+  // A filter box: words must all match (AND, also written out); OR makes alternatives; a ! before a word (!dns), or NOT, means "does not match".
+  // "phx AND !dns" and "phx !dns" both find what has phx and not dns; "phx OR sea" finds either.  `match(test)` asks test(word) for each word.
+  function parseFilter(text) {
+    const groups = [[]];
+    let pend = false;   // a "not" waits for the word it applies to
+    for (const raw of String(text || "").toLowerCase().split(/\s+/).filter(Boolean)) {
+      if (raw === "and") { pend = false; continue; }
+      if (raw === "or") { pend = false; if (groups[groups.length - 1].length) groups.push([]); continue; }
+      if (raw === "not") { pend = !pend; continue; }
+      const w = raw.replace(/^!+/, ""), neg = ((raw.length - w.length) % 2 === 1) !== pend;
+      pend = false;
+      if (w) groups[groups.length - 1].push({ w, neg });
+    }
+    const gs = groups.filter((g) => g.length);
+    return { empty: !gs.length, match: (test) => !gs.length || gs.some((g) => g.every((t) => !!test(t.w) !== t.neg)) };
+  }
   function tagSuggest(input, tagsNow) {
     let pop = null, items = [], at = -1;
     const word = () => { const m = /[^\s,]*$/.exec(input.value); return m ? m[0] : ""; };
@@ -905,10 +921,10 @@
       // the filter box: only the devices whose name, address or platform holds every word typed are drawn; `tag:` before a word asks the tags instead
       // (a plain word searches the tags too, except `source=…`, which an imported device carries and which would match its server's name).
       // Dragging to reorder is off meanwhile.
-      const words = (state.topoFilter || "").toLowerCase().split(/\s+/).filter(Boolean);
+      const flt = parseFilter(state.topoFilter), words = { length: flt.empty ? 0 : 1 };
       const devMatch = (n) => {
         const d = devByName(n), t = [d.name, d.address, platformName(d.platform)].join(" ").toLowerCase();
-        return words.every((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w) || (d.tags || []).some((x) => !x.toLowerCase().startsWith("source=") && x.toLowerCase().includes(w))));
+        return flt.match((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w) || (d.tags || []).some((x) => !x.toLowerCase().startsWith("source=") && x.toLowerCase().includes(w))));
       };
       // Up to DOT_FROM devices each is a square with its name, as always.  More than that, each is a small square joined to the gateway, and the
       // full-size square comes when the pointer is on it, or when the filter matches it (the matches are drawn full size above the others).
@@ -1360,7 +1376,7 @@
       const h = (info && info.health) || {}, f = h.facts || {};
       return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""), info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
-        f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
+        f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.by ? "Checked by " + h.by : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
         (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : devPausedHere(d.name) ? "Paused on this node: not contacted from here" : ""].filter(Boolean).join("\n");
     };
     // Entra: sign in with a browser (the device code flow); the daemon stores the result in the device's login, so the page loads the config again
@@ -2169,9 +2185,9 @@
       const { all, below, hl } = cur;
       bar.classList.toggle("hidden", !all.length);
       if (!all.length) { clear(list).append(h("div", { class: "empty" }, "No devices yet. Add them under Configure ▸ Devices.")); return; }
-      const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
-      const hay = (x) => [x.name, (STATE[hl(x).status] || ["not checked"])[0], platformName(x.platform), x.address + (x.port ? ":" + x.port : ""), (x.via || []).join(" "), (x.tags || []).join(" "), x.disabled ? "disabled" : ""].join(" ").toLowerCase();
-      const vis = words.length ? all.filter((x) => { const t = hay(x); return words.every((w) => t.includes(w)); }) : all;
+      const flt = parseFilter(filter.value), words = { length: flt.empty ? 0 : 1 };
+      const hay = (x) => [x.name, (STATE[hl(x).status] || ["not checked"])[0], platformName(x.platform), x.address + (x.port ? ":" + x.port : ""), (x.via || []).join(" "), (x.tags || []).join(" "), x.unattached ? "no gateway" : x.disabled ? "disabled" : ""].join(" ").toLowerCase();
+      const vis = words.length ? all.filter((x) => { const t = hay(x); return flt.match((w) => t.includes(w)); }) : all;
       const n = Math.max(1, Math.ceil(vis.length / size));
       page = Math.min(Math.max(page, 0), n - 1);
       const from = page * size, shown = vis.slice(from, from + size);
@@ -2186,11 +2202,11 @@
         h("thead", {}, h("tr", {}, ["Device", "State", "Platform", "Address", "Via", "Tags", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, shown.map((x) => h("tr", { class: x.disabled ? "muted" : "", tabindex: "0", title: "Right-click for the network tools",
           oncontextmenu: rowMenu(toolItems(x.address, x.remote ? "" : x.name)) },
-          h("td", { class: "nname" }, x.name), h("td", { title: [hl(x).detail || "not checked yet", below[x.name] ? "Below it: " + below[x.name] : ""].filter(Boolean).join(". ") },
+          h("td", { class: "nname" }, x.name), h("td", { title: [hl(x).detail || "not checked yet", hl(x).by ? "Checked by " + hl(x).by : "", below[x.name] ? "Below it: " + below[x.name] : ""].filter(Boolean).join(". ") },
             pill(...(STATE[hl(x).status] || ["not checked", "tiny"]))),
           h("td", {}, platformName(x.platform)), h("td", { class: "mono" }, x.address + (x.port ? ":" + x.port : "")),
           h("td", {}, (x.via || []).join(" \u25b8 ")),
-          h("td", {}, (x.tags || []).map((t) => [pill(t, "info tiny"), " "])), h("td", {}, x.disabled ? pill("disabled") : ""))))))
+          h("td", {}, (x.tags || []).map((t) => [pill(t, "info tiny"), " "])), h("td", {}, x.unattached ? pill("no gateway") : x.disabled ? pill("disabled") : ""))))))
         : h("div", { class: "empty" }, "No devices match the filter."));
     }
     async function load() {
@@ -2585,7 +2601,7 @@
     ];
     function render() {
       const all = [...tally()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" }));
-      const q = filter.value.trim().toLowerCase(), vis = q ? all.filter(([t]) => t.toLowerCase().includes(q)) : all;
+      const flt = parseFilter(filter.value), q = !flt.empty, vis = q ? all.filter(([t]) => flt.match((w) => t.toLowerCase().includes(w))) : all;
       const n = Math.max(1, Math.ceil(vis.length / size));
       page = Math.min(Math.max(page, 0), n - 1);
       const from = page * size, shown = vis.slice(from, from + size);
@@ -2642,7 +2658,7 @@
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
     const plain = spec.cols.map((c) => !c.secret);   // the filter never looks into a password or a token
-    const visible = () => { const q = filter.value.trim().toLowerCase(); return q ? data.filter((r) => r.v.some((x, i) => plain[i] && x.toLowerCase().includes(q))) : data; };
+    const visible = () => { const flt = parseFilter(filter.value); return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x, i) => plain[i] && x.toLowerCase().includes(w)))); };
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
     const cells = (row) => row.v.map((x) => x.trim());
@@ -4825,7 +4841,7 @@
         level = sel("Level", [["", "All levels"], ["info", "Info and above"], ["warn", "Warnings and errors"], ["error", "Errors only"]], kept.level, () => { kept.level = level.value; load(); });
         span = sel("Time range", [["15m", "Last 15 minutes"], ["1h", "Last hour"], ["6h", "Last 6 hours"], ["1d", "Last 24 hours"], ["7d", "Last 7 days"], ["all", "All of it"]], kept.span, () => { kept.span = span.value; load(); });
         count = sel("Lines", [["200", "200 lines"], ["1000", "1000 lines"], ["5000", "5000 lines"]], kept.count, () => { kept.count = count.value; load(); });
-        search = h("input", { type: "search", placeholder: "Filter words…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
+        search = h("input", { type: "search", placeholder: "Filter words (AND, OR, !not)…", "aria-label": "Filter text", spellcheck: "false", class: "grow",
           oninput: () => { kept.q = search.value; clearTimeout(timer); timer = setTimeout(load, 300); } });
         if (state.prefill.log != null) { kept.q = state.prefill.log; state.prefill.log = null; }   // sent here from a server's menu
         search.value = kept.q;
@@ -5901,8 +5917,8 @@
     function drawList() {
       const real = listBox; listBox = h("div", { class: "ulist" });
       try {
-        const q = filterIn ? filterIn.value.trim().toLowerCase() : "";
-        const shown = users.filter((u) => !q || u.name.toLowerCase().includes(q));
+        const flt = parseFilter(filterIn ? filterIn.value : "");
+        const shown = users.filter((u) => flt.match((w) => u.name.toLowerCase().includes(w)));
         if (!users.length) listBox.append(h("div", { class: "empty" }, "Nobody is in the " + group + " group, so nobody can sign in."));
         else if (!shown.length) listBox.append(h("div", { class: "empty" }, "No user matches."));
         shown.forEach((u) => {

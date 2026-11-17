@@ -78,6 +78,7 @@ func captureEnv(t *testing.T, acl ...string) (func(msg string, hdr ...string) (i
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "sw-secret-pw"}}
 	dc.Settings.Devices = []device.Device{{Name: "lb1", Platform: "bigip", Address: host, Port: p, Credential: "lab", Insecure: true},
 		{Name: "sw1", Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true}}
+	attachDevices(dc)
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}

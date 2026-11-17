@@ -39,6 +39,7 @@ func devEnv(t *testing.T, acl ...string) func(msg string, hdr ...string) (int, m
 	sup.mu.Lock()
 	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "sw-secret-pw"}}
 	sup.dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true, Tags: []string{"site=home"}}}
+	attachDevices(sup.dc)
 	sup.mu.Unlock()
 	return post
 }
@@ -116,6 +117,7 @@ func TestGatewayDevicesValidatedAndShared(t *testing.T) {
 	dc := newDaemonConfig()
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "u", Password: "p"}}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "lab"}, {Name: "fw1", Platform: "iosxe", Address: "10.0.0.1", Credential: "lab"}}
+	attachDevices(dc)
 	dc.Groups[0].Devices = []string{"sw1", "fw1"}
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
@@ -187,6 +189,7 @@ func TestCanvasDrawsGatewayDevices(t *testing.T) {
 	dc := newDaemonConfig()
 	dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "u", Password: "p"}}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "lab"}, {Name: "old", Platform: "iosxe", Address: "10.0.0.9", Credential: "lab", Disabled: true}}
+	attachDevices(dc)
 	dc.Groups[0].Devices = []string{"old", "sw1"}
 	cv := buildCanvas(dc, nil)[0]
 	if len(cv.Devices) != 2 || cv.Devices[0].Name != "old" || cv.Devices[0].Status != "paused" || cv.Devices[1].Status != "idle" {
