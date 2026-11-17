@@ -670,6 +670,17 @@
     renderTopbar();
   }
 
+  // The filter box takes the focus when a gateway's drawing is opened, and again for each gateway picked in the sidebar, but not from another
+  // box being typed in or an open dialog, and never again for the same gateway (the drawing and the bar are redrawn all the time).
+  function focusTopoFilter(gid) {
+    if (state.topoFocusGid === gid) return;
+    const f = document.querySelector("input.cv-filter");
+    if (!f) return;
+    state.topoFocusGid = gid;
+    const ae = document.activeElement;
+    if (document.querySelector("dialog[open]") || (ae && ae !== f && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) return;
+    f.focus();
+  }
   function renderTopbar() {
     const bar = document.getElementById("topbar");
     if (!bar) return;
@@ -688,7 +699,7 @@
         oninput: () => { state.topoFilter = fin.value; if (state.onTopoFilter) state.onTopoFilter(); } });
       rows.push(h("div", { class: "tbrow tbfilter" }, fin));
       // the box has the focus when a gateway's drawing is opened (once for each: later redraws of the bar never take the focus from what is being typed)
-      if (state.topoFocusGid !== state.topo.gid && (!document.activeElement || document.activeElement === document.body)) { state.topoFocusGid = state.topo.gid; setTimeout(() => { if (fin.isConnected && (!document.activeElement || document.activeElement === document.body)) fin.focus(); }, 0); }
+      setTimeout(() => focusTopoFilter(state.topo.gid), 0);
     } else state.topoFocusGid = null;
     if (state.nodes.length >= 2) {
       const sel = h("select", { id: "node-pick", "aria-label": "Node to configure and monitor", onchange: (e) => setTarget(e.target.value || null) });
@@ -1077,6 +1088,7 @@
       });
       svg.append(...lines, ...shapes);
       if (dotted.length) svg.append(hov);
+      focusTopoFilter(g.group_id);
       // The scrolling box (.cv-wrap) is made once and kept: only the drawing inside it is swapped on each refresh, so its
       // scrollbars neither blink nor get pulled from under the pointer while they are being dragged.
       let wrap = oldWrap && svgHost.contains(oldWrap) ? oldWrap : null;
@@ -1194,9 +1206,10 @@
           ? h("select", { multiple: true, size: String(Math.min(Math.max(f.options.length, 3), 10)) }, f.options.map((o) => h("option", { value: o, selected: o === f.v }, o)))   // Shift-click and Ctrl-click pick several
           : f.options
           ? h("select", {}, f.options.map((o) => h("option", { value: o, selected: o === f.v }, PLATFORM_LABEL[o] || o)))
+          : f.suggest
+          ? tagPicker((f.v || "").split(/[\s,]+/), () => {}, f.suggest, f.l)
           : h("input", { type: f.secret ? "password" : "text", autocomplete: f.secret ? "new-password" : "off", spellcheck: "false", value: f.v || "", disabled: f.disabled, placeholder: f.ph || "" });
         hints[f.k] = h("span", { class: "hint" }, f.hint || "");
-        if (f.suggest) tagSuggest(els[f.k], f.suggest);
         // a field may react when it is left (f.on): it gets the fields, and note(key, text) to say something under a field
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
         if (f.check) return h("label", { class: "f check wide" }, els[f.k], f.l);
@@ -1444,7 +1457,7 @@
         { k: "address", l: "Address", v: d ? d.address : "", ph: "10.0.0.2" },
         { k: "port", l: "Port (optional)", v: d && d.port ? String(d.port) : portDef(d ? d.platform : PLATFORMS[0]), ph: "443" },
         { k: "opts", l: "Options (optional)", v: d ? Object.entries(d.options || {}).map(([a, b]) => a + "=" + b).join(" ") : "", ph: "serial=Q2XX-XXXX-XXXX org=123456" },
-        { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core", hint: "Several tags: separate them with spaces.", suggest: () => inventory().flatMap((x) => x.tags || []) },
+        { k: "tags", l: "Tags (optional)", v: d ? (d.tags || []).join(" ") : "", ph: "site=dc1 role=core", hint: "Type a tag, then a space or Enter.", suggest: () => inventory().flatMap((x) => x.tags || []) },
         { k: "cert", l: "Certificate", options: ["skip check", "check"], v: d && !d.insecure && d.ca_pem ? "check" : d && !d.insecure ? "check" : "skip check", hint: "Skip: self-signed certificate." },
         { k: "login", l: "Login", options: [...ls, NEW_LOGIN], v: d ? d.credential : ls.length ? ls[0] : NEW_LOGIN, on: show, initOn: true },
         { k: "user", l: "User name", v: "", ph: "netdir" },
@@ -2472,6 +2485,45 @@
     return el;
   }
 
+  // A box of tags as pills: type a tag, then a space, a comma or Enter to make it a pill; the x on a pill removes it; Backspace in the empty box takes the last one back.
+  // The tags already in use are offered while typing (tagsNow()).  `.value` is the tags separated by spaces (what the daemon's lists are saved from).
+  function tagPicker(list, onChange, tagsNow, label) {
+    let items = [...new Set((list || []).filter(Boolean))];
+    const el = h("div", { class: "devpick tagpick", role: "group", "aria-label": label || "Tags" });
+    const input = h("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": "Add a tag", title: "Type a tag such as site=dc1, then a space or Enter. Tags in use are offered." });
+    tagSuggest(input, () => (tagsNow ? tagsNow() : []).filter((t) => !items.includes(t)));
+    function draw() {
+      clear(el).append(...items.map((x) => h("span", { class: "pill info" }, x, h("button", { type: "button", "aria-label": "Remove " + x, title: "Remove " + x, onclick: () => set(items.filter((y) => y !== x), true) }, "\u00d7"))), input);
+      input.placeholder = items.length ? "" : "add tag";
+    }
+    function set(next, focus) {
+      items = next;
+      draw();
+      onChange(items);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      if (focus) input.focus();
+    }
+    function add(focus) {
+      const w = input.value.split(/[\s,]+/).filter(Boolean);
+      input.value = "";
+      if (!w.length) return false;
+      const next = [...items];
+      for (const x of w) if (!next.includes(x)) next.push(x);
+      set(next, focus);
+      return true;
+    }
+    input.addEventListener("input", () => { if (/[\s,]/.test(input.value)) add(true); });   // a space or a comma, a paste, or a choice from the list
+    input.addEventListener("keydown", (e) => {
+      if (e.defaultPrevented) return;
+      if (e.key === "Enter" && input.value.trim()) { e.preventDefault(); e.stopPropagation(); add(true); }
+      else if (e.key === "Backspace" && !input.value && items.length) set(items.slice(0, -1), true);
+    });
+    input.addEventListener("change", (e) => { e.stopPropagation(); add(false); });
+    Object.defineProperty(el, "value", { get: () => items.concat(input.value.split(/[\s,]+/).filter(Boolean)).join(" "), configurable: true });
+    draw();
+    return el;
+  }
+
   // A table cell whose text is cut by its box (an ellipsis) shows the whole text as a tooltip when the pointer reaches it; a cell with a tooltip of its own keeps it.
   function cutTip(e) {
     const td = e.target.closest && e.target.closest("td");
@@ -2495,13 +2547,84 @@
     for (const ev of ["mouseenter", "focus", "input", "change"]) el.addEventListener(ev, set);
   }
 
+  // Configure ▸ Devices ▸ Tags: one row to each tag in the Tags column of the devices table, built the same way as the other tables
+  // (filter, pages, right-click).  Changing a tag's text renames it on every device that has it; Remove takes it off every device.
+  // devTable() is the devices table, col its Tags column, showDevices() brings its tab forward.
+  function tagTable(devTable, col, showDevices) {
+    let page = 0, size = 50;
+    const tbody = h("tbody", {});
+    const tbl = h("table", { class: "policy zones rows tagtable" }, h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number" }, "#"), h("th", {}, "Tag"), h("th", { class: "num" }, "Devices"))), tbody);
+    const empty = h("div", { class: "policy-empty" }, "");
+    const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
+    const filter = h("input", { type: "text", class: "policy-filter", placeholder: "Filter tags", "aria-label": "Filter tags", autocomplete: "off", spellcheck: "false" });
+    const count = h("span", { class: "policy-count muted" }, "");
+    const sizeSel = h("select", { "aria-label": "Rows per page" }, [25, 50, 100, 250, 500].map((n) => h("option", { value: String(n) }, n + " per page")));
+    sizeSel.value = String(size);
+    const mkBtn = (label, title) => h("button", { type: "button", class: "btn small", title, "aria-label": title }, label);
+    const first = mkBtn("«", "First page"), prev = mkBtn("‹", "Previous page"), next = mkBtn("›", "Next page"), last = mkBtn("»", "Last page");
+    const pageIn = h("input", { type: "number", min: "1", class: "policy-page", "aria-label": "Page number" });
+    const pages = h("span", { class: "muted" }, "");
+    const pager = h("span", { class: "policy-pager" }, first, prev, pageIn, pages, next, last);
+    const bar = h("div", { class: "policy-bar" }, filter, count, h("span", { class: "grow" }), pager, sizeSel);
+    const box = h("div", { class: "policy-box rows wide" }, bar, wrap);
+    bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
+    const tally = () => { const m = new Map(); for (const w of devTable().words(col)) m.set(w, (m.get(w) || 0) + 1); return m; };
+    const rename = (t, n, k) => {
+      n = n.trim().replace(/[\s,]+/g, "");
+      if (!n || n === t) return false;
+      if (tally().has(n) && !confirm("There is a tag " + n + " already. Merge " + t + " into it?")) return false;
+      devTable().mapWords(col, (w) => (w === t ? n : w));
+      return true;
+    };
+    const remove = (t, k) => { if (confirm("Remove the tag " + t + " from " + k + " device" + (k === 1 ? "" : "s") + "?")) devTable().mapWords(col, (w) => (w === t ? "" : w)); };
+    const menuFor = (t, k, inp) => [
+      ["Rename", () => { inp.focus(); inp.select(); }],
+      ["Copy", () => { try { navigator.clipboard.writeText(t); } catch (e) { /* no clipboard */ } }],
+      ["Show the devices with this tag", () => { devTable().setFilter(t); showDevices(); }],
+      ["Remove from every device", () => remove(t, k), "danger"],
+    ];
+    function render() {
+      const all = [...tally()].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: "base" }));
+      const q = filter.value.trim().toLowerCase(), vis = q ? all.filter(([t]) => t.toLowerCase().includes(q)) : all;
+      const n = Math.max(1, Math.ceil(vis.length / size));
+      page = Math.min(Math.max(page, 0), n - 1);
+      const from = page * size, shown = vis.slice(from, from + size);
+      clear(tbody).append(...shown.map(([t, k], i) => {
+        const inp = h("input", { type: "text", value: t, "aria-label": "Tag " + t, autocomplete: "off", spellcheck: "false" });
+        inp.addEventListener("change", () => { if (!rename(t, inp.value, k)) inp.value = t; });
+        inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } else if (e.key === "Escape") { inp.value = t; inp.blur(); } });
+        const tr = h("tr", {}, h("td", { class: "grip" }, h("span", { class: "rownum" }, String(from + i + 1))), h("td", {}, inp), h("td", { class: "num" }, String(k)));
+        tr.addEventListener("contextmenu", (e) => rowMenu(menuFor(t, k, inp))(e));
+        return tr;
+      }));
+      const filtered = vis.length !== all.length;
+      count.textContent = vis.length ? `${from + 1}–${Math.min(from + size, vis.length)} of ${vis.length}${filtered ? ` (filtered from ${all.length})` : ""}` : (filtered ? `0 of ${all.length}` : "0 tags");
+      pager.hidden = n < 2;
+      pageIn.value = String(page + 1); pageIn.max = String(n); pages.textContent = "of " + n;
+      first.disabled = prev.disabled = page === 0; next.disabled = last.disabled = page >= n - 1;
+      empty.hidden = vis.length > 0;
+      empty.textContent = all.length ? "No tags match the filter." : "No tags yet. Type tags (site=dc1 role=core) in the Tags column of the Devices tab.";
+    }
+    filter.addEventListener("input", () => { page = 0; render(); });
+    filter.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });
+    sizeSel.addEventListener("change", () => { size = +sizeSel.value || 50; page = 0; render(); });
+    first.addEventListener("click", () => { page = 0; render(); });
+    prev.addEventListener("click", () => { page--; render(); });
+    next.addEventListener("click", () => { page++; render(); });
+    last.addEventListener("click", () => { page = 1e9; render(); });
+    pageIn.addEventListener("change", () => { page = (parseInt(pageIn.value, 10) || 1) - 1; render(); });
+    pageIn.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); pageIn.blur(); } });
+    render();
+    return { el: box, refresh: render };
+  }
+
   function rowTable(spec, lines) {
     const N = spec.cols.length;
     const small = SMALL_TABLES.has(spec.key);
     const data = (lines || []).map((l) => { const v = spec.parse(l); return { v, off: !!(spec.isOff && spec.isOff(l)), ...(spec.track ? { orig: String(v[0] || "").trim() } : {}) }; });
     let page = 0, size = small ? 1e9 : 50, dragging = null;
     const tbody = h("tbody", {});
-    const tbl = h("table", { class: "policy zones rows" + (N === 1 ? " one" : "") },
+    const tbl = h("table", { class: "policy zones rows t-" + spec.key + (N === 1 ? " one" : "") },
       h("thead", {}, h("tr", {}, h("th", { "aria-label": "Row number and order" }, "#"), ...spec.cols.map((c) => h("th", {}, c.name)))), tbody);
     const empty = h("div", { class: "policy-empty" }, "");
     const wrap = h("div", { class: "policy-wrap" }, tbl, empty);
@@ -2569,18 +2692,19 @@
           inp.addEventListener("change", () => { row.v[i] = inp.value; mark(tr, row); });
         } else if (c.pills) {
           inp = devicePicker(row.v[i] ? row.v[i].split(",") : [], (l) => { row.v[i] = l.join(","); mark(tr, row); });
+        } else if (c.tags) {
+          inp = tagPicker((row.v[i] || "").split(/[\s,]+/), (l) => { row.v[i] = l.join(" "); mark(tr, row); }, () => (spec.tagsNow ? spec.tagsNow() : []), c.name);
         } else {
           inp = h("input", { type: c.secret ? "password" : "text", autocomplete: c.secret ? "new-password" : "off", spellcheck: "false", "aria-label": c.name, placeholder: c.ph || "" });
           if (!row.v[i] && c.def) row.v[i] = c.def;   // the default shown as the value, not left empty
           inp.value = row.v[i] || "";
           inp.addEventListener("input", () => { row.v[i] = inp.value; mark(tr, row); });
-          if (c.tags) tagSuggest(inp, () => (spec.tagsNow ? spec.tagsNow() : []));   // the Tags column offers the tags in use
           if (c.list) {   // a column that offers a list of names while typing (the datalist is filled when the box gets the focus: the names may be unsaved)
             inp.setAttribute("list", c.list);
             inp.addEventListener("focus", () => { if (spec.onList) spec.onList(c.list); });
           }
         }
-        if (!c.pills && !c.secret) tipWhenCut(inp, () => (inp.tagName === "SELECT" ? (inp.selectedOptions[0] ? inp.selectedOptions[0].textContent : "") : inp.value));
+        if (!c.pills && !c.tags && !c.secret) tipWhenCut(inp, () => (inp.tagName === "SELECT" ? (inp.selectedOptions[0] ? inp.selectedOptions[0].textContent : "") : inp.value));
         tr.append(h("td", {}, inp));
       });
       grip.addEventListener("dragstart", (e) => {
@@ -2682,6 +2806,7 @@
       commit: () => { const n = names(); for (const r of data) if (r.v[0].trim() && n[r.v[0].trim()] === 1) r.orig = r.v[0].trim(); },
       // a column's values that are keys of the map take the map's value (the Login column follows a renamed login)
       retarget: (col, map) => { let k = 0; for (const r of data) { const x = (r.v[col] || "").trim(); if (map.has(x)) { r.v[col] = map.get(x); k++; } } if (k) render(); return k; },
+      setFilter: (t) => { filter.value = t; page = 0; render(); },   // the filter box, as if typed
       // the words of a column of words (the Tags column): every word in use, and a way to rename or remove one in every row (fn gives the new word, or "" to drop it)
       words: (col) => data.flatMap((r) => (r.v[col] || "").split(/[\s,]+/).filter(Boolean)),
       mapWords: (col, fn) => { let k = 0; for (const r of data) { const w = (r.v[col] || "").split(/[\s,]+/).filter(Boolean), n = [...new Set(w.map(fn).filter(Boolean))]; if (n.join(" ") !== w.join(" ")) { r.v[col] = n.join(" "); k++; } } if (k) { render(); changed(); } return k; },
@@ -3547,28 +3672,10 @@
       // the tags of the devices table as it stands now (rows not saved yet too): offered while a Tags box is typed in, and listed on the Tags tab
       const tagCol = ROW_TABLES.devices.cols.findIndex((c) => c.name === "Tags");
       ROW_TABLES.devices.tagsNow = () => devices.table("devices").words(tagCol);
-      const tagsBody = h("div", {});
-      const drawTags = () => {
-        const dt = devices.table("devices"), count = new Map();
-        for (const w of dt.words(tagCol)) count.set(w, (count.get(w) || 0) + 1);
-        const tags = [...count.keys()].sort((a, b) => a.localeCompare(b));
-        clear(tagsBody);
-        if (!tags.length) { tagsBody.append(h("div", { class: "policy-empty" }, "No tags yet. Type tags (site=dc1 role=core) in the Tags column of the Devices tab.")); return; }
-        tagsBody.append(h("table", { class: "policy zones tagtable" }, h("thead", {}, h("tr", {}, ["Tag", "Devices", ""].map((t) => h("th", {}, t)))),
-          h("tbody", {}, tags.map((t) => {
-            const inp = h("input", { type: "text", value: t, "aria-label": "Rename the tag " + t, autocomplete: "off", spellcheck: "false" });
-            inp.addEventListener("change", () => {
-              const n = inp.value.trim().replace(/[\s,]+/g, "");
-              if (!n || n === t) { inp.value = t; return; }
-              if (count.has(n) && !confirm("There is a tag " + n + " already. Merge " + t + " into it?")) { inp.value = t; return; }
-              dt.mapWords(tagCol, (w) => (w === t ? n : w));
-            });
-            const del = h("button", { type: "button", class: "btn small danger", onclick: () => { if (confirm("Remove the tag " + t + " from " + count.get(t) + " device" + (count.get(t) === 1 ? "" : "s") + "?")) dt.mapWords(tagCol, (w) => (w === t ? "" : w)); } }, "Remove");
-            return h("tr", {}, h("td", {}, inp), h("td", { class: "num" }, String(count.get(t))), h("td", {}, del));
-          }))));
-      };
-      devices.el.addEventListener("change", drawTags);
-      drawTags();
+      // the Tags tab: a table like the others (filter, pages, right-click), one row to a tag, made from the Tags column of the devices table
+      let tabsShow = () => {};
+      const tagsTab = tagTable(() => devices.table("devices"), tagCol, () => { tabsShow(0); });
+      devices.el.addEventListener("change", tagsTab.refresh);
       const devcheck = fieldset(DEVCHECK_FIELDS, { device_check_s: set.device_check_s, device_facts_min: set.device_facts_min, device_live_check_s: set.device_live_check_s, device_live_facts_min: set.device_live_facts_min });
       const devcheckShared = () => { const c = devcheck.get(), o = {}; for (const k of ["device_live_check_s", "device_live_facts_min", "device_check_s", "device_facts_min"]) if (c[k] > 0) o[k] = c[k]; return o; };
       const cluster = fieldset(CLUSTER_FIELDS, cfg.cluster || {});
@@ -3715,7 +3822,7 @@
       };
       // the Devices page is four tabs: Devices, Logins, Checks and Tags (every table stays in the page, so a save reads them all)
       const devicesTabs = () => {
-        const TABS = [["Devices", section("Devices", devices.el, loginList)], ["Logins", section("Logins", devcreds.el)], ["Checks", section("Checks", devcheck.el)], ["Tags", section("Tags", tagsBody)]];
+        const TABS = [["Devices", section("Devices", devices.el, loginList)], ["Logins", section("Logins", devcreds.el)], ["Checks", section("Checks", devcheck.el)], ["Tags", section("Tags", tagsTab.el)]];
         const panes = TABS.map(([, el]) => h("div", { role: "tabpanel" }, el));
         const buttons = TABS.map(([name], i) => h("button", { type: "button", role: "tab", class: "dtab", onclick: () => show(i) }, name));
         function show(i, focus) {
@@ -3732,6 +3839,7 @@
           e.preventDefault();
           show((state.devTab + d + TABS.length) % TABS.length, true);
         });
+        tabsShow = show;
         show(state.devTab >= 0 && state.devTab < TABS.length ? state.devTab : 0);
         return h("div", {}, strip, ...panes);
       };

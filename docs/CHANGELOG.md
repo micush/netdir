@@ -1,5 +1,36 @@
 # Changelog
 
+## [v196] - 2026-11-16 — Tags are pills; the filter box takes the focus when switching gateways
+
+### Fixed
+- Topology: the filter box now takes the focus each time another gateway is picked in the sidebar, not only on the first load (the toolbar is not redrawn when the gateway changes, so the focus was never asked for; now the drawing asks). It does not take the focus from a box being typed in or from an open dialog.
+
+### Changed
+- Every Tags box shows its tags as pills instead of space-separated words: the Tags column of Configure ▸ Devices and Add/Edit device (right-click a device on the Topology map). Type a tag, then a space, a comma or Enter to make a pill (a paste of several makes several); the × on a pill, or Backspace in the empty box, takes one off. The tags in use are offered while typing, leaving out those already on the device. A tag typed and not yet made a pill is kept when the dialog's Save is pressed or the box is left.
+- Configure ▸ Devices: the table's Tags column takes the room the other columns leave, so the pills fit; the table may use the whole page width.
+- Saved as before: the same list of tags per device.
+
+### Verified
+- jsdom: with two gateways, picking the other one in the sidebar (and back) leaves the focus in the filter box; pills shown for a device's tags; a suggestion chosen with Down and Enter becomes a pill; several words typed at once become several; Enter; Backspace; the ×; no suggestions for tags already on the device. Chromium (dark): the table and the Edit device dialog.
+
+### Not verified
+- Keyboard use with a screen reader (the pills are buttons with "Remove TAG" labels).
+
+---
+
+## [v195] - 2026-11-16 — Configure ▸ Devices ▸ Tags is a table like the others
+
+### Changed
+- The Tags tab was a bare list with a cramped tag box. It is now built like the other Devices tables: a filter box with the count, pages (25 to 500 a page), numbered rows, a wide tag box, and a right-click menu on each row: **Rename**, **Copy**, **Show the devices with this tag** (opens the Devices tab with that tag typed into its filter) and **Remove from every device**. Changing the text of a tag still renames it on every device (onto an existing tag it asks, then merges); Enter or leaving the box applies it, Esc puts it back.
+
+### Verified
+- jsdom: the listing with counts, the filter ("1–2 of 2 (filtered from 5)"), rename, the right-click menu, Remove, Show the devices (Devices tab with the filter set), and the saved device tags. Chromium (dark): 72 tags over 2 pages, the menu.
+
+### Not verified
+- A very long list of tags with the page-size box in a narrow window.
+
+---
+
 ## [v194] - 2026-11-16 — The small-squares threshold moves to Configure ▸ Settings ▸ General
 
 ### Changed
