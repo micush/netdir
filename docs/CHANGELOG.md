@@ -1,5 +1,28 @@
 # Changelog
 
+## [v208] - 2026-11-17 — Add device ▸ Devices from inventory has a filter
+
+### Added
+- The **Devices** list of *Add device ▸ Devices from inventory* has a filter box below it. Words must all match; `AND` is optional, `OR` makes alternatives (`phx OR sea`), and `!word` or `NOT word` leaves matches out (`phx AND !dns`). It says how many of the devices are shown and how many are picked, a device picked stays picked while the filter changes, and Enter in the box does not submit the form.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; the page script and help parse.
+
+### Not verified
+- In a browser: the box was not exercised by clicking, only by the filter code it shares with the other filter boxes.
+
+---
+
+## [v207] - 2026-11-17 — Aviatrix Controller: state and history reads are listed
+
+### Changed
+- `device_api_catalog` for an Aviatrix Controller now lists the reads for tunnel and gateway state and for history (`list_bell_notifications`, `get_controller_audit_log`, `get_aviatrix_controller_commandlog`, `list_tunnel_info`, `list_tunnels_latencies`, `get_gateway_stats`, `list_site2cloud_conn`, `list_transit_learned_cidrs` and others), with a note on which to try for "when did this tunnel change state". They were already allowed, but nothing named them, so a caller had to guess action names. A test checks that none of the listed names is refused.
+
+### Not verified
+- Against a real controller: the names are from Aviatrix's API reference, and a controller release may name one otherwise. Aviatrix CoPilot is unchanged: its Network Insights API has current state only, no history.
+
+---
+
 ## [v206] - 2026-11-17 — Aviatrix Controller and Aviatrix CoPilot
 
 ### Added

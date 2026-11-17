@@ -397,6 +397,11 @@ func (a *aviatrix) APICatalog(context.Context) (any, error) {
 		"examples": []string{"/list_vpcs_summary", "/list_vpcs_summary?transit_only=true", "/list_vpcs_summary?gateway_name=transit1", "/get_gateway_info?gateway_name=transit1",
 			"/list_inter_transit_gateway_peering", "/get_inter_transit_gateway_peering_details?gateway1=transit1&gateway2=transit2"},
 		"tip": "show gateway NAME (device_show) answers everything about one gateway in one call.",
+		"state_and_history": []string{"/list_tunnel_info", "/list_tunnels_latencies", "/get_tunnel_latency", "/list_bell_notifications", "/get_controller_audit_log",
+			"/get_aviatrix_controller_commandlog", "/get_gateway_periodic_ping_status", "/get_gateway_stats?gateway_name=NAME", "/list_site2cloud_conn",
+			"/get_site2cloud_conn_detail", "/list_vgw_connections", "/list_transit_learned_cidrs", "/list_spoke_learned_cidrs",
+			"/get_transit_or_spoke_gateway_best_routes", "/show_tunnel_status_change_detection_time"},
+		"note": "For when a tunnel or gateway changed state, try list_bell_notifications (the controller's own event list) and get_controller_audit_log; list_tunnel_info and get_gateway_stats are the current state. Names are from Aviatrix's API reference; a controller release may name one otherwise and answers with its reason.",
 	}, nil
 }
 

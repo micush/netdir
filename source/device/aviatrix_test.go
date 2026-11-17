@@ -194,3 +194,20 @@ func TestAviatrixChangeAndLogin(t *testing.T) {
 		t.Error("bad api_path accepted")
 	}
 }
+
+// The state and history reads named in the catalog must not be refused by the deny list.
+func TestAviatrixCatalogReadsAllowed(t *testing.T) {
+	v, err := (&aviatrix{}).APICatalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range v.(map[string]any)["state_and_history"].([]string) {
+		act, _, _ := strings.Cut(strings.TrimPrefix(p, "/"), "?")
+		if !avxReadRE.MatchString(act) {
+			t.Errorf("%s: not a read by name", act)
+		}
+		if w := avxDenied(act); w != "" {
+			t.Errorf("%s: refused for %q", act, w)
+		}
+	}
+}
