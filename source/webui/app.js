@@ -1230,20 +1230,20 @@
         if (f.on) els[f.k].addEventListener("change", () => f.on(els, (k, t) => { const o = fields.find((x) => x.k === k); hints[k].textContent = (o && o.hint ? o.hint : "") + (t ? (o && o.hint ? " " : "") + t : ""); }));
         if (f.check) return h("label", { class: "f check wide" }, els[f.k], f.l);
         // a list of many: a filter box above it (words, AND, OR, ! and NOT) that narrows the list; what was picked stays picked
-        let flt = null;
+        let flt = null, fin = null;
         if (f.multi) {
           const sel = els[f.k], all = f.options, chosen = new Set(), count = h("span", { class: "hint" }, "");
           const paint = () => {
             for (const o of sel.options) { if (o.selected) chosen.add(o.value); else chosen.delete(o.value); }
-            const q = parseFilter(flt.value), keep = all.filter((o) => q.match((w) => o.toLowerCase().includes(w)));
+            const q = parseFilter(fin.value), keep = all.filter((o) => q.match((w) => o.toLowerCase().includes(w)));
             clear(sel).append(...keep.map((o) => h("option", { value: o, selected: chosen.has(o) }, o)));
             count.textContent = q.empty ? "" : keep.length + " of " + all.length + " shown" + (chosen.size ? ", " + chosen.size + " picked" : "");
           };
-          flt = h("input", { type: "text", class: "listfilter", autocomplete: "off", spellcheck: "false", placeholder: "Filter: phx AND !dns, sea OR nyc", "aria-label": "Filter " + f.l,
+          fin = h("input", { type: "text", class: "listfilter", autocomplete: "off", spellcheck: "false", placeholder: "Filter: phx AND !dns, sea OR nyc", "aria-label": "Filter " + f.l,
             oninput: paint, onkeydown: (e) => { if (e.key === "Enter") e.preventDefault(); } });
           sel.addEventListener("change", () => { for (const o of sel.options) { if (o.selected) chosen.add(o.value); else chosen.delete(o.value); } });
           els[f.k]._picked = () => { for (const o of sel.options) { if (o.selected) chosen.add(o.value); else chosen.delete(o.value); } return all.filter((o) => chosen.has(o)); };
-          flt = h("div", { class: "listfilterbox" }, flt, count);
+          flt = h("div", { class: "listfilterbox" }, fin, count);
         }
         return h("label", { class: "f" + (fields.length === 1 || f.wide ? " wide" : "") }, f.l, els[f.k], flt, f.hint || f.on ? hints[f.k] : null);
       }));

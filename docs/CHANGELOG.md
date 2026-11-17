@@ -1,5 +1,18 @@
 # Changelog
 
+## [v212] - 2026-11-17 — the filter box of Add device ▸ Devices from inventory filters
+
+### Fixed
+- The filter box added in v208 did nothing: it read its text from the wrong element (the box's wrapper, which has no text), so every word was empty and every device stayed listed. It now narrows the list as you type: `nphxcoreswi`, `phx AND !dns`, `ptx OR dc`, `NOT phx`. The count line ("2 of 6 shown, 1 picked") shows while a filter is typed, and a device picked stays picked when the filter changes.
+
+### Verified
+- The page script's filter block was run in a simulated page (jsdom) with typed input: plain word, AND with `!`, OR, NOT, a picked device kept across filters, and clearing the box. gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles.
+
+### Not verified
+- In a real browser, though the simulated page ran the same code and events.
+
+---
+
 ## [v211] - 2026-11-17 — an MCP caller may read any path of a device's API; the answer is what is filtered
 
 ### Changed
