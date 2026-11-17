@@ -333,7 +333,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return map[string]any{"none": true}, nil
 	// nmap of a client
 	case "scan.start":
-		return scanStart(a.QClient, actor)
+		return scanStartPorts(a.QClient, a.PPorts, actor)
 	case "nettool.start":
 		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
 		if err != nil {
@@ -341,7 +341,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}
 		return netToolStartOpts(a.NetKind, a.QClient, actor, o)
 	case "scan.get":
-		return scanGet(a.QClient)
+		return scanGetPorts(a.QClient, a.PPorts)
 	case "nettool.get":
 		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
 		if err != nil {

@@ -71,11 +71,34 @@ func scanArgs(a netip.Addr) []string { return scanArgsFor(a.String(), a.Is6()) }
 
 // scanArgsFor is scanArgs for target, an address or a host name nmap looks up itself.
 func scanArgsFor(target string, v6 bool) []string {
-	args := []string{"-Pn", "-T4", "-F", "-sV", "--version-light", "-O", "--osscan-limit", "--max-retries", "1", "--host-timeout", "120s"}
-	if v6 {
+	return scanArgsPlan(&scanPlan{items: []string{target}, v6: v6})
+}
+
+// scanArgsPlan are the arguments for a checked request.  One host is scanned with no ping (hosts that drop it are scanned anyway) and
+// its address comes last, after "--".  Several hosts are found first (nmap's own host discovery, so the dead addresses of a subnet are
+// not scanned port by port) and their addresses are read from standard input (-iL -): scanStdin.
+func scanArgsPlan(p *scanPlan) []string {
+	args := []string{"-T4", "-sV", "--version-light", "-O", "--osscan-limit", "--max-retries", "1", "--host-timeout", "120s"}
+	if p.ports != "" {
+		args = append(args, "-p", p.ports)
+	} else {
+		args = append(args, "-F")
+	}
+	if p.v6 {
 		args = append(args, "-6")
 	}
-	return append(args, "--", target)
+	if p.multi() {
+		return append(args, "-iL", "-")
+	}
+	return append(args, "-Pn", "--", p.items[0])
+}
+
+// scanStdin is the list of addresses nmap reads for a scan of several hosts.
+func scanStdin(p *scanPlan) *strings.Reader {
+	if !p.multi() {
+		return nil
+	}
+	return strings.NewReader(strings.Join(p.items, "\n") + "\n")
 }
 
 var scanPortRe = regexp.MustCompile(`^(\d+)/(tcp|udp|sctp)\s+open\s+(\S+)\s*(.*)$`)
@@ -214,11 +237,15 @@ func (l *limitBuf) Write(p []byte) (int, error) {
 }
 
 // scanStart begins a scan of addr (an address or a host name) (or returns the one already running for it).
-func scanStart(addr, actor string) (*ScanJob, error) {
-	key, ip, _, err := scanTarget(addr)
+func scanStart(addr, actor string) (*ScanJob, error) { return scanStartPorts(addr, "", actor) }
+
+// scanStartPorts is scanStart for a request that may name ports and several hosts (scantarget.go).
+func scanStartPorts(addr, ports, actor string) (*ScanJob, error) {
+	plan, err := scanPlanOf(addr, ports)
 	if err != nil {
 		return nil, err
 	}
+	key := plan.key
 	path, err := exec.LookPath("nmap")
 	if err != nil {
 		return nil, errors.New("nmap is not installed on this node (install the nmap package)")
@@ -250,21 +277,24 @@ func scanStart(addr, actor string) (*ScanJob, error) {
 	scans.jobs[key] = j
 	c := *j
 	scans.mu.Unlock()
-	infof("scan: %q started nmap of %s", actor, key)
+	infof("scan: %q started nmap of %s (%d hosts)", actor, key, len(plan.items))
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), plan.timeout())
 		defer cancel()
-		cmd := exec.CommandContext(ctx, path, scanArgsFor(key, ip.Is6())...)
-		out := &limitBuf{max: scanReadMax}
+		cmd := exec.CommandContext(ctx, path, scanArgsPlan(plan)...)
+		if in := scanStdin(plan); in != nil {
+			cmd.Stdin = in
+		}
+		out := &limitBuf{max: scanReadMax * max(1, min(len(plan.items), 16))}
 		cmd.Stdout, cmd.Stderr = out, out
 		err := cmd.Run()
-		text := scanTidy(out.b.String())
+		text := scanTidyPlan(out.b.String(), plan)
 		state := "done"
 		if err != nil {
 			state = "error"
 			switch {
 			case ctx.Err() != nil:
-				text = strings.TrimSpace("the scan took longer than " + scanTimeout.String() + " and was stopped\n" + text)
+				text = strings.TrimSpace("the scan took longer than " + plan.timeout().String() + " and was stopped\n" + text)
 			case text == "":
 				text = err.Error()
 			}
@@ -280,11 +310,14 @@ func scanStart(addr, actor string) (*ScanJob, error) {
 }
 
 // scanGet is the state of the scan of addr: running, done, error, or none when there never was one.
-func scanGet(addr string) (*ScanJob, error) {
-	key, _, _, err := scanTarget(addr)
+func scanGet(addr string) (*ScanJob, error) { return scanGetPorts(addr, "") }
+
+func scanGetPorts(addr, ports string) (*ScanJob, error) {
+	plan, err := scanPlanOf(addr, ports)
 	if err != nil {
 		return nil, err
 	}
+	key := plan.key
 	scans.mu.Lock()
 	defer scans.mu.Unlock()
 	if j := scans.jobs[key]; j != nil {

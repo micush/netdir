@@ -85,9 +85,11 @@ func TestMCPNetToolsGateways(t *testing.T) {
 		{"net_ping", `{"host":"10.1.1.1","gateway":"london"}`, "not enabled on gateway \"london\""},
 		{"net_scan", `{"host":"10.1.1.1","gateway":"nosuch"}`, "paris (161)"},
 		{"net_dig", `{"name":"example.com","gateway":"162"}`, "not enabled"},
-		{"net_scan", `{"host":"10.1.1.0/24","gateway":"paris"}`, "not an IP address or a host name"},
-		{"net_scan", `{"host":"-oN x"}`, "not an IP address or a host name"},
-		{"net_scan", `{"host":"a b"}`, "not an IP address or a host name"},
+		{"net_scan", `{"host":"10.1.0.0/16","gateway":"paris"}`, "more than 1024 addresses"},
+		{"net_scan", `{"host":"10.1.1.1","ports":"22;id"}`, "not a port or a range of ports"},
+		{"net_scan", `{"host":"10.1.1.9-10.1.1.2"}`, "not a range"},
+		{"net_scan", `{"host":"-oN x"}`, "not an IP address, a host name"},
+		{"net_scan", `{"host":"a b"}`, "not an IP address, a host name"},
 		{"net_scan", `{"host":"224.0.0.1"}`, "not an address of one host"},
 		{"net_ping", `{"host":"a b; rm -rf /"}`, "not an IP address or a host name"},
 		{"net_mtr", `{"host":"-c1"}`, "not an IP address or a host name"},
@@ -122,7 +124,7 @@ func TestMCPNetToolsRun(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
 		"ping": "echo '4 packets transmitted, 4 received, 0% packet loss'",
-		"nmap": "echo 'Nmap scan report for 10.1.1.1'; echo '22/tcp open ssh'",
+		"nmap": "echo 'Nmap scan report for 10.1.1.1'; echo 'Host is up (0.001s latency).'; echo '22/tcp open ssh'; echo \"args: $*\"; cat > /dev/null; echo 'Nmap done: 2 IP addresses (1 host up) scanned in 1 seconds'",
 		"dig":  "echo \"args: $*\"; echo 'example.com. 300 IN A 93.184.216.34'",
 		"curl": "echo \"args: $*\"; echo 'HTTP/2 200'",
 	} {
@@ -145,6 +147,9 @@ func TestMCPNetToolsRun(t *testing.T) {
 	}
 	if txt := call("net_scan", `{"host":"10.1.1.1"}`); !strings.Contains(txt, `"state":"done"`) || !strings.Contains(txt, "22/tcp") {
 		t.Errorf("net_scan: %s", txt)
+	}
+	if txt := call("net_scan", `{"host":"10.1.1.0/30","ports":"443,22"}`); !strings.Contains(txt, `"state":"done"`) || !strings.Contains(txt, "2 addresses scanned, 1 up") || !strings.Contains(txt, "▸ 10.1.1.1") {
+		t.Errorf("net_scan of a subnet: %s", txt)
 	}
 	if txt := call("net_dig", `{"name":"example.com","type":"mx","server":"10.0.0.53","gateway":"161"}`); !strings.Contains(txt, "+time=3 +tries=1 @10.0.0.53 example.com MX") || !strings.Contains(txt, "x.x.x.x") {
 		t.Errorf("net_dig: %s", txt)

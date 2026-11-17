@@ -218,18 +218,21 @@ func mcpNetTools() []mcpTool {
 				return get(c, q)
 			}},
 		{name: "net_scan", title: "nmap scan from a gateway", idempotent: true, noNode: true,
-			desc:  "An nmap scan of one host: the 100 commonest TCP ports, service and OS detection, no ping, at most two minutes. It sends probe traffic to the host, so scan only hosts you may." + note,
-			props: []mcpProp{gw, {name: "host", typ: "string", required: true, desc: "One IP address or host name (not a range)."}},
+			desc: "An nmap scan: TCP ports with service and OS detection, at most two and a half minutes for one host and a little longer for each host more (15 minutes at most). One host is scanned with no ping; for a subnet, a range or a list the hosts that answer are found first and only those are scanned. It sends probe traffic to every address, so scan only networks you may." + note,
+			props: []mcpProp{gw,
+				{name: "host", typ: "string", required: true, desc: "What to scan: an IP address or host name, a subnet (10.1.1.0/24), a range (10.1.1.10-10.1.1.50 or 10.1.1.10-50), or several of these separated by commas. At most 1024 addresses and 20 host names; IPv4 and IPv6 are not mixed."},
+				{name: "ports", typ: "string", desc: "TCP ports to scan: numbers and ranges, e.g. 22,443 or 1-1024 (at most 1024 ports). Left out: the 100 commonest."}},
 			run: func(c *mcpCtx) (any, error) {
-				h := strings.TrimSpace(c.str("host"))
-				if _, _, _, err := scanTarget(h); err != nil {
-					return nil, fmt.Errorf("host: %w", err)
+				h, ports := strings.TrimSpace(c.str("host")), strings.TrimSpace(c.str("ports"))
+				plan, err := scanPlanOf(h, ports)
+				if err != nil {
+					return nil, err
 				}
 				n, err := c.toolsNode(c.str("gateway"))
 				if err != nil {
 					return nil, err
 				}
-				return c.mcpNetRun(n, "/api/scan", map[string]any{"client": h}, "/api/scan?client="+url.QueryEscape(h), scanTimeout)
+				return c.mcpNetRun(n, "/api/scan", map[string]any{"client": h, "ports": ports}, "/api/scan?client="+url.QueryEscape(h)+"&ports="+url.QueryEscape(ports), plan.timeout())
 			}},
 		{name: "net_port", title: "TCP port check from a gateway", idempotent: true, noNode: true,
 			desc:  "Is a TCP port open? Connects to one or more ports (up to ten) of a host and says open, closed (refused) or filtered (no answer in 4 s), with the time to connect. Quick and light: use it instead of net_scan for a port or two." + note,

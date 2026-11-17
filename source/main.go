@@ -153,7 +153,7 @@ the web GUI):
                    --update-cancel all|ADDR,...  --update-auto on|off
                    --update-repo URL|default   (where "fetch online" downloads from;
                    default https://github.com/micush/netdir)
-  Network tools    --scan ADDR   (nmap of an address, run from this node; needs the nmap package)
+  Network tools    --scan ADDR|SUBNET|RANGE|LIST [--scan-ports 22,443]   (nmap, run from this node; needs the nmap package)
                    --ping ADDR|NAME  --traceroute ADDR|NAME   (ping / mtr, run from this node; needs ping and mtr)
                    --whois NAME   (registration data of a host name or address, asked of its registry from this node)
   Capture          --capture IFACE [--capture-seconds N] [--capture-filter EXPR] [--capture-file FILE] [--all-nodes]

@@ -1,5 +1,23 @@
 # Changelog
 
+## [v205] - 2026-11-17 — net_scan takes ports, ranges and subnets
+
+### Added
+- `net_scan` (and `--scan`, `POST /api/scan`) can scan **several hosts**: `host` may be a subnet (`10.1.1.0/24`), a range (`10.1.1.10-50` or `10.1.1.10-10.1.1.50`), a host name, or a comma-separated list of these. At most 1024 addresses (a /22) and 20 host names; IPv4 and IPv6 are not mixed; a subnet's own and broadcast addresses are left out.
+- `net_scan` takes **`ports`**: numbers and ranges (`22,443`, `1-1024`), at most 1024 ports. Left out, it is the 100 commonest, as before. On the command line: `--scan ADDR|SUBNET|RANGE|LIST --scan-ports 22,443`.
+- For several hosts the hosts that answer are found first (nmap's own host discovery) and only those are scanned, so the dead addresses of a subnet are not scanned port by port; a scan of one host still skips the ping. The report says how many addresses were scanned and how many were up, then a short report for each host that is up (OS, MAC, open ports; the first 100 hosts). The scan may run for 2½ minutes plus 3 seconds per host, 15 minutes at most; asked again, it picks up the result.
+
+### Changed
+- What reaches nmap is checked first and spelled out: the addresses go to nmap on its standard input and the ports as a list of digits, so nothing a caller types is ever read as an option. A scan of one host with no ports is the same as before.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; tests for the target and port lists (what is accepted and refused), nmap's command line and the report of several hosts.
+
+### Not verified
+- Against real nmap on a real subnet: the report of several hosts was tested on sample nmap output, and nmap's real output may differ in a detail.
+
+---
+
 ## [v204] - 2026-11-17 — dig works on nodes whose dig refuses "--"
 
 ### Fixed

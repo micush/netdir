@@ -18,32 +18,32 @@ import (
 // calls the same code), so the two always agree.
 
 type cliFlags struct {
-	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                                                                                                  *bool
-	clusterStatus, clusterToken, clusterTokenClear, clusterPromote, clusterLeave, clusterSync                                                                                           *bool
-	updateStatus, updateApply, updateHistory, noWait, yes                                                                                                                               *bool
-	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                                                                                         *string
-	certFile, keyFile, cn, san                                                                                                                                                          *string
-	clusterJoin, clusterRemove, clusterUnremove, clusterDelete                                                                                                                          *string
-	users, schedule, scheduleHistory                                                                                                                                                    *bool
-	scheduleSet, scheduleDel, scheduleRun                                                                                                                                               *string
-	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires                                                                                                            *string
-	power, powerAt                                                                                                                                                                      *string
-	powerIn                                                                                                                                                                             *int
-	bgp, bgpDisable, bgpEnable, logShow, hostShow, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                             *bool
-	logMin, logGrep, logSince, logLines, whoisName, nodeRename, scanAddr, pingAddr, traceAddr, hostLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
-	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                             *bool
-	lldp, lldpOn, lldpOff                                                                                                                                                               *bool
-	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                   *string
-	ospf, ospfDisable, ospfEnable                                                                                                                                                       *bool
-	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                    *string
-	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                 *string
-	updateUpload, updatePush, updateCancel, updateAuto, updateRepo                                                                                                                      *string
-	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                             *bool
-	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, label, anycast, address, scope, node, realMACs, device                                   *string
-	pos, group                                                                                                                                                                          *int
-	deviceChange, deviceTarget, deviceRaw, deviceBody, deviceLines, deviceCapture, deviceSignin, deviceImport, troubleUser, troubleHost, troubleHours                                   *string
-	dryRun, deviceSave                                                                                                                                                                  *bool
-	_                                                                                                                                                                                   *string
+	versions, versionSnapshot, tlsStatus, tlsInstall, tlsCSR, tlsRevert, tlsRegenerate                                                                                                             *bool
+	clusterStatus, clusterToken, clusterTokenClear, clusterPromote, clusterLeave, clusterSync                                                                                                      *bool
+	updateStatus, updateApply, updateHistory, noWait, yes                                                                                                                                          *bool
+	versionShow, versionDiff, versionRestore, versionExport, configImport, note                                                                                                                    *string
+	certFile, keyFile, cn, san                                                                                                                                                                     *string
+	clusterJoin, clusterRemove, clusterUnremove, clusterDelete                                                                                                                                     *string
+	users, schedule, scheduleHistory                                                                                                                                                               *bool
+	scheduleSet, scheduleDel, scheduleRun                                                                                                                                                          *string
+	userAdd, userPasswd, userExpiry, userDel, userGrant, userRevoke, expires                                                                                                                       *string
+	power, powerAt                                                                                                                                                                                 *string
+	powerIn                                                                                                                                                                                        *int
+	bgp, bgpDisable, bgpEnable, logShow, hostShow, nodePause, nodeResume, nodeStatus, allNodes, captureList                                                                                        *bool
+	logMin, logGrep, logSince, logLines, whoisName, nodeRename, scanAddr, scanPorts, pingAddr, traceAddr, hostLookup, hostRange, captureIface, captureSecs, captureFilter, captureFile, tshootFile *string
+	syslog, syslogOff, syslogOn, syslogTest, syslogInsecure                                                                                                                                        *bool
+	lldp, lldpOn, lldpOff                                                                                                                                                                          *bool
+	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                              *string
+	ospf, ospfDisable, ospfEnable                                                                                                                                                                  *bool
+	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                               *string
+	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                            *string
+	updateUpload, updatePush, updateCancel, updateAuto, updateRepo                                                                                                                                 *string
+	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                        *bool
+	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, label, anycast, address, scope, node, realMACs, device                                              *string
+	pos, group                                                                                                                                                                                     *int
+	deviceChange, deviceTarget, deviceRaw, deviceBody, deviceLines, deviceCapture, deviceSignin, deviceImport, troubleUser, troubleHost, troubleHours                                              *string
+	dryRun, deviceSave                                                                                                                                                                             *bool
+	_                                                                                                                                                                                              *string
 }
 
 func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
@@ -69,7 +69,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		users: b("users"), userAdd: s("user-add"), userPasswd: s("user-passwd"), userExpiry: s("user-expiry"), userDel: s("user-del"), userGrant: s("user-grant"), userRevoke: s("user-revoke"), expires: s("expires"),
 		power: s("power"), powerAt: s("at"), powerIn: fs.Int("in", 0, ""),
 		nodePause: b("node-pause"), nodeResume: b("node-resume"), nodeStatus: b("node-status"),
-		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), scanAddr: s("scan"), pingAddr: s("ping"), traceAddr: s("traceroute"), whoisName: s("whois"), nodeRename: s("node-rename"), hostLookup: s("host-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), hostRange: s("host-range"),
+		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), scanAddr: s("scan"), scanPorts: s("scan-ports"), pingAddr: s("ping"), traceAddr: s("traceroute"), whoisName: s("whois"), nodeRename: s("node-rename"), hostLookup: s("host-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), hostRange: s("host-range"),
 		bgp: b("bgp"), bgpDisable: b("bgp-disable"), bgpEnable: b("bgp-enable"), nbrDisable: s("bgp-neighbor-disable"), nbrEnable: s("bgp-neighbor-enable"), asn: s("asn"), routerID: s("router-id"), asPrepend: s("as-prepend"),
 		nbrAdd: s("bgp-neighbor-add"), nbrDel: s("bgp-neighbor-del"), remoteAS: s("remote-as"), descr: s("description"),
 		syslog: b("syslog"), syslogOff: b("syslog-disable"), syslogOn: b("syslog-enable"), syslogTest: b("syslog-test"), syslogInsecure: b("syslog-tls-insecure"),
@@ -393,7 +393,7 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.captureIface != "":
 		runCapture(sock, f)
 	case *f.scanAddr != "":
-		runScan(sock, *f.scanAddr)
+		runScan(sock, *f.scanAddr, *f.scanPorts)
 	case *f.deviceChange != "":
 		runDeviceChange(sock, *f.deviceChange, *f.deviceTarget, *f.dryRun, *f.yes, *f.deviceSave)
 	case *f.troubleUser != "" || *f.troubleHost != "":
@@ -1191,13 +1191,14 @@ func runNetTool(sock, kind, addr string) {
 }
 
 // runScan asks this node for an nmap of addr and prints the report when it is done.
-func runScan(sock, addr string) {
+func runScan(sock, addr, ports string) {
 	var j ScanJob
-	decode(op(sock, "scan.start", map[string]string{"client": addr}), &j)
+	args := map[string]string{"client": addr, "ports": ports}
+	decode(op(sock, "scan.start", args), &j)
 	fmt.Fprintf(os.Stderr, "scanning %s with nmap…\n", j.Addr)
 	for j.State == "running" {
 		time.Sleep(2 * time.Second)
-		decode(op(sock, "scan.get", map[string]string{"client": addr}), &j)
+		decode(op(sock, "scan.get", args), &j)
 	}
 	fmt.Println(j.Text)
 	if j.State == "error" {
