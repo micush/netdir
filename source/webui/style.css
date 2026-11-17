@@ -859,4 +859,4 @@ table.tagtable td:nth-child(2) input { width: 100%; min-width: 14rem; }
 .policy-box.rows.wide:has(table.t-devices) { max-width: none; }
 table.policy.rows.t-devices th:nth-child(2) { width: 7rem; } table.policy.rows.t-devices th:nth-child(3) { width: 7.5rem; } table.policy.rows.t-devices th:nth-child(4) { width: 7rem; }
 table.policy.rows.t-devices th:nth-child(5) { width: 4rem; } table.policy.rows.t-devices th:nth-child(6) { width: 5.5rem; } table.policy.rows.t-devices th:nth-child(7) { width: auto; }
-table.policy.rows.t-devices th:nth-child(8) { width: 6rem; } table.policy.rows.t-devices th:nth-child(9) { width: 5.5rem; }
+table.policy.rows.t-devices th:nth-child(8) { width: 8rem; } table.policy.rows.t-devices th:nth-child(9) { width: 5.5rem; }

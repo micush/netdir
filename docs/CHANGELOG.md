@@ -1,5 +1,16 @@
 # Changelog
 
+## [v203] - 2026-11-17 — Two cut-off labels
+
+### Fixed
+- Configure ▸ Settings ▸ General ▸ Topology: the field is now called **Small square limit** and its hint no longer repeats the range or runs off the box.
+- Configure ▸ Devices: the Certificate column was too narrow, so "skip check" lost its last letter under the arrow. It is wider.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; the field hint and help tests. Not looked at in a browser.
+
+---
+
 ## [v202] - 2026-11-17 — Version bump
 
 ### Changed

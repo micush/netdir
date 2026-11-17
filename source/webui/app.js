@@ -2394,7 +2394,7 @@
   // Configure ▸ Settings ▸ General ▸ Neighbor discovery (lldp.go)
   // Configure ▸ Settings ▸ General ▸ Topology (settings.topology_squares_above): how many devices a gateway may have before the drawing turns each into a small square
   const TOPO_FIELDS = [
-    { shared: true, k: "topology_squares_above", l: "Draw devices as small squares above", unit: "devices", t: "int", min: 1, max: 5000, def: 36, hint: "1 to 5000. Hover shows the full box." },
+    { shared: true, k: "topology_squares_above", l: "Small square limit", unit: "devices", t: "int", min: 1, max: 5000, def: 36, hint: "Above this many, devices become squares." },
   ];
   const LLDP_FIELDS = [
     { shared: true, k: "lldp", l: "Run LLDP on every node", t: "bool" },
