@@ -1,5 +1,22 @@
 # Changelog
 
+## [v206] - 2026-11-17 — Aviatrix Controller and Aviatrix CoPilot
+
+### Added
+- New platform **`aviatrixcopilot`** (Aviatrix CoPilot), read only. It uses CoPilot's Network Insights API with the API key (made in CoPilot ▸ Settings ▸ Configuration ▸ General ▸ Features) as the credential's token, on port 443. Facts count the gateways, tunnels and BGP neighbors; Interfaces lists the gateways with their state; Show has `status`, `gateways`, `tunnels`, `bgp`, `metrics [gateway=NAME]` and `gateway NAME`; `device_api_get` reads `/status-api/v1/` and `/metrics-api/v1/gateways`. A wrong key and a CoPilot without the API are told apart in the error.
+- A change sent to a CoPilot device is refused with the reason and the way to do it: change the Aviatrix Controller.
+
+### Changed
+- The existing **`aviatrix`** platform is shown as **Aviatrix Controller** (GUI, help, README). Its stored platform name is unchanged, so no device or setting needs editing.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, no-cgo, cross-compiles; tests for the CoPilot driver against a stub (reads, parsing, wrong key, missing API, refusals) and the every-platform write test.
+
+### Not verified
+- Against a real CoPilot. Read/write for CoPilot is **not built**: Aviatrix publishes no CoPilot configuration API (the "API reference" page is the Controller's), so a write would be a guess at an undocumented interface.
+
+---
+
 ## [v205] - 2026-11-17 — net_scan takes ports, ranges and subnets
 
 ### Added

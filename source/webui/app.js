@@ -2844,7 +2844,7 @@
   const SERVICE_ADDR = { meraki: "api.meraki.com", entra: "graph.microsoft.com", nsone: "api.nsone.net", rcode0: "my.rcodezero.at" };
   // what the list and the tiles say for a platform whose stored name is not what people call it; the stored name stays
   const PLATFORM_LABEL = {
-    aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
+    aci: "Cisco ACI", afc: "Aruba Fabric Controller", aoscx: "ArubaOS-CX", aviatrix: "Aviatrix Controller", aviatrixcopilot: "Aviatrix CoPilot", bigip: "F5 BigIP", centreon: "Centreon", dnsdir: "AnyName DNS Director",
     ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", device42: "Device42", smax: "Micro Focus SMAX", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
