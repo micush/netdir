@@ -1,5 +1,16 @@
 # Changelog
 
+## [v219] - 2026-11-18 — Edit ▸ Arrange puts a gateway's devices in alphabetical order
+
+### Added
+- Right-click a gateway on the Topology page ▸ **Edit ▸ Arrange**: the gateway's devices (`devices`, the order of the squares) are sorted alphabetically, ignoring case, with numbers in names counted as numbers (sw2 before sw10). It is saved with the gateway like a drag. Greyed out, with the reason, when the gateway has fewer than two devices or they are in order already.
+
+### Verified
+- The sort run on sample names (case, numbers, already-sorted); `node --check` of `app.js` and `help.js`; the main package's help tests; gofmt, vet, the leak test, the five cross-compiles.
+
+### Not verified
+- The menu item in a real browser, and the native cgo/PAM build with `TestUpdateBuildApplyAndRollbackGuard` (no PAM headers in this sandbox).
+
 ## [v218] - 2026-11-18 — the purple alert square for every device: sensors in a fault state; `alerts=off`
 
 ### Added

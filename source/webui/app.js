@@ -1573,9 +1573,13 @@
       confirmDialog("Copy the devices to every other gateway?", "Adds the devices of " + gwLabel(g) + " that are missing there: " + plan.map(([o, add]) => gwLabel(o) + " " + add.length).join(", ") + ". Nothing is removed from any gateway.", "Copy to " + plan.length + " gateway" + (plan.length > 1 ? "s" : ""), () => quick(() => { for (const [o, add] of plan) o.devices = (o.devices || []).concat(add); }));
     };
     const pasteSub = (g) => [[devClip.length > 1 ? devClip.length + " devices" : "Device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), pasteWhy(g)], ...pasteAnySubs(g)];
+    // Edit ▸ Arrange: the gateway's devices in alphabetical order (numbers in names count as numbers: sw2 before sw10)
+    const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    const arranged = (g) => (g.devices || []).slice().sort(byName);
+    const arrangeWhy = (g) => ((g.devices || []).length < 2 ? "This gateway has fewer than two devices" : arranged(g).every((n, i) => n === g.devices[i]) ? "The devices are in alphabetical order already" : "");
     const gwItems = (g) => [["Statistics", () => selectTab("mcpusage")],
       "-",
-      ["Edit", null, "", [["Gateway", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")]]],
+      ["Edit", null, "", [["Gateway", () => gatewayForm(g)], ["MCP", () => selectTab("cfg_mcp")], ["Arrange", () => quick(() => { g.devices = arranged(g); }), arrangeWhy(g)]]],
       ["Add", null, "", [["Device", () => deviceForm(g)], nodeAddItem(g), ["Anycast address", () => anycastForm(g)]]],
       ["Copy", null, "", [["All devices", () => { devClip = [...(g.devices || [])]; }, (g.devices || []).length ? "" : "This gateway has no devices"], ["To all gateways", () => copyToAll(g), copyWhy(g)]]],
       ["Paste", null, "", pasteSub(g)],
