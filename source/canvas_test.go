@@ -420,7 +420,7 @@ func TestCanvasDeviceWithAlerts(t *testing.T) {
 	dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium"}, {Name: "cen", Platform: "centreon"}, {Name: "plain", Platform: "iosxe"}}
 	g := &GroupConfig{Devices: []string{"obs", "cen", "plain"}}
 	health := map[string]device.Health{
-		"obs":   {Status: "ok", Detail: "Observium: 2 alerts: a; b", AlertCount: 2, Alerts: []string{"a", "b"}},
+		"obs":   {Status: "ok", Detail: "Observium: 2 alerts: a; b", AlertCount: 2},
 		"cen":   {Status: "bad", Detail: "the API port does not answer", AlertCount: 5},
 		"plain": {Status: "ok", Detail: "answering"},
 	}

@@ -250,7 +250,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mSave
 			mCap
 		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mSave{m}, mCap{m}}
-	case "api raw fw port route res vlan chg ": // fortios, panos
+	case "api raw fw port route res vlan chg ": // fortios
 		return struct {
 			recDrv
 			mAPI
@@ -262,6 +262,19 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mVLAN
 			mChg
 		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}}
+	case "api raw fw port route res vlan chg alert ": // panos, panorama
+		return struct {
+			recDrv
+			mAPI
+			mRaw
+			mFW
+			mPort
+			mRoute
+			mRes
+			mVLAN
+			mChg
+			mAlert
+		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mAlert{m}}
 	case "api raw port chg cli ": // meraki
 		return struct {
 			recDrv
@@ -278,14 +291,20 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRaw
 			mRes
 		}{rd, mAPI{m}, mRaw{m}, mRes{m}}
-	case "api raw alert ": // centreon
+	case "api alert ": // aviatrixcopilot
+		return struct {
+			recDrv
+			mAPI
+			mAlert
+		}{rd, mAPI{m}, mAlert{m}}
+	case "api raw alert ": // afc, aviatrix, centreon
 		return struct {
 			recDrv
 			mAPI
 			mRaw
 			mAlert
 		}{rd, mAPI{m}, mRaw{m}, mAlert{m}}
-	case "api raw ": // afc, aviatrix, ipfabric, proxmox
+	case "api raw ": // ipfabric, proxmox
 		return struct {
 			recDrv
 			mAPI

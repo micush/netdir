@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +22,7 @@ import (
 //	paused  the device is disabled
 //
 // A monitoring system (Observium, Centreon) that holds alerts is still "ok" here (it answers); how many alerts it holds is in
-// AlertCount, the first of them in Alerts, and the detail says so.  The Topology page paints such a square in its own colour
+// AlertCount, and the detail says so.  The Topology page paints such a square in its own colour
 // ("alert", canvas.go), which is neither red, amber nor green: a monitoring system with an alert is working.
 type Health struct {
 	Status   string `json:"status"`
@@ -33,11 +32,10 @@ type Health struct {
 	Checked  int64  `json:"checked,omitempty"`   // unix time of the last reach check
 	FactsAt  int64  `json:"facts_at,omitempty"`  // unix time of the last facts request, good or bad
 	FactsErr string `json:"facts_err,omitempty"` // why the last facts request failed
-	// Alerts are the first maxAlertsKept of the alerts a monitoring system holds, AlertCount how many it holds (AlertReporter);
-	// AlertsAt is the unix time they were asked for.
-	Alerts     []string `json:"alerts,omitempty"`
-	AlertCount int      `json:"alert_count,omitempty"`
-	AlertsAt   int64    `json:"alerts_at,omitempty"`
+	// AlertCount is how many alerts a monitoring or management system holds (AlertReporter); AlertsAt is the unix time they were
+	// asked for.  Only the count is kept: what the alerts say is read from the system itself.
+	AlertCount int   `json:"alert_count,omitempty"`
+	AlertsAt   int64 `json:"alerts_at,omitempty"`
 	// By is the node that did the check; set by whoever reads the health (the daemon), never by the monitor.
 	By string `json:"by,omitempty"`
 }
@@ -237,39 +235,20 @@ func (m *Monitor) Recheck(ctx context.Context, d Device, c Credential, now time.
 // udpPlatforms are the platforms whose driver talks UDP (SNMP): there is no port to connect to, so the check is the request itself.
 var udpPlatforms = map[string]bool{"ios": true}
 
-// alertPlatforms are the platforms whose driver reports alerts (AlertReporter) and the platform's name in the detail.
-var alertPlatforms = map[string]string{"observium": "Observium", "centreon": "Centreon"}
+// alertPlatforms are the platforms whose driver reports alerts (AlertReporter), with the platform's name in the detail.
+var alertPlatforms = map[string]string{"observium": "Observium", "centreon": "Centreon", "afc": "Aruba Fabric Composer", "aviatrix": "Aviatrix Controller",
+	"aviatrixcopilot": "Aviatrix CoPilot", "panorama": "Panorama"}
 
 // alertEvery is the shortest time between two alert requests to one device (the reach check is more often than that).
 const alertEvery = 2 * time.Minute
 
-// maxAlertsKept is how many alerts Health keeps (the count is of all of them); maxAlertsShown how many the detail names.
-const (
-	maxAlertsKept  = 20
-	maxAlertsShown = 3
-)
-
-// alertDetail is the detail of a device with alerts: "Observium: 2 alerts: a; b (+1 more)".
-func alertDetail(platform string, n int, alerts []string) string {
-	name := firstNonEmptyStr(alertPlatforms[platform], platform)
-	shown := alerts
-	if len(shown) > maxAlertsShown {
-		shown = shown[:maxAlertsShown]
+// alertDetail is the detail of a device with alerts: "Observium: 12 alerts".
+func alertDetail(platform string, n int) string {
+	name := alertPlatforms[platform]
+	if name == "" {
+		name = platform
 	}
-	d := fmt.Sprintf("%s: %d alert%s: %s", name, n, map[bool]string{true: "", false: "s"}[n == 1], strings.Join(shown, "; "))
-	if more := n - len(shown); more > 0 {
-		d += fmt.Sprintf(" (+%d more)", more)
-	}
-	return d
-}
-
-func firstNonEmptyStr(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
+	return fmt.Sprintf("%s: %d alert%s", name, n, map[bool]string{true: "", false: "s"}[n == 1])
 }
 
 // alerts asks the driver of d for its failed alerts; a driver that does not report any gives none.
@@ -285,11 +264,7 @@ func (m *Monitor) alerts(ctx context.Context, d Device, c Credential) ([]string,
 	if !ok {
 		return nil, nil
 	}
-	a, err := ar.ActiveAlerts(ctx)
-	for i := range a {
-		a[i] = scrub(a[i], c)
-	}
-	return a, err
+	return ar.ActiveAlerts(ctx)
 }
 
 func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health, now time.Time) (out Health) {
@@ -312,7 +287,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		cancel()
 		if err != nil {
 			h.Status, h.Detail = "bad", "the API port does not answer: "+shortErr(err)
-			h.Alerts, h.AlertCount, h.AlertsAt = nil, 0, 0
+			h.AlertCount, h.AlertsAt = 0, 0
 			return h
 		}
 		conn.Close()
@@ -342,14 +317,10 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		if now.Sub(time.Unix(h.AlertsAt, 0)) >= alertEvery {
 			if a, err := m.alerts(ctx, d, c); err == nil {
 				h.AlertCount, h.AlertsAt = len(a), now.Unix()
-				if len(a) > maxAlertsKept {
-					a = a[:maxAlertsKept]
-				}
-				h.Alerts = a
 			}
 		}
 		if h.AlertCount > 0 {
-			h.Detail = alertDetail(d.Platform, h.AlertCount, h.Alerts)
+			h.Detail = alertDetail(d.Platform, h.AlertCount)
 		}
 	}
 	return h

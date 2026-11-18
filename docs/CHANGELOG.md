@@ -1,5 +1,25 @@
 # Changelog
 
+## [v215] - 2026-11-18 — the purple alert square for Aruba Fabric Composer, Aviatrix Controller and CoPilot and Panorama; the tooltip gives the count only
+
+### Added
+- The purple "alert" square of v214 (Observium, Centreon) is also drawn for these platforms, with the count in the tooltip:
+  - **afc** (Aruba Fabric Composer): the alarms in `GET /alarms` that are not acknowledged, cleared or closed. An AFC with no such resource answers 404, which is an error (what was known is kept), never an alert.
+  - **aviatrix** (Controller): the gateways of `list_vpcs_summary` that are not working: `inst_state` other than `running`, or a `gw_state` or `vpc_state` that says down, failed, error, stopped or unreachable. A gateway stopped on purpose counts.
+  - **aviatrixcopilot** (CoPilot): gateways and tunnels that are down or degraded and BGP neighbors that are not established, from the status API the driver already reads.
+  - **panorama** (platform *panorama* only): the managed firewalls `show devices all` reports with `connected` no. A *panos* firewall is never asked.
+
+### Changed
+- The tooltip of an alert square gives the count only (`Observium: 12 alerts`), and so does the detail line; the alerts themselves are no longer kept (`Health.Alerts` is gone, `alert_count` stays). The drivers still return them (`AlertReporter`) for tests.
+
+### Verified
+- `TestActiveAlertsOfTheManagementPlatforms` (afc, aviatrix, copilot, panorama with and without a disconnected firewall) and the Observium and Centreon tests against the TLS stubs; `TestCanvasDeviceWithAlerts`. `wrapLeak` records the alerts of every driver that has them (leak test). `node --check` of `app.js` and `help.js`. gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, the five cross-compiles.
+
+### Not verified
+- Against a real AFC, Aviatrix Controller, CoPilot or Panorama. The AFC resource `/alarms` and its fields (`acknowledged`, `cleared`, `state`, `description`) are not from a published reference I could read, and the Controller's `gw_state` and `vpc_state` are guesses next to the `inst_state` the driver already reads: if a real one names them differently the square simply stays green (AFC) or only `inst_state` counts (Controller). The CoPilot and Panorama fields are those the drivers already read.
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard` (the PAM headers could not be installed in this sandbox).
+- The purple square and tooltip in a real browser.
+
 ## [v214] - 2026-11-18 — Observium and Centreon alerts: a purple square and the count in the tooltip; Open on devices
 
 ### Added

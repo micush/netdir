@@ -199,6 +199,40 @@ func (a *aviatrix) Facts(ctx context.Context) (Facts, error) {
 	return f, nil
 }
 
+// avxBadState says whether a state word of a gateway means it is not working: down, failed, in error, stopped or unreachable.
+func avxBadState(s string) bool {
+	s = strings.ToLower(s)
+	for _, w := range []string{"down", "fail", "error", "stopped", "unreach"} {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// ActiveAlerts are the gateways of the controller that are not working: an instance that is not running, or a gateway or VPC
+// state (gw_state, vpc_state) that says down, failed, error, stopped or unreachable.  Fields as Interfaces reads them (inst_state)
+// and as the controller is said to give them; not tried against a real controller.
+func (a *aviatrix) ActiveAlerts(ctx context.Context) ([]string, error) {
+	gws, err := a.gateways(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, g := range gws {
+		name := firstOf(str(g["gw_name"]), str(g["vpc_name"]), str(g["vpc_id"]))
+		switch inst := str(g["inst_state"]); {
+		case inst != "" && inst != "running":
+			out = append(out, name+": instance "+inst)
+		case avxBadState(str(g["gw_state"])):
+			out = append(out, name+": "+str(g["gw_state"]))
+		case avxBadState(str(g["vpc_state"])):
+			out = append(out, name+": "+str(g["vpc_state"]))
+		}
+	}
+	return out, nil
+}
+
 func (a *aviatrix) Interfaces(ctx context.Context) ([]Interface, error) {
 	gws, err := a.gateways(ctx, nil)
 	if err != nil {

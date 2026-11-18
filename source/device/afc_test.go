@@ -101,6 +101,9 @@ func afcStub(t *testing.T, st *afcState) Device {
 			out(200, J{"result": []J{{"uuid": "s1", "name": "leaf1"}, {"uuid": "s2", "name": "leaf2"}}})
 		case "/vlans":
 			out(200, J{"result": []J{}})
+		case "/alarms":
+			out(200, J{"result": []J{{"uuid": "a1", "description": "switch leaf2 unreachable", "state": "active"}, {"uuid": "a2", "description": "old", "acknowledged": true},
+				{"uuid": "a3", "description": "fixed", "state": "cleared"}}})
 		default:
 			out(404, J{})
 		}

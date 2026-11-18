@@ -190,6 +190,31 @@ func (a *avCoPilot) Facts(ctx context.Context) (Facts, error) {
 	return Facts{Hostname: a.d.Address, Vendor: "Aviatrix", Model: m}, nil
 }
 
+// ActiveAlerts are what the status API says is wrong: gateways and tunnels that are down or degraded and BGP neighbors that are not established.
+func (a *avCoPilot) ActiveAlerts(ctx context.Context) ([]string, error) {
+	v, err := a.status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, g := range v.Gateways {
+		if g.State != "up" {
+			out = append(out, "gateway "+g.Name+" "+g.State)
+		}
+	}
+	for _, t := range v.Tunnels {
+		if t.State != "up" {
+			out = append(out, "tunnel "+t.Name+" "+t.State)
+		}
+	}
+	for _, b := range v.BGP {
+		if b.State != "established" {
+			out = append(out, "BGP "+b.Name+" "+b.Neighbor+" "+b.State)
+		}
+	}
+	return out, nil
+}
+
 // Interfaces are the gateways, with the state CoPilot reports.
 func (a *avCoPilot) Interfaces(ctx context.Context) ([]Interface, error) {
 	v, err := a.status(ctx)

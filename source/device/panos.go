@@ -1019,6 +1019,28 @@ func (p *panos) Resources(ctx context.Context) (Resources, error) {
 	return out, nil
 }
 
+// ActiveAlerts are the managed firewalls a Panorama says are not connected to it (show devices all: connected no).  A firewall
+// (not a Panorama) has none.
+func (p *panos) ActiveAlerts(ctx context.Context) ([]string, error) {
+	if _, err := p.system(ctx); err != nil {
+		return nil, err
+	}
+	if !p.panorama() {
+		return nil, nil
+	}
+	v, err := p.get(ctx, "<show><devices><all></all></devices></show>")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	walkNamed(v, func(m map[string]any) {
+		if strings.EqualFold(str(m["connected"]), "no") {
+			out = append(out, "firewall "+firstOf(str(m["hostname"]), str(m["serial"]), str(m["name"]))+" is not connected")
+		}
+	})
+	return out, nil
+}
+
 // VLANs are the tagged subinterfaces of a firewall: the tag is the VLAN ID and the parent interface its port.
 func (p *panos) VLANs(ctx context.Context) ([]VLAN, error) {
 	if _, err := p.system(ctx); err != nil {

@@ -501,11 +501,11 @@ func TestMonitorObserviumAlertIsAmber(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	m.Check(context.Background(), []Device{d}, creds, now)
 	h := m.Snapshot()[d.Name]
-	if h.Status != "ok" || h.AlertCount != 1 || len(h.Alerts) != 1 || !strings.Contains(h.Detail, "Observium: 1 alert: core-sw.example.com") || h.Facts == nil {
+	if h.Status != "ok" || h.AlertCount != 1 || h.Detail != "Observium: 1 alert" || h.Facts == nil {
 		t.Fatalf("with an alert: %+v", h)
 	}
 
-	if got := alertDetail("observium", 5, []string{"a", "b", "c", "d", "e"}); got != "Observium: 5 alerts: a; b; c (+2 more)" {
+	if got := alertDetail("observium", 5); got != "Observium: 5 alerts" {
 		t.Errorf("alertDetail: %q", got)
 	}
 }

@@ -173,6 +173,28 @@ func (a *afc) Facts(ctx context.Context) (Facts, error) {
 	return f, nil
 }
 
+// ActiveAlerts are the alarms the Fabric Composer holds that nobody has acknowledged or cleared (GET /alarms).  An AFC that has no
+// such resource answers 404: that is an error here (the caller keeps what it knew), never an alert.  Not tried against a real AFC:
+// the resource and its fields (acknowledged, state, severity, description) are what the API Explorer is said to show.
+func (a *afc) ActiveAlerts(ctx context.Context) ([]string, error) {
+	rs, err := a.list(ctx, "alarms", "")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range rs {
+		if centFlag(r["acknowledged"]) || centFlag(r["cleared"]) {
+			continue
+		}
+		switch strings.ToLower(firstOf(str(r["state"]), str(r["status"]))) {
+		case "cleared", "closed", "resolved", "acknowledged":
+			continue
+		}
+		out = append(out, firstOf(str(r["description"]), str(r["message"]), str(r["name"]), str(r["uuid"]), "alarm"))
+	}
+	return out, nil
+}
+
 func (a *afc) Interfaces(context.Context) ([]Interface, error) { return nil, ErrUnsupported }
 func (a *afc) Neighbors(context.Context) ([]Neighbor, error)   { return nil, ErrUnsupported }
 func (a *afc) Config(context.Context) (string, error)          { return "", ErrUnsupported }

@@ -1390,9 +1390,9 @@
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
     const devTip = (d, info) => {
       const h = (info && info.health) || {}, f = h.facts || {};
-      const alerts = h.alerts || [], na = h.alert_count || 0;   // Observium, Centreon: the alerts it holds (purple square); the count first, then the first of them
+      const na = h.alert_count || 0;   // Observium, Centreon, AFC, Aviatrix, Panorama: how many alerts it holds (purple square)
       return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""),
-        na ? platformName(d.platform) + ": " + na + (na === 1 ? " alert" : " alerts") + (alerts.length ? "\n" + alerts.map((a) => "\u2022 " + a).join("\n") : "") + (na > alerts.length ? "\n\u2026 and " + (na - alerts.length) + " more" : "") : info ? info.detail : "Not checked yet",
+        na ? platformName(d.platform) + ": " + na + (na === 1 ? " alert" : " alerts") : info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
         f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.by ? "Checked by " + h.by : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
         (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : devPausedHere(d.name) ? "Paused on this node: not contacted from here" : ""].filter(Boolean).join("\n");
