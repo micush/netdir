@@ -1,9 +1,9 @@
 # Changelog
 
-## [v213] - 2026-11-18 — Observium and Centreon alerts: a purple square and the count in the tooltip; Open on devices
+## [v214] - 2026-11-18 — Observium and Centreon alerts: a purple square and the count in the tooltip; Open on devices
 
 ### Added
-- A device on the Observium or Centreon platform that answers and holds alerts is drawn **purple** on the Topology page (new status `alert`, a device colour only: not red, amber or green, because a monitoring system with alerts is working). The tooltip gives the count and the first 20 alerts (`Observium: 12 alerts`, `• host: check: message`, `… and 3 more`); the detail line names the first three. The legend has a purple "alerts" dot, `--canvas` prints `[ALRT]`. A device that is down stays red and one that refuses its request stays amber, whatever it holds. Nothing else changes: the Devices page, the alerts and the metrics still see it as `ok` (answering).
+- Replaces the amber of v213: a device on the Observium or Centreon platform that answers and holds alerts is drawn **purple** on the Topology page (new status `alert`, a device colour only: not red, amber or green, because a monitoring system with alerts is working). The tooltip gives the count and the first 20 alerts (`Observium: 12 alerts`, `• host: check: message`, `… and 3 more`); the detail line names the first three. The legend has a purple "alerts" dot, `--canvas` prints `[ALRT]`. A device that is down stays red and one that refuses its request stays amber, whatever it holds. Nothing else changes: the Devices page, the alerts and the metrics still see it as `ok` (answering).
 - Observium: the alerts are the failed ones (`/alerts/?status=failed`), for the server every monitored device's, with the option `device` that device's; the check names come from `/alert_checks/` and the host names from `/devices/` (both best effort).
 - Centreon: the problems nobody has dealt with: hosts down or unreachable and services in warning, critical or unknown, except those acknowledged or in downtime. Only the first 20 pages of hosts and of services are read.
 - `device.AlertReporter` (an optional driver interface, `ActiveAlerts`); `Health.Alerts` (first 20), `Health.AlertCount` and `Health.AlertsAt`. The monitor asks a driver of `alertPlatforms` (observium, centreon) at most every 2 minutes, on a reach check; a request that fails keeps what was known (a hiccup in the alert API is not an alert), and a device that is down forgets its alerts.
@@ -16,6 +16,17 @@
 - The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard`: the PAM headers could not be installed in this sandbox, so that test (it builds the tree with cgo) fails here; nothing in it touches this change.
 - Against a real Observium or Centreon: the alert fields (Observium `alert_status` 0 = failed, `alert_test_id`, `last_message`; Centreon `acknowledged`, `in_downtime`, `status.code`) are those the drivers already read, seen only in the stubs. If a build names them differently the alerts still count, but the text falls back to `entity_type entity_id alert` (Observium).
 - The purple square, the legend and the tooltip, and the Open item, in a real browser (light and dark).
+
+## [v213] - 2026-11-18 — an Observium alert turns its square amber
+
+### Added
+- A device on the Observium platform turns amber (`warn`) on the Topology page while Observium holds a failed alert, and the tooltip names the alerts. `device.AlertReporter` (an optional driver interface) and `Health.Alerts`. Superseded in v214, which paints such a square purple instead and adds Centreon.
+
+### Verified
+- Observium alert tests against the TLS stub, gofmt, vet, `go test -race ./device`.
+
+### Not verified
+- Against a real Observium; the native cgo/PAM build.
 
 ## [v212] - 2026-11-17 — the filter box of Add device ▸ Devices from inventory filters
 
