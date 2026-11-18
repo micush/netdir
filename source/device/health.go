@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,9 @@ import (
 //	bad   the API port does not answer
 //	idle  not checked yet
 //	paused  the device is disabled
+//
+// A monitoring system (Observium) that has an alert failed for what the device stands for is "warn" too, with the alerts in
+// Alerts and in the detail: the API answers, but something it watches is wrong.
 type Health struct {
 	Status   string `json:"status"`
 	Detail   string `json:"detail"`
@@ -28,6 +32,8 @@ type Health struct {
 	Checked  int64  `json:"checked,omitempty"`   // unix time of the last reach check
 	FactsAt  int64  `json:"facts_at,omitempty"`  // unix time of the last facts request, good or bad
 	FactsErr string `json:"facts_err,omitempty"` // why the last facts request failed
+	// Alerts are the alerts a monitoring system (Observium) holds as failed, as of the last check (AlertReporter).
+	Alerts []string `json:"alerts,omitempty"`
 	// By is the node that did the check; set by whoever reads the health (the daemon), never by the monitor.
 	By string `json:"by,omitempty"`
 }
@@ -227,6 +233,49 @@ func (m *Monitor) Recheck(ctx context.Context, d Device, c Credential, now time.
 // udpPlatforms are the platforms whose driver talks UDP (SNMP): there is no port to connect to, so the check is the request itself.
 var udpPlatforms = map[string]bool{"ios": true}
 
+// alertPlatforms are the platforms whose driver reports alerts (AlertReporter); they are asked on every reach check, one request.
+var alertPlatforms = map[string]bool{"observium": true}
+
+// maxAlertsShown is how many alerts the detail line names; Alerts has them all.
+const maxAlertsShown = 3
+
+// alertDetail is the detail of a device with alerts: "Observium: 2 alerts failed: a; b".
+func alertDetail(platform string, alerts []string) string {
+	name := map[string]string{"observium": "Observium"}[platform]
+	if name == "" {
+		name = platform
+	}
+	shown := alerts
+	if len(shown) > maxAlertsShown {
+		shown = shown[:maxAlertsShown]
+	}
+	d := fmt.Sprintf("%s: %d alert%s failed: %s", name, len(alerts), map[bool]string{true: "", false: "s"}[len(alerts) == 1], strings.Join(shown, "; "))
+	if more := len(alerts) - len(shown); more > 0 {
+		d += fmt.Sprintf(" (+%d more)", more)
+	}
+	return d
+}
+
+// alerts asks the driver of d for its failed alerts; a driver that does not report any gives none.
+func (m *Monitor) alerts(ctx context.Context, d Device, c Credential) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*m.Timeout)
+	defer cancel()
+	drv, err := Open(d, c)
+	if err != nil {
+		return nil, err
+	}
+	defer drv.Close(context.WithoutCancel(ctx))
+	ar, ok := drv.(AlertReporter)
+	if !ok {
+		return nil, nil
+	}
+	a, err := ar.ActiveAlerts(ctx)
+	for i := range a {
+		a[i] = scrub(a[i], c)
+	}
+	return a, err
+}
+
 func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health, now time.Time) (out Health) {
 	defer func() {
 		if p := recover(); p != nil { // a driver bug costs that device's check, not the loop
@@ -240,6 +289,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return Health{Status: "paused", Detail: "disabled: never contacted", Facts: h.Facts, LastOK: h.LastOK}
 	}
 	h.Checked = now.Unix()
+	h.Alerts = nil // what the last round found is not what this one will
 	udp := udpPlatforms[d.Platform]
 	if d.Platform != "tools" && !udp { // the tools are programs on this node, and SNMP is UDP: nothing to dial
 		rctx, cancel := context.WithTimeout(ctx, m.Timeout)
@@ -271,6 +321,14 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return h
 	}
 	h.Status, h.Detail = "ok", "answering"
+	if alertPlatforms[d.Platform] {
+		// an alerts request that fails leaves the device as it is (green): the facts request has just worked, and a hiccup in the
+		// alert API is not an alert
+		if a, err := m.alerts(ctx, d, c); err == nil && len(a) > 0 {
+			h.Alerts = a
+			h.Status, h.Detail = "warn", alertDetail(d.Platform, a)
+		}
+	}
 	return h
 }
 

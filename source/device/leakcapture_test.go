@@ -101,6 +101,7 @@ type mCli struct{ mx }
 type mCap struct{ mx }
 type mSave struct{ mx }
 type mDown struct{ mx }
+type mAlert struct{ mx }
 
 func (m mAPI) APIGet(ctx context.Context, p string) (any, bool, error) {
 	v, text, err := m.d.(APIer).APIGet(ctx, p)
@@ -156,6 +157,11 @@ func (m mSave) SaveConfig(ctx context.Context) error {
 	err := m.d.(ConfigSaver).SaveConfig(ctx)
 	leakAdd(m.plat, "save_config", nil, err)
 	return err
+}
+func (m mAlert) ActiveAlerts(ctx context.Context) ([]string, error) {
+	v, err := m.d.(AlertReporter).ActiveAlerts(ctx)
+	leakAdd(m.plat, "alerts", v, err)
+	return v, err
 }
 func (m mUser) UserDevices(ctx context.Context, who string) (map[string]any, []map[string]any, error) {
 	u, dv, err := m.d.(UserDeviceLooker).UserDevices(ctx, who)
@@ -214,6 +220,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 	_, cli := drv.(ClientReporter)
 	_, capt := drv.(Capturer)
 	_, down := drv.(Downstream)
+	_, alert := drv.(AlertReporter)
 	add(api, "api")
 	add(raw, "raw")
 	add(fw, "fw")
@@ -227,6 +234,7 @@ func wrapLeak(plat string, drv Driver) Driver {
 	add(cli, "cli")
 	add(capt, "cap")
 	add(down, "down")
+	add(alert, "alert")
 	switch set {
 	case "api raw fw port route res vlan chg save cap ": // eos, bigip
 		return struct {
@@ -290,14 +298,15 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRaw
 			mUser
 		}{rd, mAPI{m}, mRaw{m}, mUser{m}}
-	case "api raw port res ": // observium
+	case "api raw port res alert ": // observium
 		return struct {
 			recDrv
 			mAPI
 			mRaw
 			mPort
 			mRes
-		}{rd, mAPI{m}, mRaw{m}, mPort{m}, mRes{m}}
+			mAlert
+		}{rd, mAPI{m}, mRaw{m}, mPort{m}, mRes{m}, mAlert{m}}
 	case "api raw fw port route res vlan chg save ": // aoscx, iosxe, nxos
 		return struct {
 			recDrv

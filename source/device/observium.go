@@ -570,6 +570,75 @@ func (o *observium) Resources(ctx context.Context) (Resources, error) {
 	return res, nil
 }
 
+// ---- alerts ----
+
+// ActiveAlerts are the alerts Observium holds as failed: for the server, those of every monitored device (each starts with the
+// device's name); for one monitored device (option device), its own.  Each is "device: check name: message", whatever of that
+// Observium gave.  The names of the checks and the devices are looked up on a best-effort basis: an alert is never dropped for
+// want of a name.  It is what turns the Observium square amber on the Topology page (health.go).
+func (o *observium) ActiveAlerts(ctx context.Context) ([]string, error) {
+	path := "/alerts/?status=failed&pagesize=500"
+	var devName string
+	if o.dev != "" {
+		row, id, err := o.resolve(ctx, o.dev)
+		if err != nil {
+			return nil, err
+		}
+		path += "&device_id=" + url.QueryEscape(id)
+		devName = firstOf(str(row["hostname"]), str(row["sysName"]), o.dev)
+	}
+	rs, err := o.list(ctx, path, "alerts")
+	if err != nil {
+		return nil, err
+	}
+	var failed []map[string]any
+	for _, r := range rs {
+		if st := str(r["alert_status"]); st == "" || st == "0" {
+			failed = append(failed, r)
+		}
+	}
+	if len(failed) == 0 {
+		return nil, nil
+	}
+	checks := map[string]string{} // alert_test_id -> the name of the check
+	if cs, err := o.list(ctx, "/alert_checks/?fields=alert_test_id,alert_name&pagesize=500", "alert_checks"); err == nil {
+		for _, c := range cs {
+			checks[str(c["alert_test_id"])] = str(c["alert_name"])
+		}
+	}
+	hosts := map[string]string{} // device_id -> host name (the server's answer names the device an alert is on)
+	if o.dev == "" {
+		if ds, err := o.list(ctx, "/devices/?fields=device_id,hostname,sysName&pagesize=500", "devices"); err == nil {
+			for _, d := range ds {
+				hosts[str(d["device_id"])] = firstOf(str(d["hostname"]), str(d["sysName"]))
+			}
+		}
+	}
+	out := make([]string, 0, len(failed))
+	for _, r := range failed {
+		host := firstOf(devName, hosts[str(r["device_id"])])
+		if host == "" && str(r["device_id"]) != "" {
+			host = "device " + str(r["device_id"])
+		}
+		name := firstOf(str(r["alert_name"]), checks[str(r["alert_test_id"])])
+		if name == "" {
+			name = "alert " + firstOf(str(r["alert_table_id"]), str(r["alert_test_id"]), "?")
+			if t := str(r["entity_type"]); t != "" {
+				name = t + " " + firstOf(str(r["entity_id"]), "?") + " alert"
+			}
+		}
+		line := name
+		if host != "" {
+			line = host + ": " + name
+		}
+		if m := firstOf(str(r["last_message"]), str(r["message"])); m != "" {
+			line += ": " + RedactText(m)
+		}
+		out = append(out, line)
+	}
+	return out, nil
+}
+
 // ---- show ----
 
 // obsShow are the lists "show NAME" reads.

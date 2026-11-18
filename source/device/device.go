@@ -107,6 +107,13 @@ type Driver interface {
 	Close(ctx context.Context)
 }
 
+// AlertReporter is implemented by a driver of a monitoring system (Observium) that knows of alerts it has raised: the
+// health check asks it on every round, and a device with an alert is amber on the Topology page with the alerts as its detail.
+// Each string is one alert, short enough for a line.  Nothing here changes anything.
+type AlertReporter interface {
+	ActiveAlerts(ctx context.Context) ([]string, error)
+}
+
 // Factory makes the driver of a platform for one device.
 type Factory func(d Device, c Credential) (Driver, error)
 

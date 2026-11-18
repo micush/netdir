@@ -1,5 +1,23 @@
 # Changelog
 
+## [v213] - 2026-11-18 — an Observium alert turns its square amber and shows the alert
+
+### Added
+- A device on the Observium platform is now amber (`warn`) on the Topology page while Observium holds a failed alert, and the tooltip names the alerts, one per line (`host: check name: message`). For the Observium server it is every monitored device's failed alerts; with the option `device` it is that device's. The detail line reads `Observium: 2 alerts failed: a; b (+1 more)`. When the alerts clear the next check makes it green again.
+- `device.AlertReporter` (an optional driver interface, `ActiveAlerts`) and `Health.Alerts` (the full list, in the canvas and device health JSON). The monitor asks a driver of `alertPlatforms` (only `observium`) on every reach check, one request (`/alerts/?status=failed`, with the check names from `/alert_checks/` and the host names from `/devices/`, both best effort). A failed alerts request leaves the square as it was (green): a hiccup in the alert API is not an alert. A device that does not answer or refuses its facts keeps its red or amber for that reason, as before.
+
+### Changed
+- Right-click a device on the Topology page ▸ **Open** (first item): opens `https://address[:port]` in a new browser tab (Observium below its `prefix` option). Not offered for ios, linux, windows, ad or tools, which have no web page. Nothing is sent to the device by netdir; the browser makes the connection.
+- The Devices page counts an Observium device with an alert under "Refusing" (the tile's amber), as it counts every `warn`.
+
+### Verified
+- `TestObserviumActiveAlerts` (server and one device, failed alerts only, host names) and `TestMonitorObserviumAlertIsAmber` (warn, `Health.Alerts`, the detail line) against the TLS stub; `node --check webui/app.js` (the Open item was not clicked in a browser). `wrapLeak` records the new alerts answer (leak test passes). gofmt, vet, `go test -race ./device`, the leak test, `go test` of the main package with cgo off, and the amd64, arm64, arm, 386 and riscv64 cross-compiles.
+
+### Not verified
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard`: the PAM headers could not be installed in this sandbox, so that one test (it builds the tree with cgo) failed here; nothing in it touches this change.
+- Against a real Observium: the alert fields (`alert_status` 0 = failed, `alert_test_id`, `last_message`, `alert_name` of `/alert_checks/`) are the names of Observium's database, seen only in the stub, and the `status=failed` filter is the one the driver already used. If a build names them differently the alerts still count but the text falls back to `entity_type entity_id alert`.
+- The tooltip in a real browser.
+
 ## [v212] - 2026-11-17 — the filter box of Add device ▸ Devices from inventory filters
 
 ### Fixed

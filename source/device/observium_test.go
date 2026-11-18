@@ -467,3 +467,45 @@ func TestObsPick(t *testing.T) {
 }
 
 func toJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// The alerts Observium holds as failed are what turns its square amber: for the server, every device's; for one device, its own.
+func TestObserviumActiveAlerts(t *testing.T) {
+	ctx := context.Background()
+	drv, st := obsOpen(t, nil)
+	ar, ok := drv.(AlertReporter)
+	if !ok {
+		t.Fatal("the Observium driver does not report alerts")
+	}
+	a, err := ar.ActiveAlerts(ctx)
+	if err != nil || len(a) != 1 || !strings.HasPrefix(a[0], "core-sw.example.com: ") {
+		t.Fatalf("server alerts: %v %q", err, a)
+	}
+	if !strings.Contains(st.joined(), "status=failed") {
+		t.Errorf("only the failed alerts are asked for: %s", st.joined())
+	}
+	drv, _ = obsOpen(t, map[string]string{"device": "ipam2"})
+	a, err = drv.(AlertReporter).ActiveAlerts(ctx)
+	if err != nil || len(a) != 1 || a[0] != "ipam2.example.com: port 101 alert" {
+		t.Fatalf("device alerts: %v %q", err, a)
+	}
+}
+
+// A device with an alert is "warn" with the alerts in its detail.
+func TestMonitorObserviumAlertIsAmber(t *testing.T) {
+	d, _ := obsStub(t, "")
+	d.Credential = "obs"
+	creds := []Credential{{Name: "obs", Token: "APITOKEN"}}
+	m := NewMonitor()
+	m.Timeout = 2 * time.Second
+	m.IdleReach, m.IdleFacts = 0, 0
+	now := time.Unix(1_800_000_000, 0)
+	m.Check(context.Background(), []Device{d}, creds, now)
+	h := m.Snapshot()[d.Name]
+	if h.Status != "warn" || len(h.Alerts) != 1 || !strings.Contains(h.Detail, "Observium: 1 alert failed: core-sw.example.com") || h.Facts == nil {
+		t.Fatalf("with an alert: %+v", h)
+	}
+
+	if got := alertDetail("observium", []string{"a", "b", "c", "d", "e"}); got != "Observium: 5 alerts failed: a; b; c (+2 more)" {
+		t.Errorf("alertDetail: %q", got)
+	}
+}

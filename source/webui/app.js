@@ -1390,7 +1390,9 @@
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
     const devTip = (d, info) => {
       const h = (info && info.health) || {}, f = h.facts || {};
-      return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""), info ? info.detail : "Not checked yet",
+      const alerts = h.alerts || [];   // Observium: the alerts it holds as failed (the square is amber), each on its own line
+      return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""),
+        alerts.length ? "Observium: " + alerts.length + (alerts.length === 1 ? " alert" : " alerts") + " failed\n" + alerts.map((a) => "\u2022 " + a).join("\n") : info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
         f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.by ? "Checked by " + h.by : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
         (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : devPausedHere(d.name) ? "Paused on this node: not contacted from here" : ""].filter(Boolean).join("\n");
@@ -1446,9 +1448,16 @@
     const pasteWhy = (g) => (!devClip.length ? "Nothing copied yet: right-click a device ▸ Copy, or a gateway ▸ Copy ▸ All devices" : !devClip.some((n) => devByName(n)) ? "The copied devices are no longer in the inventory" : !clipNew(g).length ? (devClip.length > 1 ? "Every copied device is already on this gateway" : devClip[0] + " is already on this gateway") : "");
     const pasteDevice = (g) => quick(() => { const add = clipNew(g); g.devices = (g.devices || []).concat(add); cv.sel = { kind: "dev", addr: add[add.length - 1] }; });
     const pasteItem = (g) => [devClip.length > 1 ? "Paste " + devClip.length + " devices" : "Paste device" + (devClip.length ? " " + devClip[0] : ""), () => pasteDevice(g), "", null, pasteWhy(g)];
+    // Open: the device's own address and port in a new browser tab (https; Observium below its prefix).  Not for the platforms that have no web page (SNMP, SSH, LDAP, the tools).
+    const NO_WEB = ["ios", "linux", "windows", "ad", "tools"];
+    const devURL = (d) => {
+      const host = d.address.includes(":") && !d.address.startsWith("[") ? "[" + d.address + "]" : d.address;
+      return "https://" + host + (d.port ? ":" + d.port : "") + (d.platform === "observium" && d.options && d.options.prefix ? d.options.prefix.replace(/\/+$/, "") : "") + "/";
+    };
     const devItems = (g, name) => {
       const d = devByName(name);
       return [
+        ...(NO_WEB.includes(d.platform) || !d.address ? [] : [["Open", () => { window.open(devURL(d), "_blank", "noopener,noreferrer"); }]]),
         ["Network tools", null, "", toolItems(d.address, name).filter((x) => x !== "-")],
         ...(["observium", "ipfabric", "centreon", "panorama", "pdm", "afc", "unimus", "device42", "proxmox", "vcenter"].includes(d.platform) && !(d.options && d.options.device) ? [["Import", null, "", [["Devices", () => importDevices(name)], ["Preview", () => importPreview(name)]]]] : []),
         ...(d.platform === "entra" ? [["Troubleshoot user or host", () => troubleForm(name, "entra")], ["Sign in with Microsoft", () => signinDialog(name)]] : []),
