@@ -923,7 +923,7 @@
       // Dragging to reorder is off meanwhile.
       const flt = parseFilter(state.topoFilter), words = { length: flt.empty ? 0 : 1 };
       const devMatch = (n) => {
-        const d = devByName(n), t = [d.name, d.address, platformName(d.platform)].join(" ").toLowerCase();
+        const d = devByName(n), t = [d.name, d.address, d.platform, platformName(d.platform)].join(" ").toLowerCase();
         return flt.match((w) => (w.startsWith("tag:") ? (d.tags || []).some((x) => x.toLowerCase().includes(w.slice(4))) : t.includes(w) || (d.tags || []).some((x) => !x.toLowerCase().startsWith("source=") && x.toLowerCase().includes(w))));
       };
       // Up to DOT_FROM devices each is a square with its name, as always.  More than that, each is a small square joined to the gateway, and the
@@ -1235,7 +1235,7 @@
           const sel = els[f.k], all = f.options, chosen = new Set(), count = h("span", { class: "hint" }, "");
           const paint = () => {
             for (const o of sel.options) { if (o.selected) chosen.add(o.value); else chosen.delete(o.value); }
-            const q = parseFilter(fin.value), keep = all.filter((o) => q.match((w) => o.toLowerCase().includes(w)));
+            const q = parseFilter(fin.value), keep = all.filter((o) => q.match((w) => (o + " " + ((f.hay && f.hay[o]) || "")).toLowerCase().includes(w)));
             clear(sel).append(...keep.map((o) => h("option", { value: o, selected: chosen.has(o) }, o)));
             count.textContent = q.empty ? "" : keep.length + " of " + all.length + " shown" + (chosen.size ? ", " + chosen.size + " picked" : "");
           };
@@ -1481,7 +1481,7 @@
       };
       form(edit ? "Edit device " + edit : "Add device", [
         ...(edit || !others.length ? [] : [{ k: "pick", l: "Add", options: [NEW_DEV, FROM_INV], v: NEW_DEV, on: show, initOn: true },
-          { k: "many", l: "Devices", options: others, multi: true, wide: true, hint: "Shift-click or Ctrl-click to pick several." },
+          { k: "many", l: "Devices", options: others, hay: Object.fromEntries(others.map((o) => { const x = devByName(o); return [o, x ? [x.platform, platformName(x.platform), x.address, (x.tags || []).join(" ")].join(" ") : ""]; })), multi: true, wide: true, hint: "Shift-click or Ctrl-click to pick several." },
           { k: "enable", l: "Enable", check: true, v: false }]),
         { k: "name", l: "Name", v: d ? d.name : "", ph: "core-sw1" },
         // a cloud service has one API address: choosing it fills the address in (an address typed by hand is left alone)
@@ -2687,7 +2687,7 @@
     bar.addEventListener("change", (e) => e.stopPropagation());   // the filter and paging controls are not settings
     const changed = () => tbl.dispatchEvent(new Event("change", { bubbles: true }));
     const plain = spec.cols.map((c) => !c.secret);   // the filter never looks into a password or a token
-    const visible = () => { const flt = parseFilter(filter.value); return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x, i) => plain[i] && x.toLowerCase().includes(w)))); };
+    const visible = () => { const flt = parseFilter(filter.value); return flt.empty ? data : data.filter((r) => flt.match((w) => r.v.some((x, i) => plain[i] && (x.toLowerCase().includes(w) || (spec.cols[i].opts === PLATFORMS && platformName(x.trim()).toLowerCase().includes(w)))))); };
     const clearMarks = () => tbody.querySelectorAll(".drop-above, .drop-below").forEach((x) => x.classList.remove("drop-above", "drop-below"));
     const trOf = (row) => [...tbody.children].find((t) => t._row === row);
     const cells = (row) => row.v.map((x) => x.trim());

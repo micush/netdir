@@ -1,5 +1,26 @@
 # Changelog
 
+## [v223] - 2026-11-18 — the Topology filter matches a platform by its key as well as its name
+
+### Fixed
+- The Topology page's device filter looked at a platform only by its display name (`Cisco IOS-XE`), so `iosxe` found nothing. It now matches both, as the two Devices filters do.
+
+## [v222] - 2026-11-18 — Configure ▸ Devices filter matches a platform by its name as well as its key
+
+### Fixed
+- The Configure ▸ Devices table filter looked in the Platform column only by its key (`iosxe`), so `IOS-XE` or `Cisco IOS-XE`, the name the column shows, found nothing. It now matches both.
+
+## [v221] - 2026-11-18 — Add device ▸ Devices from inventory filters on platform, address and tags too
+
+### Changed
+- The filter box under the **Devices** list of Add device ▸ *Devices from inventory* matched only the device name. It now matches the name, the platform (its key, `proxmox`, and its name, `Proxmox VE`), the address and the tags, with the same AND, OR and `!` rules.
+
+### Verified
+- `node --check` of `app.js` and `help.js`; the device package builds.
+
+### Not verified
+- The filter in a real browser.
+
 ## [v220] - 2026-11-18 — the sensor check is removed: only monitoring and management systems show a purple alert square
 
 ### Removed
