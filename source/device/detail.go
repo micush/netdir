@@ -98,7 +98,7 @@ var secretWords = []string{"password", "passwd", "secret", "md5", "psk", "token"
 	"pwd", "phash", "private-key", "private_key", "privatekey", "pre-shared", "pre_shared", "api-key", "api_key", "apikey",
 	"community-string", "community_string",
 	// Observium (a device's SNMP community, and its SNMP authentication and privacy passwords and user name)
-	"snmp_community", "snmp-community", "authpass", "cryptopass", "snmp_authname",
+	"snmp_community", "snmp-community", "snmp_communit", "snmp-communit", "snmpcommunit", "ro_community", "rw_community", "read_community", "write_community", "authpass", "cryptopass", "snmp_authname",
 	// Infoblox WAPI (zone transfer and DDNS keys: tsig_key, tsig_key_name, ...)
 	"tsig_key", "tsig-key",
 	// RADIUS and TACACS+ shared keys, SNMPv3 passwords, routing protocol and MC-LAG keys (ArubaOS-CX and others), and the ciphertext of any of them
@@ -134,7 +134,7 @@ func redactIn(v any, snmp bool) any {
 		out := make(map[string]any, len(t))
 		for k, x := range t {
 			lk := strings.ToLower(k)
-			if x != nil && x != "" && strings.Contains(lk, "community") && (snmp || strings.Contains(lk, "snmp")) {
+			if x != nil && x != "" && strings.Contains(lk, "communit") && (snmp || strings.Contains(lk, "snmp")) {
 				out[k] = "(hidden)" // the names of the communities are the secrets, so a list or an object of them goes whole
 				continue
 			}
@@ -175,6 +175,14 @@ func secretLeafless(v any) bool {
 			}
 		}
 		return true
+	case []any: // a list of plain values (passwords: ["a", "b"]) is the secret too
+		for _, x := range t {
+			switch x.(type) {
+			case map[string]any, []any:
+				return false
+			}
+		}
+		return len(t) > 0
 	}
 	return false
 }

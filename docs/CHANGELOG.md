@@ -1,5 +1,17 @@
 # Changelog
 
+## [v224] - 2026-11-18 — SNMP community strings kept from an assistant under the plural names too
+
+### Fixed
+- A key such as `snmp_communities`, `snmp-communities` or `snmpCommunities` was not recognised as holding secrets: the rules looked for the word `community`, and `communities` does not contain it, so the community strings came back in plain text in a device's configuration or answer. The rules now look for `communit`, in the key-name check, the JSON-text check and the line check, and also hide `ro_community`, `rw_community`, `read_community` and `write_community`. A BGP community (`bgp_communities`, a route-map line) is still shown: only a key under an SNMP name, or one of those names, is hidden.
+- A list of plain values under a secret's name (`"radius_passwords": ["a", "b"]`) was shown as it was; it is now hidden whole, as an object of plain values already was.
+
+### Verified
+- `TestSNMPCommunitiesAreHidden` and `TestListUnderSecretNameIsHidden`; gofmt, vet, the device package tests, the redaction, privacy and leak tests of the main package, the leak test script.
+
+### Not verified
+- The exact shape of the four switches' configuration that leaked: I did not see it, so the fix covers the names above, not whatever the real field was called. If a community still shows, add its field name under Configure ▸ Privacy ▸ Secret words and tell me the name.
+
 ## [v223] - 2026-11-18 — the Topology filter matches a platform by its key as well as its name
 
 ### Fixed

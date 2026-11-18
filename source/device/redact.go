@@ -16,13 +16,13 @@ import (
 
 // secretTokens: a word of a line that holds one of these, or is one of secretWords, hides the rest of the line.
 var secretTokenParts = []string{"password", "passwd", "secret", "psk", "passphrase", "md5", "encrypted", "token", "key-string",
-	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass", "cryptopass", "snmp_community",
+	"key_string", "auth-key", "authentication-key", "pre-shared", "privatekey", "private-key", "community-string", "pwd", "phash", "api-key", "communitystring", "authpass", "privpass", "cryptopass", "snmp_community", "snmp_communit", "snmp-communit", "snmpcommunit", "ro_community", "rw_community", "read_community", "write_community",
 	"passkey", "pass_key", "auth_pass", "priv_pass", "authentication_key", "keepalive_key", "ciphertext", "keystring", "shared_key", "shared-key", "sharedkey"}
 var secretTokenExact = map[string]bool{"key": true, "community": true, "ro": false}
 
 var (
 	pemBlock = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE|PGP)[A-Z ]*-----.*?(-----END [^\n]*-----|$)`)
-	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass|cryptopass|snmp_community|passkey|pass_key|auth_pass|priv_pass|authentication_key|keepalive_key|ciphertext|keystring|shared_key|sharedkey)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s{\[][^,}\s]*)`)
+	jsonSec  = regexp.MustCompile(`(?i)("[^"]*(password|passwd|secret|psk|passphrase|token|key-string|auth-key|authentication-key|encrypted|communitystring|authpass|privpass|cryptopass|snmp_communit|snmp-communit|snmpcommunit|ro_community|rw_community|read_community|write_community|passkey|pass_key|auth_pass|priv_pass|authentication_key|keepalive_key|ciphertext|keystring|shared_key|sharedkey)[^"]*"\s*[:=]\s*)("([^"\\]|\\.)*"|[^,}\s{\[][^,}\s]*)`)
 )
 
 // jsonMember is one line of indented JSON that holds a member with a plain value: "key": "value",
