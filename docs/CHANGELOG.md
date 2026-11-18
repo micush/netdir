@@ -1,5 +1,17 @@
 # Changelog
 
+## [v220] - 2026-11-18 — the sensor check is removed: only monitoring and management systems show a purple alert square
+
+### Removed
+- The sensor-fault check of v218. A device that is not a monitoring or management system is never asked for its fans, power supplies or temperatures to colour its square, so the health check sends such a device nothing beyond the facts request it always did (no extra RESTCONF, REST or SSH requests on a switch, firewall or server).
+- The purple square stays for Observium, Centreon, Aruba Fabric Composer, Aviatrix Controller and CoPilot, Panorama, Meraki, Unimus, Proxmox VE, vCenter, Proxmox Backup Server and Proxmox Datacenter Manager (their own alerts, at most every 2 minutes), and the option `alerts=off` still keeps one of them from ever being purple.
+
+### Verified
+- gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, the cross-compiles.
+
+### Not verified
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard` (no PAM headers in this sandbox).
+
 ## [v219] - 2026-11-18 — Edit ▸ Arrange puts a gateway's devices in alphabetical order
 
 ### Added

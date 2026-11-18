@@ -252,55 +252,6 @@ func alertDetail(platform string, n int) string {
 	return fmt.Sprintf("%s: %d alert%s", name, n, map[bool]string{true: "", false: "s"}[n == 1])
 }
 
-// sensorFault says whether the state a device gives a sensor is a fault: failed, fault, critical, alarm, error, warning, shutdown,
-// bad, not ok.  An empty slot (absent, not inserted, not present) and an unknown or empty state are not.
-func sensorFault(state string) bool {
-	s := strings.ToLower(strings.TrimSpace(state))
-	switch s {
-	case "", "ok", "normal", "good", "up", "present", "absent", "unknown", "n/a", "na":
-		return false
-	}
-	if strings.Contains(s, "absent") || strings.Contains(s, "not present") || strings.Contains(s, "notinserted") || strings.Contains(s, "not inserted") || strings.Contains(s, "unknown") {
-		return false
-	}
-	for _, w := range []string{"fail", "fault", "crit", "alarm", "error", "warn", "shutdown", "bad", "nok", "not ok", "notok", "nonoperational", "non-operational"} {
-		if strings.Contains(s, w) {
-			return true
-		}
-	}
-	return false
-}
-
-// faults counts the sensors of a device (its fans, power supplies and temperatures, as its driver reads them) that are in a fault
-// state.  A driver that reads no resources, or a device that does not answer them, has none: that is not an alert.
-func (m *Monitor) faults(ctx context.Context, d Device, c Credential) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*m.Timeout)
-	defer cancel()
-	drv, err := Open(d, c)
-	if err != nil {
-		return 0, err
-	}
-	defer drv.Close(context.WithoutCancel(ctx))
-	rs, ok := drv.(Resourcer)
-	if !ok {
-		return 0, nil
-	}
-	r, err := rs.Resources(ctx)
-	if err != nil {
-		if errors.Is(err, ErrUnsupported) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	n := 0
-	for _, s := range r.Sensors {
-		if sensorFault(s.State) {
-			n++
-		}
-	}
-	return n, nil
-}
-
 // alerts asks the driver of d for its failed alerts; a driver that does not report any gives none.
 func (m *Monitor) alerts(ctx context.Context, d Device, c Credential) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*m.Timeout)
@@ -342,12 +293,10 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		}
 		conn.Close()
 	}
-	asked := false // the facts were asked in this round
 	wasDown := h.Status != "ok" && h.Status != "warn"
 	_, factsEvery := m.intervals(now)
 	if udp || wasDown || h.FactsAt == 0 || now.Sub(time.Unix(h.FactsAt, 0)) >= factsEvery { // an SNMP device is asked every time: one datagram is the whole check
 		h.FactsAt = now.Unix()
-		asked = true
 		f, err := m.facts(ctx, d, c)
 		if err != nil {
 			h.FactsErr = scrub(err.Error(), c)
@@ -374,11 +323,6 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 			if a, err := m.alerts(ctx, d, c); err == nil {
 				h.AlertCount, h.AlertsAt = len(a), now.Unix()
 			}
-		}
-	case asked:
-		// any other device: its faults (a fan, a power supply or a temperature sensor in a failed state), looked at when its facts are
-		if n, err := m.faults(ctx, d, c); err == nil {
-			h.AlertCount, h.AlertsAt = n, now.Unix()
 		}
 	}
 	if h.AlertCount > 0 {
