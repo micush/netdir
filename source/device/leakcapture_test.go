@@ -278,7 +278,14 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mRaw
 			mRes
 		}{rd, mAPI{m}, mRaw{m}, mRes{m}}
-	case "api raw ": // afc, aviatrix, centreon, ipfabric, proxmox
+	case "api raw alert ": // centreon
+		return struct {
+			recDrv
+			mAPI
+			mRaw
+			mAlert
+		}{rd, mAPI{m}, mRaw{m}, mAlert{m}}
+	case "api raw ": // afc, aviatrix, ipfabric, proxmox
 		return struct {
 			recDrv
 			mAPI

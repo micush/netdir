@@ -22,8 +22,9 @@ import (
 //	idle  not checked yet
 //	paused  the device is disabled
 //
-// A monitoring system (Observium) that has an alert failed for what the device stands for is "warn" too, with the alerts in
-// Alerts and in the detail: the API answers, but something it watches is wrong.
+// A monitoring system (Observium, Centreon) that holds alerts is still "ok" here (it answers); how many alerts it holds is in
+// AlertCount, the first of them in Alerts, and the detail says so.  The Topology page paints such a square in its own colour
+// ("alert", canvas.go), which is neither red, amber nor green: a monitoring system with an alert is working.
 type Health struct {
 	Status   string `json:"status"`
 	Detail   string `json:"detail"`
@@ -32,8 +33,11 @@ type Health struct {
 	Checked  int64  `json:"checked,omitempty"`   // unix time of the last reach check
 	FactsAt  int64  `json:"facts_at,omitempty"`  // unix time of the last facts request, good or bad
 	FactsErr string `json:"facts_err,omitempty"` // why the last facts request failed
-	// Alerts are the alerts a monitoring system (Observium) holds as failed, as of the last check (AlertReporter).
-	Alerts []string `json:"alerts,omitempty"`
+	// Alerts are the first maxAlertsKept of the alerts a monitoring system holds, AlertCount how many it holds (AlertReporter);
+	// AlertsAt is the unix time they were asked for.
+	Alerts     []string `json:"alerts,omitempty"`
+	AlertCount int      `json:"alert_count,omitempty"`
+	AlertsAt   int64    `json:"alerts_at,omitempty"`
 	// By is the node that did the check; set by whoever reads the health (the daemon), never by the monitor.
 	By string `json:"by,omitempty"`
 }
@@ -233,27 +237,39 @@ func (m *Monitor) Recheck(ctx context.Context, d Device, c Credential, now time.
 // udpPlatforms are the platforms whose driver talks UDP (SNMP): there is no port to connect to, so the check is the request itself.
 var udpPlatforms = map[string]bool{"ios": true}
 
-// alertPlatforms are the platforms whose driver reports alerts (AlertReporter); they are asked on every reach check, one request.
-var alertPlatforms = map[string]bool{"observium": true}
+// alertPlatforms are the platforms whose driver reports alerts (AlertReporter) and the platform's name in the detail.
+var alertPlatforms = map[string]string{"observium": "Observium", "centreon": "Centreon"}
 
-// maxAlertsShown is how many alerts the detail line names; Alerts has them all.
-const maxAlertsShown = 3
+// alertEvery is the shortest time between two alert requests to one device (the reach check is more often than that).
+const alertEvery = 2 * time.Minute
 
-// alertDetail is the detail of a device with alerts: "Observium: 2 alerts failed: a; b".
-func alertDetail(platform string, alerts []string) string {
-	name := map[string]string{"observium": "Observium"}[platform]
-	if name == "" {
-		name = platform
-	}
+// maxAlertsKept is how many alerts Health keeps (the count is of all of them); maxAlertsShown how many the detail names.
+const (
+	maxAlertsKept  = 20
+	maxAlertsShown = 3
+)
+
+// alertDetail is the detail of a device with alerts: "Observium: 2 alerts: a; b (+1 more)".
+func alertDetail(platform string, n int, alerts []string) string {
+	name := firstNonEmptyStr(alertPlatforms[platform], platform)
 	shown := alerts
 	if len(shown) > maxAlertsShown {
 		shown = shown[:maxAlertsShown]
 	}
-	d := fmt.Sprintf("%s: %d alert%s failed: %s", name, len(alerts), map[bool]string{true: "", false: "s"}[len(alerts) == 1], strings.Join(shown, "; "))
-	if more := len(alerts) - len(shown); more > 0 {
+	d := fmt.Sprintf("%s: %d alert%s: %s", name, n, map[bool]string{true: "", false: "s"}[n == 1], strings.Join(shown, "; "))
+	if more := n - len(shown); more > 0 {
 		d += fmt.Sprintf(" (+%d more)", more)
 	}
 	return d
+}
+
+func firstNonEmptyStr(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // alerts asks the driver of d for its failed alerts; a driver that does not report any gives none.
@@ -289,7 +305,6 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return Health{Status: "paused", Detail: "disabled: never contacted", Facts: h.Facts, LastOK: h.LastOK}
 	}
 	h.Checked = now.Unix()
-	h.Alerts = nil // what the last round found is not what this one will
 	udp := udpPlatforms[d.Platform]
 	if d.Platform != "tools" && !udp { // the tools are programs on this node, and SNMP is UDP: nothing to dial
 		rctx, cancel := context.WithTimeout(ctx, m.Timeout)
@@ -297,6 +312,7 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		cancel()
 		if err != nil {
 			h.Status, h.Detail = "bad", "the API port does not answer: "+shortErr(err)
+			h.Alerts, h.AlertCount, h.AlertsAt = nil, 0, 0
 			return h
 		}
 		conn.Close()
@@ -321,12 +337,19 @@ func (m *Monitor) checkOne(ctx context.Context, d Device, c Credential, h Health
 		return h
 	}
 	h.Status, h.Detail = "ok", "answering"
-	if alertPlatforms[d.Platform] {
-		// an alerts request that fails leaves the device as it is (green): the facts request has just worked, and a hiccup in the
-		// alert API is not an alert
-		if a, err := m.alerts(ctx, d, c); err == nil && len(a) > 0 {
-			h.Alerts = a
-			h.Status, h.Detail = "warn", alertDetail(d.Platform, a)
+	if _, ok := alertPlatforms[d.Platform]; ok {
+		// asked at most every alertEvery; a request that fails keeps what was known (a hiccup in the alert API is not an alert)
+		if now.Sub(time.Unix(h.AlertsAt, 0)) >= alertEvery {
+			if a, err := m.alerts(ctx, d, c); err == nil {
+				h.AlertCount, h.AlertsAt = len(a), now.Unix()
+				if len(a) > maxAlertsKept {
+					a = a[:maxAlertsKept]
+				}
+				h.Alerts = a
+			}
+		}
+		if h.AlertCount > 0 {
+			h.Detail = alertDetail(d.Platform, h.AlertCount, h.Alerts)
 		}
 	}
 	return h

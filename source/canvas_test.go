@@ -413,3 +413,22 @@ func TestUnattachedDeviceReadsAsDisabled(t *testing.T) {
 		t.Errorf("offWhy: %q", got)
 	}
 }
+
+// A device that answers and holds alerts is drawn "alert" (its own colour); one that is down stays "bad", whatever it holds.
+func TestCanvasDeviceWithAlerts(t *testing.T) {
+	dc := &DaemonConfig{}
+	dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium"}, {Name: "cen", Platform: "centreon"}, {Name: "plain", Platform: "iosxe"}}
+	g := &GroupConfig{Devices: []string{"obs", "cen", "plain"}}
+	health := map[string]device.Health{
+		"obs":   {Status: "ok", Detail: "Observium: 2 alerts: a; b", AlertCount: 2, Alerts: []string{"a", "b"}},
+		"cen":   {Status: "bad", Detail: "the API port does not answer", AlertCount: 5},
+		"plain": {Status: "ok", Detail: "answering"},
+	}
+	got := map[string]string{}
+	for _, d := range canvasDevices(dc, g, health) {
+		got[d.Name] = d.Status
+	}
+	if got["obs"] != "alert" || got["cen"] != "bad" || got["plain"] != "ok" {
+		t.Fatalf("statuses: %v", got)
+	}
+}

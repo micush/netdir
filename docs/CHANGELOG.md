@@ -1,22 +1,21 @@
 # Changelog
 
-## [v213] - 2026-11-18 — an Observium alert turns its square amber and shows the alert
+## [v213] - 2026-11-18 — Observium and Centreon alerts: a purple square and the count in the tooltip; Open on devices
 
 ### Added
-- A device on the Observium platform is now amber (`warn`) on the Topology page while Observium holds a failed alert, and the tooltip names the alerts, one per line (`host: check name: message`). For the Observium server it is every monitored device's failed alerts; with the option `device` it is that device's. The detail line reads `Observium: 2 alerts failed: a; b (+1 more)`. When the alerts clear the next check makes it green again.
-- `device.AlertReporter` (an optional driver interface, `ActiveAlerts`) and `Health.Alerts` (the full list, in the canvas and device health JSON). The monitor asks a driver of `alertPlatforms` (only `observium`) on every reach check, one request (`/alerts/?status=failed`, with the check names from `/alert_checks/` and the host names from `/devices/`, both best effort). A failed alerts request leaves the square as it was (green): a hiccup in the alert API is not an alert. A device that does not answer or refuses its facts keeps its red or amber for that reason, as before.
-
-### Changed
-- Right-click a device on the Topology page ▸ **Open** (first item): opens `https://address[:port]` in a new browser tab (Observium below its `prefix` option). Not offered for ios, linux, windows, ad or tools, which have no web page. Nothing is sent to the device by netdir; the browser makes the connection.
-- The Devices page counts an Observium device with an alert under "Refusing" (the tile's amber), as it counts every `warn`.
+- A device on the Observium or Centreon platform that answers and holds alerts is drawn **purple** on the Topology page (new status `alert`, a device colour only: not red, amber or green, because a monitoring system with alerts is working). The tooltip gives the count and the first 20 alerts (`Observium: 12 alerts`, `• host: check: message`, `… and 3 more`); the detail line names the first three. The legend has a purple "alerts" dot, `--canvas` prints `[ALRT]`. A device that is down stays red and one that refuses its request stays amber, whatever it holds. Nothing else changes: the Devices page, the alerts and the metrics still see it as `ok` (answering).
+- Observium: the alerts are the failed ones (`/alerts/?status=failed`), for the server every monitored device's, with the option `device` that device's; the check names come from `/alert_checks/` and the host names from `/devices/` (both best effort).
+- Centreon: the problems nobody has dealt with: hosts down or unreachable and services in warning, critical or unknown, except those acknowledged or in downtime. Only the first 20 pages of hosts and of services are read.
+- `device.AlertReporter` (an optional driver interface, `ActiveAlerts`); `Health.Alerts` (first 20), `Health.AlertCount` and `Health.AlertsAt`. The monitor asks a driver of `alertPlatforms` (observium, centreon) at most every 2 minutes, on a reach check; a request that fails keeps what was known (a hiccup in the alert API is not an alert), and a device that is down forgets its alerts.
+- Right-click a device on the Topology page ▸ **Open** (first item): opens `https://address[:port]` in a new browser tab (Observium below its `prefix` option). Not offered for ios, linux, windows, ad or tools, which have no web page. The browser makes the connection, not netdir.
 
 ### Verified
-- `TestObserviumActiveAlerts` (server and one device, failed alerts only, host names) and `TestMonitorObserviumAlertIsAmber` (warn, `Health.Alerts`, the detail line) against the TLS stub; `node --check webui/app.js` (the Open item was not clicked in a browser). `wrapLeak` records the new alerts answer (leak test passes). gofmt, vet, `go test -race ./device`, the leak test, `go test` of the main package with cgo off, and the amd64, arm64, arm, 386 and riscv64 cross-compiles.
+- `TestObserviumActiveAlerts`, `TestMonitorObserviumAlertIsAmber` (stays `ok`, count, detail), `TestCentreonActiveAlerts` (hosts and services) against the TLS stubs; `TestCanvasDeviceWithAlerts` (alert only when `ok`; a down device stays red). `wrapLeak` records the new alerts answer (leak test passes). `node --check` of `app.js` and `help.js`. gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, and the amd64, arm64, arm, 386 and riscv64 cross-compiles.
 
 ### Not verified
-- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard`: the PAM headers could not be installed in this sandbox, so that one test (it builds the tree with cgo) failed here; nothing in it touches this change.
-- Against a real Observium: the alert fields (`alert_status` 0 = failed, `alert_test_id`, `last_message`, `alert_name` of `/alert_checks/`) are the names of Observium's database, seen only in the stub, and the `status=failed` filter is the one the driver already used. If a build names them differently the alerts still count but the text falls back to `entity_type entity_id alert`.
-- The tooltip in a real browser.
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard`: the PAM headers could not be installed in this sandbox, so that test (it builds the tree with cgo) fails here; nothing in it touches this change.
+- Against a real Observium or Centreon: the alert fields (Observium `alert_status` 0 = failed, `alert_test_id`, `last_message`; Centreon `acknowledged`, `in_downtime`, `status.code`) are those the drivers already read, seen only in the stubs. If a build names them differently the alerts still count, but the text falls back to `entity_type entity_id alert` (Observium).
+- The purple square, the legend and the tooltip, and the Open item, in a real browser (light and dark).
 
 ## [v212] - 2026-11-17 — the filter box of Add device ▸ Devices from inventory filters
 

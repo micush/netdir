@@ -18,6 +18,7 @@ import (
 //	warn  yellow  degraded (works, but something underneath it does not)
 //	bad   red     down
 //	idle  grey    not known yet (not applied, or not running here)
+//	alert purple  a device only: a monitoring system (Observium, Centreon) that answers and holds alerts
 //
 // CanvasDevice is one managed device of a gateway, as a square under its circle.
 type CanvasDevice struct {
@@ -271,6 +272,9 @@ func canvasDevices(dc *DaemonConfig, g *GroupConfig, health map[string]device.He
 		}
 		if d.Disabled {
 			h.Status, h.Detail = "paused", "disabled: never contacted"
+		}
+		if h.Status == "ok" && h.AlertCount > 0 { // answering, with alerts of its own: its own colour (purple), not a fault of the device
+			h.Status = "alert"
 		}
 		out = append(out, CanvasDevice{Name: d.Name, Platform: d.Platform, Address: d.Address, Tags: d.Tags, Status: h.Status, Detail: h.Detail, Health: h})
 	}

@@ -758,7 +758,7 @@ func waitForUpdate(sock, target string) {
 	fmt.Println("Still working; check --update-status.")
 }
 
-var canvasTag = map[string]string{"ok": "[ OK ]", "warn": "[WARN]", "bad": "[DOWN]", "idle": "[ -- ]", "paused": "[PAUS]"}
+var canvasTag = map[string]string{"ok": "[ OK ]", "warn": "[WARN]", "bad": "[DOWN]", "idle": "[ -- ]", "paused": "[PAUS]", "alert": "[ALRT]"}
 
 // showCanvas prints the same tree and status colours the GUI canvas draws.
 func showCanvas(sock string) {

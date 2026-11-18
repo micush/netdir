@@ -317,7 +317,52 @@ func (c *centreon) Interfaces(ctx context.Context) ([]Interface, error) {
 
 func (c *centreon) Neighbors(context.Context) ([]Neighbor, error) { return nil, ErrUnsupported }
 func (c *centreon) Config(context.Context) (string, error)        { return "", ErrUnsupported }
-func (c *centreon) Close(context.Context)                         { c.api.close() }
+
+// centFlag reads a yes/no field Centreon gives as a bool, a number or a word.
+func centFlag(v any) bool {
+	switch strings.ToLower(str(v)) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
+// ActiveAlerts are the problems Centreon holds that nobody has dealt with: hosts that are down or unreachable and services in
+// warning, critical or unknown, except those acknowledged or in scheduled downtime.  Each is "host: service: output" (a host is
+// "host: DOWN: output").  Only the first pages of each list are read (a Centreon with thousands of resources is counted from
+// what the first pages hold).  It is what the Topology page counts for a Centreon square (health.go).
+func (c *centreon) ActiveAlerts(ctx context.Context) ([]string, error) {
+	hs, _, herr := c.hosts(ctx, 20)
+	ss, _, serr := c.all(ctx, "/monitoring/services", nil, 20)
+	if herr != nil && serr != nil {
+		return nil, herr
+	}
+	open := func(m map[string]any) bool { return !centFlag(m["acknowledged"]) && !centFlag(m["in_downtime"]) }
+	short := func(m map[string]any) string {
+		o := RedactText(str(m["output"]))
+		if len(o) > 120 {
+			o = o[:120] + "…"
+		}
+		if o != "" {
+			o = ": " + o
+		}
+		return o
+	}
+	var out []string
+	for _, h := range hs {
+		if code, ok := stateOf(h); ok && (code == 1 || code == 2) && open(h) {
+			out = append(out, firstOf(str(h["name"]), str(h["id"]))+": DOWN"+short(h))
+		}
+	}
+	for _, s := range ss {
+		if centWant(s, "problem") && open(s) {
+			out = append(out, centHostName(s)+": "+firstOf(str(s["description"]), str(s["id"]))+short(s))
+		}
+	}
+	return out, nil
+}
+
+func (c *centreon) Close(context.Context) { c.api.close() }
 
 const centUsage = "show platform | pollers | hosts [status=down|unreachable|up|pending] [search=TEXT] [limit=N] | host NAME|ID | services [host=NAME] [status=ok|warning|critical|unknown|problem] [search=TEXT] [limit=N] | problems | hostgroups | servicegroups | downtimes"
 

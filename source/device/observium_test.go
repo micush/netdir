@@ -490,7 +490,7 @@ func TestObserviumActiveAlerts(t *testing.T) {
 	}
 }
 
-// A device with an alert is "warn" with the alerts in its detail.
+// A device with alerts is still "ok" (it answers), with the count and the alerts in its detail; the canvas paints it its own colour.
 func TestMonitorObserviumAlertIsAmber(t *testing.T) {
 	d, _ := obsStub(t, "")
 	d.Credential = "obs"
@@ -501,11 +501,11 @@ func TestMonitorObserviumAlertIsAmber(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	m.Check(context.Background(), []Device{d}, creds, now)
 	h := m.Snapshot()[d.Name]
-	if h.Status != "warn" || len(h.Alerts) != 1 || !strings.Contains(h.Detail, "Observium: 1 alert failed: core-sw.example.com") || h.Facts == nil {
+	if h.Status != "ok" || h.AlertCount != 1 || len(h.Alerts) != 1 || !strings.Contains(h.Detail, "Observium: 1 alert: core-sw.example.com") || h.Facts == nil {
 		t.Fatalf("with an alert: %+v", h)
 	}
 
-	if got := alertDetail("observium", []string{"a", "b", "c", "d", "e"}); got != "Observium: 5 alerts failed: a; b; c (+2 more)" {
+	if got := alertDetail("observium", 5, []string{"a", "b", "c", "d", "e"}); got != "Observium: 5 alerts: a; b; c (+2 more)" {
 		t.Errorf("alertDetail: %q", got)
 	}
 }

@@ -375,3 +375,18 @@ func TestCentreonChange(t *testing.T) {
 		}
 	}
 }
+
+// Centreon's open problems are what the Topology page counts for it: the hosts that are down and the services that are not OK.
+func TestCentreonActiveAlerts(t *testing.T) {
+	st := &centState{}
+	d := centStub(t, st, "/centreon", "latest")
+	drv := open(t, d, Credential{Username: "admin", Password: "pw"})
+	ar, ok := drv.(AlertReporter)
+	if !ok {
+		t.Fatal("the Centreon driver does not report alerts")
+	}
+	a, err := ar.ActiveAlerts(context.Background())
+	if err != nil || strings.Join(a, "|") != "db1: DOWN: CRITICAL - host down|sw1: DOWN|web1: Disk-/var: CRITICAL - 96% used|db1: Load" {
+		t.Fatalf("alerts: %v %q", err, a)
+	}
+}

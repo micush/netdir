@@ -1390,9 +1390,9 @@
     const devByName = (n) => (cv.cfg.settings && cv.cfg.settings.devices || []).find((d) => d.name === n) || null;
     const devTip = (d, info) => {
       const h = (info && info.health) || {}, f = h.facts || {};
-      const alerts = h.alerts || [];   // Observium: the alerts it holds as failed (the square is amber), each on its own line
+      const alerts = h.alerts || [], na = h.alert_count || 0;   // Observium, Centreon: the alerts it holds (purple square); the count first, then the first of them
       return [d.name + " — " + platformName(d.platform) + ", " + d.address + (d.port ? ":" + d.port : ""),
-        alerts.length ? "Observium: " + alerts.length + (alerts.length === 1 ? " alert" : " alerts") + " failed\n" + alerts.map((a) => "\u2022 " + a).join("\n") : info ? info.detail : "Not checked yet",
+        na ? platformName(d.platform) + ": " + na + (na === 1 ? " alert" : " alerts") + (alerts.length ? "\n" + alerts.map((a) => "\u2022 " + a).join("\n") : "") + (na > alerts.length ? "\n\u2026 and " + (na - alerts.length) + " more" : "") : info ? info.detail : "Not checked yet",
         f.model || f.os_version ? [f.vendor, f.model, f.os_version].filter(Boolean).join(" ") : "", f.serial ? "Serial " + f.serial : "",
         f.uptime_s ? "Up " + spanText(f.uptime_s) : "", h.by ? "Checked by " + h.by : "", h.last_ok ? "Last answered " + spanText(Date.now() / 1000 - h.last_ok) + " ago" : "",
         (d.tags || []).length ? "Tags: " + d.tags.join(" ") : "", d.disabled ? "Disabled: never contacted" : devPausedHere(d.name) ? "Paused on this node: not contacted from here" : ""].filter(Boolean).join("\n");
@@ -1976,7 +1976,7 @@
           // right-click on empty canvas: no menu (the shapes and tabs have their own); it only clears the selection
           oncontextmenu: (e) => { e.preventDefault(); cv.sel = null; refresh(); } });
         const legend = legendEl = h("div", { class: "cv-legend muted small hidden" },
-          h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused");
+          h("span", { class: "dot st-ok" }), "working ", h("span", { class: "dot st-warn" }), "degraded ", h("span", { class: "dot st-bad" }), "down ", h("span", { class: "dot st-alert" }), "alerts ", h("span", { class: "dot st-idle" }), "not yet known ", h("span", { class: "dot st-paused" }), "paused");
         state.onTopoFilter = () => { if (cv.loaded) refresh(); };
         main.append(svgHost, legend);
         cv.loaded = false;
