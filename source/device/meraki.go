@@ -336,6 +336,29 @@ func (m *meraki) Neighbors(ctx context.Context) ([]Neighbor, error) {
 	return out, nil
 }
 
+// ActiveAlerts are the devices the dashboard says are offline or alerting (for the organization: all of them; with the option serial:
+// that one).  A dormant device (silent for a long time) is not an alert.
+func (m *meraki) ActiveAlerts(ctx context.Context) ([]string, error) {
+	org, err := m.orgID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := m.get(ctx, "/organizations/"+org+"/devices/statuses?perPage=1000")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range rows(v) {
+		if m.serial != "" && !strings.EqualFold(str(d["serial"]), m.serial) {
+			continue
+		}
+		if st := str(d["status"]); st == "offline" || st == "alerting" {
+			out = append(out, firstOf(str(d["name"]), str(d["serial"]))+" "+st)
+		}
+	}
+	return out, nil
+}
+
 func (m *meraki) Config(context.Context) (string, error) { return "", ErrUnsupported }
 
 // ---- show NAME [network=ID] [serial=S] ----

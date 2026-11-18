@@ -76,7 +76,15 @@ func pxStub(t *testing.T, st *pxState) Device {
 		case p == "/nodes/localhost/status":
 			out(200, map[string]any{"uptime": 1234, "info": map[string]any{"fingerprint": "aa:bb"}})
 		case p == "/status/datastore-usage":
-			out(200, []map[string]any{{"store": "backup1", "total": 100, "used": 40}, {"store": "backup2", "total": 10, "used": 1}})
+			out(200, []map[string]any{{"store": "backup1", "total": 100, "used": 40}, {"store": "backup2", "total": 10, "used": 10}})
+		case p == "/nodes/localhost/tasks":
+			now := pxNow().Unix()
+			out(200, []map[string]any{{"upid": "u1", "worker_type": "garbage_collection", "worker_id": "backup1", "starttime": now - 3600, "endtime": now - 3500, "status": "unable to open chunk store"},
+				{"upid": "u2", "worker_type": "verificationjob", "starttime": now - 3600, "endtime": now - 3500, "status": "WARNINGS: 1"},
+				{"upid": "u3", "worker_type": "backup", "worker_id": "vm/100", "starttime": now - 200000, "endtime": now - 199000, "status": "connection reset"},
+				{"upid": "u4", "worker_type": "prune", "starttime": now - 100, "endtime": now - 90, "status": "OK"}})
+		case p == "/resources/status":
+			out(200, map[string]any{"failed_remotes": 1, "failed_remotes_list": []map[string]any{{"remote": "bk"}}, "pve_nodes": map[string]any{"online": 2, "offline": 1}})
 		case p == "/nodes/localhost/network":
 			out(200, []map[string]any{{"iface": "vmbr0", "type": "bridge", "active": 1, "cidr": "10.0.0.5/24"}})
 		case p == "/admin/datastore/backup1/snapshots":

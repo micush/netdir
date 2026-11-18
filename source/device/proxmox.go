@@ -228,6 +228,28 @@ func (p *proxmox) Facts(ctx context.Context) (Facts, error) {
 	return f, nil
 }
 
+// ActiveAlerts are the cluster's nodes that are not online and its storages that are not available (/cluster/status, /cluster/resources).
+func (p *proxmox) ActiveAlerts(ctx context.Context) ([]string, error) {
+	var out []string
+	cs, err := p.get(ctx, "/cluster/status")
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range rows(cs) {
+		if str(c["type"]) == "node" && str(c["online"]) == "0" {
+			out = append(out, "node "+str(c["name"])+" offline")
+		}
+	}
+	if rs, err := p.get(ctx, "/cluster/resources?type=storage"); err == nil {
+		for _, r := range rows(rs) {
+			if st := str(r["status"]); st != "" && st != "available" {
+				out = append(out, "storage "+firstOf(str(r["storage"]), str(r["id"]))+" "+st)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (p *proxmox) Interfaces(ctx context.Context) ([]Interface, error) {
 	n, err := p.localNode(ctx)
 	if err != nil {

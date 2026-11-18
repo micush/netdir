@@ -216,6 +216,42 @@ func (u *unimus) Facts(ctx context.Context) (Facts, error) {
 	return f, nil
 }
 
+// ActiveAlerts are the managed devices whose last job (backup) failed, for the server all of them, with the option device that one;
+// and the server itself when its health is not OK.  Not tried against a real Unimus: lastJobStatus is the field its device list is
+// said to carry, so a Unimus without it never shows an alert for a device.
+func (u *unimus) ActiveAlerts(ctx context.Context) ([]string, error) {
+	h, err := u.get(ctx, "/health")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	if m, ok := h.(map[string]any); ok {
+		if s := str(m["status"]); s != "" && !strings.EqualFold(s, "OK") {
+			out = append(out, "Unimus health "+s)
+		}
+	}
+	var rs []map[string]any
+	if u.dev != "" {
+		row, err := u.findDevice(ctx)
+		if err != nil {
+			return nil, err
+		}
+		rs = []map[string]any{row}
+	} else if rs, err = u.list(ctx, "/devices", "devices", 0); err != nil {
+		return nil, err
+	}
+	for _, r := range rs {
+		if m, ok := r["managed"].(bool); ok && !m {
+			continue
+		}
+		js := firstOf(str(r["lastJobStatus"]), str(r["lastJob"]))
+		if l := strings.ToLower(js); strings.Contains(l, "fail") || strings.Contains(l, "error") {
+			out = append(out, firstOf(str(r["description"]), str(r["address"]), str(r["uuid"]))+" backup "+strings.ToLower(js))
+		}
+	}
+	return out, nil
+}
+
 func (u *unimus) Interfaces(context.Context) ([]Interface, error) { return nil, ErrUnsupported }
 func (u *unimus) Neighbors(context.Context) ([]Neighbor, error)   { return nil, ErrUnsupported }
 

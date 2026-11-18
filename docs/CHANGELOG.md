@@ -1,5 +1,48 @@
 # Changelog
 
+## [v218] - 2026-11-18 — the purple alert square for every device: sensors in a fault state; `alerts=off`
+
+### Added
+- Every device whose driver reads resources and is not one of the monitoring or management systems above is purple while one of its sensors (fans, power supplies, temperatures) is in a fault state: the state says failed, fault, critical, alarm, error, warning, shutdown, bad, not ok or non-operational. An empty slot (absent, not inserted, not present) and an unknown state are not faults. Faults only: no CPU, memory or disk thresholds and no interfaces that are down. The count is taken when the device's facts are asked (every 5 minutes while someone looks, every 6 hours otherwise, and at once when someone starts looking), one more resources request then; a request that fails keeps the last count.
+- The device option `alerts=off` (Options in the device form) keeps any one device, of any platform, from ever being purple.
+
+### Verified
+- `TestSensorFault` (the state words) and `TestMonitorCountsSensorFaults` (a fake driver with five sensors: two faults counted, an empty slot and a sensor with no state not; `alerts=off` gives none). gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, the five cross-compiles.
+
+### Not verified
+- The state words each real driver gives (read from the drivers' code and tests: aoscx, eos, nxos, iosxe, fortios, panos, nios) on real hardware; a word that is not in the list above never counts.
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard` (no PAM headers in this sandbox); the purple square in a real browser.
+
+## [v217] - 2026-11-18 — the purple alert square for Proxmox Backup Server and Datacenter Manager
+
+### Added
+- **pbs**: datastores that report an `error` or are 90% full or more (`/status/datastore-usage`), and tasks of the last 24 hours that failed (`/nodes/localhost/tasks?errors=1`; a task that ended with warnings, one that is still running and an older failure are not alerts, so the square clears by itself).
+- **pdm**: remotes Datacenter Manager cannot reach and nodes it counts as offline (`/resources/status`: `failed_remotes_list` or `failed_remotes`, `pve_nodes` and `pbs_nodes` with `offline`).
+
+### Verified
+- `TestActiveAlertsOfTheManagementPlatforms` covers both against the TLS stub (a full datastore, a failed task of the last hour, and a warning, an old failure and a success that are not counted; a failed remote and an offline node). The leak test records their alerts. gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, the five cross-compiles.
+
+### Not verified
+- Against a real Backup Server or Datacenter Manager. The fields of the PBS usage and task lists (`error`, `used`, `total`, `starttime`, `endtime`, `status`) are those of its API documentation; the `/resources/status` fields of Datacenter Manager (`failed_remotes`, `failed_remotes_list`, `pve_nodes.offline`) are from memory of its dashboard and may differ, in which case the square stays green.
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard` (no PAM headers in this sandbox); the purple square in a real browser.
+
+## [v216] - 2026-11-18 — the purple alert square for Meraki, Unimus, Proxmox VE and vCenter
+
+### Added
+- The purple "alert" square (count in the tooltip) is also drawn for:
+  - **meraki**: devices the dashboard reports `offline` or `alerting` (the organization's devices; with the option `serial`, that one). Dormant devices are not alerts.
+  - **unimus**: managed devices whose last job (backup) failed (`lastJobStatus`), and the server itself when `/health` is not OK (with the option `device`, that device).
+  - **proxmox** (Proxmox VE): cluster nodes that are not online (`/cluster/status`) and storages whose status is not `available` (`/cluster/resources?type=storage`).
+  - **vcenter**: ESXi hosts whose `connection_state` is not CONNECTED, and parts of the appliance whose health (`/appliance/health/...`) is yellow, orange or red. vCenter's REST API has no alarms, so what the Alarms view shows is not counted; a host in maintenance mode is connected.
+- Not for Proxmox Backup Server and Datacenter Manager (pbs, pdm).
+
+### Verified
+- `TestActiveAlertsOfTheManagementPlatforms` now covers meraki, unimus, proxmox and vcenter against the TLS stubs (the stubs of Unimus and Proxmox gained a failed backup, an offline node and an unavailable storage). `wrapLeak` records their alerts (leak test). gofmt, vet, `go test -race ./device`, the leak test, the main package's tests with cgo off, the five cross-compiles.
+
+### Not verified
+- Against real systems. Meraki's `status` values and Proxmox's `online` and storage `status` are the documented ones; Unimus's `lastJobStatus` is the field its device list is said to carry (a Unimus without it never shows a device alert); vCenter's health words are those the driver already reads.
+- The native cgo/PAM build and `TestUpdateBuildApplyAndRollbackGuard` (the PAM headers could not be installed in this sandbox); the purple square in a real browser.
+
 ## [v215] - 2026-11-18 — the purple alert square for Aruba Fabric Composer, Aviatrix Controller and CoPilot and Panorama; the tooltip gives the count only
 
 ### Added

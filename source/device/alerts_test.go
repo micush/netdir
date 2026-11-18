@@ -59,4 +59,41 @@ func TestActiveAlertsOfTheManagementPlatforms(t *testing.T) {
 			t.Errorf("panorama: %q", got)
 		}
 	})
+	t.Run("meraki", func(t *testing.T) {
+		d := merakiStub(t, newMerakiState())
+		if got := alerts(t, openMeraki(t, d, "KEY")); got != "Q2DD-EEEE-FFFF offline" {
+			t.Errorf("meraki: %q", got)
+		}
+	})
+	t.Run("unimus", func(t *testing.T) {
+		d := uniStub(t, &uniState{}, nil)
+		if got := alerts(t, open(t, d, Credential{Token: uniTok})); got != "10.0.0.7 backup failed" {
+			t.Errorf("unimus: %q", got)
+		}
+	})
+	t.Run("proxmox", func(t *testing.T) {
+		d := pveStub(t, &pveState{secret: "SEC"})
+		if got := alerts(t, openPVE(t, d, Credential{Name: "a", Token: "root@pam!nd=SEC"})); got != "node pve2 offline|storage nfs1 unknown" {
+			t.Errorf("proxmox: %q", got)
+		}
+	})
+	t.Run("vcenter", func(t *testing.T) {
+		d := vcStub(t, &vcState{})
+		if got := alerts(t, open(t, d, vcCred)); got != "host esx2.example.com disconnected|appliance load orange" {
+			t.Errorf("vcenter: %q", got)
+		}
+	})
+	t.Run("pbs", func(t *testing.T) {
+		drv := openPx(t, "pbs", &pxState{prefix: "PBSAPIToken", secret: "SEC"}, Credential{Name: "a", Token: "root@pam!nd:SEC"})
+		// a full datastore and the failed task of the last day: not the one with warnings, the old one or the one that worked
+		if got := alerts(t, drv); got != "datastore backup2 100% full|task garbage_collection backup1 failed" {
+			t.Errorf("pbs: %q", got)
+		}
+	})
+	t.Run("pdm", func(t *testing.T) {
+		drv := openPx(t, "pdm", &pxState{prefix: "PDMAPIToken", secret: "SEC"}, Credential{Name: "a", Token: "root@pam!nd:SEC"})
+		if got := alerts(t, drv); got != "remote bk unreachable|pve_node offline" {
+			t.Errorf("pdm: %q", got)
+		}
+	})
 }

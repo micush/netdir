@@ -91,9 +91,11 @@ func pveStub(t *testing.T, st *pveState) Device {
 		case p == "/version" && r.Method == "GET":
 			out(200, map[string]any{"version": "8.2.4", "release": "8.2", "repoid": "x"})
 		case p == "/cluster/status":
-			out(200, []map[string]any{{"type": "cluster", "name": "prod", "nodes": 2, "quorate": 1}, {"type": "node", "name": "pve1", "local": 1, "online": 1}, {"type": "node", "name": "pve2", "local": 0, "online": 1}})
+			out(200, []map[string]any{{"type": "cluster", "name": "prod", "nodes": 2, "quorate": 1}, {"type": "node", "name": "pve1", "local": 1, "online": 1}, {"type": "node", "name": "pve2", "local": 0, "online": 0}})
 		case p == "/nodes":
 			out(200, []map[string]any{{"node": "pve1", "status": "online"}, {"node": "pve2", "status": "online"}})
+		case p == "/cluster/resources" && r.URL.Query().Get("type") == "storage":
+			out(200, []map[string]any{{"type": "storage", "storage": "local", "status": "available"}, {"type": "storage", "storage": "nfs1", "status": "unknown"}})
 		case p == "/cluster/resources":
 			out(200, []map[string]any{{"id": "qemu/100", "type": "qemu", "vmid": 100, "node": "pve2", "name": "web"}, {"id": "lxc/200", "type": "lxc", "vmid": 200, "node": "pve1", "name": "ct"}})
 		case p == "/nodes/pve1/network":

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Proxmox Backup Server over its REST API, https://HOST:8007/api2/json (see pxmx.go for the login and what PBS and PDM share).
@@ -91,6 +92,41 @@ func (p *pbs) Facts(ctx context.Context) (Facts, error) {
 		f.Model = fmt.Sprintf("Proxmox Backup Server, %d datastore(s)", len(rows(u)))
 	}
 	return f, nil
+}
+
+// pxNow is the time failed tasks are measured against (a variable for the tests).
+var pxNow = time.Now
+
+// pbsFailedWithin is how far back a failed task still counts as an alert: yesterday's failure is today's alert, last month's is history.
+const pbsFailedWithin = 24 * time.Hour
+
+// ActiveAlerts are the datastores that report an error or are 90% full or more (/status/datastore-usage) and the tasks of the last
+// 24 hours that failed (/nodes/localhost/tasks?errors=1; a task that ended with warnings is not one).
+func (p *pbs) ActiveAlerts(ctx context.Context) ([]string, error) {
+	u, err := p.get(ctx, "/status/datastore-usage")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, d := range rows(u) {
+		name := firstOf(str(d["store"]), "datastore")
+		if e := str(d["error"]); e != "" {
+			out = append(out, "datastore "+name+": "+RedactText(e))
+		} else if total := flt(d["total"]); total > 0 && flt(d["used"])/total >= 0.9 {
+			out = append(out, fmt.Sprintf("datastore %s %d%% full", name, int(flt(d["used"])*100/total)))
+		}
+	}
+	if t, err := p.get(ctx, "/nodes/localhost/tasks?errors=1&limit=50"); err == nil {
+		since := pxNow().Add(-pbsFailedWithin).Unix()
+		for _, r := range rows(t) {
+			st := str(r["status"])
+			if num(r["starttime"]) < since || st == "" || strings.HasPrefix(st, "OK") || strings.HasPrefix(st, "WARNINGS") || str(r["endtime"]) == "" {
+				continue
+			}
+			out = append(out, "task "+firstOf(str(r["worker_type"]), "?")+" "+firstOf(str(r["worker_id"]), str(r["upid"]))+" failed")
+		}
+	}
+	return out, nil
 }
 
 func (p *pbs) Interfaces(ctx context.Context) ([]Interface, error)  { return p.interfaces(ctx) }

@@ -84,6 +84,34 @@ func (p *pdm) Facts(ctx context.Context) (Facts, error) {
 	return f, nil
 }
 
+// ActiveAlerts are the remotes Datacenter Manager cannot reach and the nodes it counts as offline (/resources/status: failed_remotes,
+// failed_remotes_list, pve_nodes and pbs_nodes with offline).  Not tried against a real Datacenter Manager.
+func (p *pdm) ActiveAlerts(ctx context.Context) ([]string, error) {
+	v, err := p.get(ctx, "/resources/status")
+	if err != nil {
+		return nil, err
+	}
+	m, _ := v.(map[string]any)
+	var out []string
+	if l := rows(m["failed_remotes_list"]); len(l) > 0 {
+		for _, r := range l {
+			out = append(out, "remote "+firstOf(str(r["remote"]), str(r["id"]), str(r["name"]), "?")+" unreachable")
+		}
+	} else if n := num(m["failed_remotes"]); n > 0 {
+		for i := int64(0); i < n; i++ {
+			out = append(out, "remote unreachable")
+		}
+	}
+	for _, k := range []string{"pve_nodes", "pbs_nodes"} {
+		if x, ok := m[k].(map[string]any); ok {
+			for i := int64(0); i < num(x["offline"]); i++ {
+				out = append(out, strings.TrimSuffix(k, "s")+" offline")
+			}
+		}
+	}
+	return out, nil
+}
+
 func (p *pdm) Interfaces(ctx context.Context) ([]Interface, error)  { return p.interfaces(ctx) }
 func (p *pdm) Neighbors(context.Context) ([]Neighbor, error)        { return nil, ErrUnsupported }
 func (p *pdm) Config(context.Context) (string, error)               { return "", ErrUnsupported }

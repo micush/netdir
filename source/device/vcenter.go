@@ -224,6 +224,32 @@ func (v *vcenter) hosts(ctx context.Context) ([]map[string]any, error) {
 	return rows(x), nil
 }
 
+// ActiveAlerts are the ESXi hosts that are not connected and the parts of the appliance (system, load, memory, storage, ...) whose
+// health is not green (vCenter's REST API has no alarms: what the Alarms view shows is not reachable here).  A host in maintenance
+// mode is connected.  A health item the account may not read is skipped.
+func (v *vcenter) ActiveAlerts(ctx context.Context) ([]string, error) {
+	hs, err := v.hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, h := range hs {
+		if c := str(h["connection_state"]); c != "" && c != "CONNECTED" {
+			out = append(out, "host "+firstOf(str(h["name"]), str(h["host"]))+" "+strings.ToLower(c))
+		}
+	}
+	for _, name := range vcHealth {
+		x, err := v.get(ctx, "/appliance/health/"+name)
+		if err != nil {
+			continue
+		}
+		if s := strings.ToLower(str(x)); s == "yellow" || s == "orange" || s == "red" {
+			out = append(out, "appliance "+name+" "+s)
+		}
+	}
+	return out, nil
+}
+
 func (v *vcenter) Interfaces(ctx context.Context) ([]Interface, error) {
 	hs, err := v.hosts(ctx)
 	if err != nil {

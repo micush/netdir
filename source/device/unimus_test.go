@@ -46,9 +46,9 @@ func uniStub(t *testing.T, st *uniState, opts map[string]string) Device {
 				return
 			}
 			all := []any{
-				map[string]any{"uuid": uniDevUUID, "address": "10.0.0.5", "description": "core1", "managed": true, "deviceVendor": "Cisco", "deviceType": "IOS-XE", "deviceModel": "C9300"},
+				map[string]any{"uuid": uniDevUUID, "address": "10.0.0.5", "description": "core1", "managed": true, "deviceVendor": "Cisco", "deviceType": "IOS-XE", "deviceModel": "C9300", "lastJobStatus": "SUCCESSFUL"},
 				map[string]any{"uuid": "a", "address": "10.0.0.6", "description": "fw 1 main", "managed": false, "deviceVendor": "Fortinet", "deviceType": "FortiOS"},
-				map[string]any{"uuid": "b", "address": "10.0.0.7", "deviceVendor": "Mikrotik", "deviceType": "RouterOS"},
+				map[string]any{"uuid": "b", "address": "10.0.0.7", "deviceVendor": "Mikrotik", "deviceType": "RouterOS", "lastJobStatus": "FAILED"},
 			}
 			if a := r.URL.Query().Get("addresses"); a != "" {
 				all = all[:1]
