@@ -1,5 +1,16 @@
 # Changelog
 
+## [v226] - 2026-11-19 — `get_topology`: the answering node's VIP state and anycast state are under `this_node` too
+
+### Fixed
+- v225 moved the gateway's `status` and `paused` to the whole cluster, but `families` ("this node was removed from the gateway") and the anycast entries' `up: false` ("gateway not running on this node") were still the answering node's own, beside them, and an assistant read them as the gateway's. `families` is now under `this_node`; each anycast entry keeps its address, `uptime` and `cluster_up_sec`, gains `up_in_cluster` (somebody in the cluster has had it up), and has `up`, `reason`, `paused`, `status`, `detail` and `bgp` under its own `this_node`. When the answering node does not serve the gateway, `this_node.view_from` names the node whose picture it is.
+
+### Verified
+- `TestMCPTopologyIsClusterWide` now has a family and an anycast address; gofmt, vet, the MCP tests.
+
+### Not verified
+- Against a real cluster; the full main-package suite with cgo.
+
 ## [v225] - 2026-11-19 — `get_topology` tells an assistant what is paused for the whole gateway, and what only for the node it asked
 
 ### Changed

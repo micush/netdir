@@ -979,7 +979,7 @@ func init() {
 				return out, nil
 			}},
 		{name: "get_topology", title: "Gateways and servers", noNode: true,
-			desc: "Every gateway (VIP): its status and detail for the whole cluster, how many nodes serve it (serving_nodes), its anycast addresses, and its devices. paused is true only when the gateway is paused on every node; this_node is the answering node's own view (it may be paused or removed there while the others serve), and says nothing about the other nodes.",
+			desc: "Every gateway (VIP): its status and detail for the whole cluster, how many nodes serve it (serving_nodes), its anycast addresses (up_in_cluster, and under this_node what the answering node announces: up is false there when it was removed from the gateway), and its devices. paused is true only when the gateway is paused on every node; this_node is the answering node's own view (it may be paused or removed there while the others serve), and says nothing about the other nodes.",
 			run:  func(c *mcpCtx) (any, error) { b, err := c.get("/api/canvas"); return mcpTopology(asAny(b)), err }},
 		// ── changes (rw addresses only) ──
 		{name: "list_devices", title: "Managed devices", noNode: true,
@@ -1071,6 +1071,32 @@ func mcpTopology(v any) any {
 				here[k] = val
 				delete(g, k)
 			}
+		}
+		if f, ok := g["families"]; ok { // the VIP's running state on the answering node
+			here["families"] = f
+			delete(g, "families")
+		}
+		if as, ok := g["anycast"].([]any); ok { // up, reason, BGP: what the answering node announces; the cluster's uptime stays
+			for _, y := range as {
+				a, _ := y.(map[string]any)
+				if a == nil {
+					continue
+				}
+				on := map[string]any{}
+				for _, k := range []string{"up", "reason", "paused", "status", "detail", "bgp"} {
+					if val, ok := a[k]; ok {
+						on[k] = val
+						delete(a, k)
+					}
+				}
+				a["this_node"] = on
+				if u, ok := a["cluster_up_sec"].(float64); ok && u > 0 {
+					a["up_in_cluster"] = true
+				}
+			}
+		}
+		if v, ok := g["via"]; ok { // the answering node does not serve this gateway: this_node is the node that does
+			here["view_from"] = v
 		}
 		if len(here) > 0 {
 			g["this_node"] = here
