@@ -1,5 +1,17 @@
 # Changelog
 
+## [v225] - 2026-11-19 — `get_topology` tells an assistant what is paused for the whole gateway, and what only for the node it asked
+
+### Changed
+- The MCP tool `get_topology` gave the answering node's own flags as the gateway's: a gateway that node was removed from, or paused on, read `"status": "paused"` and `"paused": true` although the other nodes served it, and an assistant reported the gateway as paused or dead. Now `status`, `detail` and `paused` describe the gateway for the whole cluster (`paused` is true only when every node has it paused), `serving_nodes` and `node_count` say which nodes serve it, and what is true of the answering node alone is under `this_node` (its status, detail, `paused`, `node_paused`, `paused_scope`, `excluded`). Without a cluster, the one node is the whole picture and `this_node` is left out.
+- The tool's description says so. The GUI, and the REST answer `/api/canvas` it draws from, are unchanged.
+
+### Verified
+- `TestMCPTopologyIsClusterWide` (removed from the gateway while two others serve it: ok, not paused, two serving nodes, this_node says removed; no cluster: unchanged); gofmt, vet, the MCP tests.
+
+### Not verified
+- Against a real cluster; the full main-package suite with cgo (no PAM headers in this sandbox).
+
 ## [v224] - 2026-11-18 — SNMP community strings kept from an assistant under the plural names too
 
 ### Fixed

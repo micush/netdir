@@ -979,8 +979,8 @@ func init() {
 				return out, nil
 			}},
 		{name: "get_topology", title: "Gateways and servers", noNode: true,
-			desc: "Every gateway (VIP) as this node sees it: its nodes and which one is active, its anycast addresses, and what is paused.",
-			run:  func(c *mcpCtx) (any, error) { b, err := c.get("/api/canvas"); return asAny(b), err }},
+			desc: "Every gateway (VIP): its status and detail for the whole cluster, how many nodes serve it (serving_nodes), its anycast addresses, and its devices. paused is true only when the gateway is paused on every node; this_node is the answering node's own view (it may be paused or removed there while the others serve), and says nothing about the other nodes.",
+			run:  func(c *mcpCtx) (any, error) { b, err := c.get("/api/canvas"); return mcpTopology(asAny(b)), err }},
 		// ── changes (rw addresses only) ──
 		{name: "list_devices", title: "Managed devices", noNode: true,
 			desc: "The switches and firewalls this gateway manages: name, platform, address, tags and whether each is disabled, and the platforms that have a driver. " +
@@ -1049,4 +1049,54 @@ func mergeJSON(dst, set map[string]any) {
 		}
 		dst[k] = v
 	}
+}
+
+// mcpTopology reshapes the picture the GUI draws for an assistant, which read the answering node's own flags as the gateway's:
+// a gateway that node was removed from, or paused on, said "paused": true although the other nodes served it.  The top-level
+// status, detail and paused now describe the whole cluster (paused only when every node has it paused); what is true of the
+// answering node alone is under this_node; serving_nodes names the nodes that serve it.
+func mcpTopology(v any) any {
+	gs, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	for _, x := range gs {
+		g, ok := x.(map[string]any)
+		if !ok {
+			continue
+		}
+		here := map[string]any{}
+		for _, k := range []string{"status", "detail", "paused", "node_paused", "paused_scope", "excluded"} {
+			if val, ok := g[k]; ok {
+				here[k] = val
+				delete(g, k)
+			}
+		}
+		if len(here) > 0 {
+			g["this_node"] = here
+		}
+		serving, total := []any{}, 0
+		if ns, ok := g["nodes"].([]any); ok {
+			for _, y := range ns {
+				n, _ := y.(map[string]any)
+				if n == nil || n["excluded"] == true || n["gw"] == "removed" {
+					continue
+				}
+				total++
+				if n["gw"] == "ok" || n["gw"] == "degraded" || n["gw"] == "" || n["gw"] == nil {
+					serving = append(serving, firstNonEmpty(fmt.Sprint(n["name"]), fmt.Sprint(n["addr"])))
+				}
+			}
+			g["serving_nodes"], g["node_count"] = serving, total
+		}
+		if st, ok := g["cluster_status"].(string); ok && st != "" {
+			g["status"], g["detail"], g["paused"] = st, g["cluster_detail"], st == "paused"
+			delete(g, "cluster_status")
+			delete(g, "cluster_detail")
+		} else if h, ok := here["status"]; ok { // no cluster: this node is the whole picture
+			g["status"], g["detail"], g["paused"] = h, here["detail"], here["paused"]
+			delete(g, "this_node")
+		}
+	}
+	return gs
 }
