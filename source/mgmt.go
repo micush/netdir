@@ -127,6 +127,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	m.webPolicy.Store(&w)
 	m.bgp.Apply(dc)
 	sysSink.Apply(dc.Syslog)
+	dnsRegistrar.Apply(dc)
 	m.sched.SetTasks(dc.Settings.Schedule)
 	m.certs.Refresh()
 	if _, raw, err := m.LiveConfig(); err == nil {
