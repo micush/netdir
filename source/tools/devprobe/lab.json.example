@@ -13,7 +13,6 @@
     {"name": "meraki-org", "platform": "meraki", "address": "api.meraki.com", "credential": "merakikey"},
     {"name": "dnsdir1", "platform": "dnsdir", "address": "192.168.1.13", "credential": "dirkey", "insecure": true},
     {"name": "ntpdir1", "platform": "ntpdir", "address": "192.168.1.14", "credential": "dirkey", "insecure": true},
-    {"name": "flow1", "platform": "flowdir", "address": "192.168.1.16", "credential": "dirkey", "insecure": true},
     {"name": "encoder1", "platform": "mediaencoder", "address": "192.168.1.15", "credential": "enckey", "insecure": true},
     {"name": "dns1", "platform": "technitium", "address": "192.168.1.11", "credential": "pan", "insecure": true},
     {"name": "aviatrix", "platform": "aviatrix", "address": "192.168.1.17", "credential": "avxadmin", "insecure": true},

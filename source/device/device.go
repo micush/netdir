@@ -42,7 +42,7 @@ type Device struct {
 	// certificate (or chain) the device's certificate must be signed by instead.
 	Insecure bool   `json:"insecure,omitempty"`
 	CAPEM    string `json:"ca_pem,omitempty"`
-	// Options are platform-specific settings: "api_version" for ArubaOS-CX ("v10.09"), "vdom" for FortiOS, "vsys" and "device_group" for PAN-OS, "wapi_version" for Infoblox, "node" for dnsdir and ntpdir (flowdir takes none), "org" and "serial" for Meraki, "tenant" and "login_host" for Entra, none for afc, "snmp_version" (2c or 3), "auth" (md5, sha, sha224, sha256, sha384, sha512) and "priv" (aes, des, none) for ios, "node" for proxmox (the cluster node the tools ask about), "device" (a monitored device's host name or ID) and "prefix" (the path it is served below) for Observium.  Technitium, EOS and mediaencoder take none.
+	// Options are platform-specific settings: "api_version" for ArubaOS-CX ("v10.09"), "vdom" for FortiOS, "vsys" and "device_group" for PAN-OS, "wapi_version" for Infoblox, "node" for dnsdir and ntpdir, "org" and "serial" for Meraki, "tenant" and "login_host" for Entra, none for afc, "snmp_version" (2c or 3), "auth" (md5, sha, sha224, sha256, sha384, sha512) and "priv" (aes, des, none) for ios, "node" for proxmox (the cluster node the tools ask about), "device" (a monitored device's host name or ID) and "prefix" (the path it is served below) for Observium.  Technitium, EOS and mediaencoder take none.
 	Options map[string]string `json:"options,omitempty"`
 	// Disabled devices stay in the inventory but are never contacted.
 	Disabled bool `json:"disabled,omitempty"`
@@ -278,7 +278,7 @@ func checkHost(h string) error {
 
 // defaultPorts is the API port of a platform that is not 443.  The drivers dial it when the device has no port, and the health
 // check connects to it (a Proxmox node listens on 8006, not 443: connecting to 443 reported it down).
-var defaultPorts = map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380, "netdir": 22161, "flowdir": 19996, "mediaencoder": 8765, "pbs": 8007, "pdm": 8443, "linux": 22, "windows": 22}
+var defaultPorts = map[string]int{"proxmox": 8006, "junos": 3443, "technitium": 53443, "dnsdir": 53853, "ntpdir": 12380, "netdir": 22161, "mediaencoder": 8765, "pbs": 8007, "pdm": 8443, "linux": 22, "windows": 22}
 
 // DefaultPort is the API port of the platform when the device names none.
 func DefaultPort(platform string) int {

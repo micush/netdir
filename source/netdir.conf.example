@@ -29,7 +29,6 @@
       {"name": "meraki-sw1", "platform": "meraki", "address": "api.meraki.com", "credential": "merakikey", "options": {"serial": "Q2XX-XXXX-XXXX"}},
       {"name": "dnsdir1", "platform": "dnsdir", "address": "10.0.0.13", "credential": "dirkey", "insecure": true, "tags": ["site=home", "role=ddi"]},
       {"name": "ntpdir1", "platform": "ntpdir", "address": "10.0.0.14", "credential": "dirkey", "insecure": true, "tags": ["site=home"]},
-      {"name": "flow1", "platform": "flowdir", "address": "10.0.0.16", "credential": "dirkey", "insecure": true, "tags": ["site=home"]},
       {"name": "encoder1", "platform": "mediaencoder", "address": "10.0.0.15", "credential": "enckey", "insecure": true, "tags": ["site=home", "role=media"]},
       {"name": "dns1", "platform": "technitium", "address": "10.0.0.11", "credential": "pan", "insecure": true, "tags": ["site=home", "role=ddi"]},
       {"name": "aviatrix", "platform": "aviatrix", "address": "10.0.0.17", "credential": "avxadmin", "insecure": true, "tags": ["site=home", "role=cloud"]},

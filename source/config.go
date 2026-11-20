@@ -565,9 +565,6 @@ type DaemonConfig struct {
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
 	// Syslog is this node's log forwarding to a syslog server (see syslog.go), per node, never replicated.  Nil when never used: no "syslog" key.
 	Syslog *SyslogConfig `json:"syslog,omitempty"`
-	// DNSReg is this node's registration of its own addresses in DNS by dynamic update (see dnsreg.go), per node, never
-	// replicated.  Nil when never used: no "dns_register" key.
-	DNSReg *DNSRegConfig `json:"dns_register,omitempty"`
 	// SNMP is this node's snmpd settings (see snmp.go).  A pointer with omitempty so a config that never used SNMP has no
 	// "snmp" key and older versions still read it.  Local to the node, never replicated.
 	SNMP *SNMPConfig `json:"snmp,omitempty"`
@@ -843,14 +840,6 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if !dc.OSPF.Configured() {
 			dc.OSPF = nil
-		}
-	}
-	if dc.DNSReg != nil {
-		if err := dc.DNSReg.Validate(); err != nil {
-			return err
-		}
-		if dc.DNSReg.empty() {
-			dc.DNSReg = nil
 		}
 	}
 	if dc.Syslog != nil {

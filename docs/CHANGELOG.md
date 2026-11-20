@@ -1,44 +1,31 @@
 # Changelog
 
-## [v228] - 2026-11-20 — each node can register its own addresses in DNS
+## [v229] - 2026-11-20 — version bump
 
-### Added
-- **DNS registration** (Configure ▸ Settings ▸ DNS, `--dnsreg`, `dns_register` in the node's config file): the `autoregdns` script, built in. A node puts its own interface addresses into DNS with RFC 2136 dynamic updates over TCP, signed with a TSIG key: `host.domain` for its first IPv4 and IPv6 address, `host-interface.domain` for every address of an interface, and a PTR record for each address. The domain defaults to the first search domain in `/etc/resolv.conf`, the server to the primary in the zone's SOA record (each reverse zone has its own SOA lookup and falls back to the forward zone's server). A check runs every 300 s plus up to 30 % jitter (both settable) and sends an update only for a record that is wrong or missing.
-- The key is a BIND key file or `name:base64secret[:algorithm]` (hmac-md5, -sha1, -sha256 default, -sha384, -sha512). It is hidden from read-only accounts, from MCP and from the troubleshooting bundle, and the GUI box hides what is typed.
-- **Register now** and **Remove records** buttons and `--dnsreg-now` / `--dnsreg-remove`; the state of the last run (right, updated, removed, failed, the error of each failed record) is shown under the settings and by `--dnsreg`. Help topic for the new tab, `--dnsreg*` in `--help`, README section, `netdir/dnsreg.json` in the troubleshooting bundle.
-- The setting is per node and never replicated, and leaves no key in the file until it is used, so older versions still read the file.
+### Changed
+- Same tree as v228 (the text popups have only Close, at the right), numbered 229 on request so an installation that already has 228 takes it as an update.
 
-### Changed (compared with the script)
-- A name's whole address set is replaced in one UPDATE message, so a second address on an interface no longer overwrites the first, and a client never sees a name half done. `host.domain` gets the first address of *each* family (the script gave the first address only to one family).
-- Not registered: the gateways' VIPs and anycast addresses (they move between nodes), interfaces that are down, IPv4 loopback of the whole 127/8, and interfaces matching `skip_interfaces` (for `docker*`, `veth*` and the like).
-- A zone is found from the SOA record in the answer or, for a name below the apex, in the authority section; an SOA of the root or of `in-addr.arpa` / `ip6.arpa` is not taken for a zone of this network.
-- Remove deletes a PTR record only while it still points at this node's name.
-- The result of an update is the reply's result code, with a hint for REFUSED (no or wrong TSIG key) and NOTAUTH (not the primary).
+## [v228] - 2026-11-20 — the tool popups have no Run again
+
+### Changed
+- The text popups (Whois, Ping, Traceroute, Scan, Lookup, Recheck and the rest that share them) have only Close; Run again is gone, and with it the sentence about it in the Devices help. To run a tool again, close the popup and pick it again. The Entra sign-in popup says "The code expired." and no longer tells you to run it again.
 
 ### Verified
-- `go test`: a fake authoritative server that checks the TSIG signature on its own (the MAC recomputed from the message) covers first registration, an unchanged second run sending nothing, one changed record put right, remove leaving other nodes' records alone, no key / wrong key refused and nothing written, the server and domain settings, the zone lookup through a resolver file, reverse names for IPv4 and IPv6, key formats (file and `name:secret:alg`), validation, an unused setting leaving no key, the loop starting and stopping, VIPs excluded.
-- A real daemon (CGO off) driven through the CLI against a small stdlib DNS server: `--dnsreg-key … --dnsreg-enable` registers A, A and PTR with signed updates, the loop starts again after a daemon restart from the saved file, `--dnsreg-now` finds all three right, `--dnsreg-remove` removes them, `--dnsreg-disable` and clearing the settings leave no `dns_register` key, a bad key is refused with a message, the troubleshooting bundle shows `<removed>` for the key.
-- The Settings page in headless Chromium against a mocked API: the new DNS tab, the key box hides its text, the saved block carries the key and the interface patterns (defaults are not written), emptying every box leaves no `dns_register` key, Register now and the two-click Remove records call the right routes. gofmt, `go vet`, `go test ./...` (all but `TestUpdateBuildApplyAndRollbackGuard`, which needs the PAM headers).
+- `node --check` of `app.js` and `help.js`; the help, version and hint tests with cgo off (no PAM headers in this sandbox).
 
 ### Not verified
-- Against a real BIND, Knot or Windows DNS server (only the fake and the TSIG maths of RFC 8945 were checked), and IPv6 reverse zones delegated at a different length than /64. The reply's own TSIG signature is not checked.
-- `go test -race` (cgo and the PAM headers are not available here), the real PAM login and a multi-node cluster run.
+- The popups against a live daemon; the full suite with cgo, `-race` and the cross-compiles (a front-end only change).
 
-## [v227] - 2026-11-19 — a FlowDirector driver (`flowdir`)
+## [v227] - 2026-11-20 — the tool popups: no ✕, buttons on the right
 
-### Added
-- **Platform `flowdir`: FlowDirector**, the clustered NetFlow, IPFIX and sFlow collector, as a device (`device/flowdir.go`). It is reached through its own MCP endpoint (`POST /mcp` on its GUI port, 19996) with an MCP key as the credential's token (Configure ▸ Monitoring ▸ MCP ▸ Keys on FlowDirector); FlowDirector only reads, so a `ro` key is enough. Any node of its cluster will do.
-- **Facts** from `list_nodes` (the node that answered, its release, the node count). **Show** takes `show nodes|topology|exporters|status|top|timeseries`; `top` and `timeseries` take `by=`, `range=` (15m to 90d, 1y, all) or `from=` and `to=`, `metric=`, `limit=`, `dedupe=`, `step=`, `exporter=`, `host=`, `src=`, `dst=`, `port=`, `proto=`, `interface=`, `as=` and `filter="…"` (double quotes, so a filter with spaces, AND, OR, NOT and wildcards such as `host=10.1.*.*` or `*.example.com` is one value). Every value is checked here before it is sent: a wrong `by`, `range`, `metric`, `limit` or `step`, an unknown key, a pipe, a control character or an unclosed quote never reaches FlowDirector.
-- Not a network device: interfaces, neighbors and configuration answer `not supported`, and `device_change_raw` is refused (FlowDirector has nothing to change through MCP). The refusal is a `RawChange`, as `TestEveryPlatformIsWritable` requires of every platform.
-- Wired in: default port 19996 (`device.go`, the GUI's port box and the health check), the platform's name in the GUI, `flowdir` as a well-known MCP key to avoid (`gkey.go`, the GUI), the platform lists in the usage text, `netdir.conf.example`, `tools/devprobe/lab.json.example`, `device_show`'s and `device_change_raw`'s descriptions, `webui/help.js`, the README (a section of its own) and this file's list of drivers; `leakcapture_test.go` records its answers.
+### Changed
+- The Whois, Ping, Traceroute, Scan, Lookup (and the other text popups that share them) have no ✕ in the corner, and their buttons (Run again, Close) sit at the right edge, level with the output box. The "Resolve names" box of Traceroute stays on the left. Layout is in `style.css` (`.nt-bar`), no `style=`.
 
 ### Verified
-- `device/flowdir_test.go` against a TLS stub of FlowDirector's MCP endpoint: registration and port, facts (the node that answered, the release, the node count), a missing key and a wrong key (401), nothing sent for interfaces, neighbors, configuration or a change, every show name, a secret in an answer hidden, the arguments of a quoted filter reaching the tool, and 22 bad commands refused with no call made.
-- gofmt, `go vet ./...`, `go test -count=1 ./device`, `go test -race -count=1 ./device`, `sh tools/leaktest.sh` (37 platforms, nothing leaked), `go test .` with cgo off (all but `TestUpdateBuildApplyAndRollbackGuard`, which needs the PAM headers), `node --check` on `app.js` and `help.js`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+- `node --check webui/app.js`; gofmt, `go vet`, the help, version and hint tests (cgo off: the PAM headers are not in this sandbox); the markup of the popup laid out in headless Chromium with `style.css` (Close's right edge equals the output box's).
 
 ### Not verified
-- Against a real FlowDirector: the field names read from `list_nodes` (`name`, `this_node`, `version`) are those of FlowDirector's source; the flow answers are passed on as JSON without being read field by field.
-- The GUI page for adding a device in a browser (only `node --check`); the full main-package suite with cgo.
+- The popups against a live daemon; the full suite with cgo, `-race` and the cross-compiles (a front-end only change).
 
 ## [v226] - 2026-11-19 — `get_topology`: the answering node's VIP state and anycast state are under `this_node` too
 

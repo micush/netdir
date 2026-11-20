@@ -347,11 +347,6 @@ func wrapLeak(plat string, drv Driver) Driver {
 			mChg
 			mSave
 		}{rd, mAPI{m}, mRaw{m}, mFW{m}, mPort{m}, mRoute{m}, mRes{m}, mVLAN{m}, mChg{m}, mSave{m}}
-	case "raw ": // flowdir
-		return struct {
-			recDrv
-			mRaw
-		}{rd, mRaw{m}}
 	case "api raw res cap down ": // dnsdir, ntpdir, netdir
 		return struct {
 			recDrv

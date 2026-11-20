@@ -139,10 +139,6 @@ the web GUI):
                    --syslog-server HOST[:PORT]  [--syslog-protocol udp|tcp|tls]  [--syslog-facility daemon|local0..local7]
                    [--syslog-format rfc5424|rfc3164]  [--syslog-ca FILE]  [--syslog-tls-insecure]   (- = default / none)
                    --syslog-disable | --syslog-enable   (settings kept)   --syslog-test   (send a test message)
-  DNS registration --dnsreg   (this node puts its interface addresses into DNS: A, AAAA and PTR, by dynamic update)
-                   --dnsreg-key FILE|NAME:SECRET[:ALG]  [--dnsreg-domain D] [--dnsreg-server HOST[:PORT]]  [--dnsreg-interval S] [--dnsreg-ttl S]
-                   [--dnsreg-skip PATTERN,...]   (- = default / none)    --dnsreg-enable | --dnsreg-disable   (settings kept, records stay)
-                   --dnsreg-now   (register now, list the records)    --dnsreg-remove   (take this node's records out of DNS)
   LLDP             --lldp   (neighbor discovery: the setting, lldpd on this node, and the switch port of each interface)
                    --lldp-enable | --lldp-disable   (every node of the cluster runs lldpd, or none does; off by default)
   Cluster          --cluster-status  --cluster-token  --cluster-join CODE
@@ -200,7 +196,7 @@ Shared settings ("settings" block, the same on every node of a cluster):
   mcp_log            true writes every /mcp request and reply to /var/lib/netdir/mcp-content.log (the --state-dir) (default false)
   mcp_log_mb         the most disk that log may use, 1 to 1000 (default 50)
   mcp_log_entry_kb   the most of one request or reply it writes, 1 to 8192 (default 256)
-  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|flowdir|mediaencoder|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|aviatrixcopilot|centreon|junos|linux|windows|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
+  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|mediaencoder|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|aviatrixcopilot|centreon|junos|linux|windows|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
                      "credential", "tags", "insecure", "ca_pem", "options", "disabled"}
   device_credentials the logins they use: {"name", "username", "password"} or {"name", "token"}; never shown to a
                      read-only account or to any MCP caller

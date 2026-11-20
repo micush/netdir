@@ -633,6 +633,7 @@ table.qtop.plain tbody tr { height: 2.6667rem; }   /* twelve of these are as tal
 .qblocked { flex: none; font-size: .85em; cursor: default; }
 .qblocked.qdim { opacity: .4; }   /* a network holds this client; the bright icon is a rule for its own address */
 
+dialog.cv-dialog .toolbar.nt-bar { justify-content: flex-end; }
 .nt-opt { margin-right: auto; display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; color: var(--muted); }
 
 /* scheduler */

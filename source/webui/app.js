@@ -629,7 +629,7 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "dns" ? "config_dns" : state.settingsTab === "general" ? "config_general" : "config_logs";
+      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
       case "cfg_groups": return "config_groups";
       case "cfg_devices": return state.devTab === 3 ? "config_tags" : state.devTab === 2 ? "config_checks" : state.devTab === 1 ? "config_logins" : "config_devices";
       case "cfg_web": return "config_web";
@@ -1412,7 +1412,7 @@
           const p = (await api("POST", "/api/devices/signin/poll", { id: s.id })).data;
           if (p.state === "done") { link.hidden = true; await load(); refresh(); put("Signed in. " + name + " now asks Microsoft Entra as that account."); return; }
         }
-        if (live()) put("The code expired. Run again.");
+        if (live()) put("The code expired.");
       }, link);
     }
     // Observium, IP Fabric, Centreon: add the devices the server knows to the inventory, disabled and with no login (the daemon saves it, so the page loads the config again)
@@ -2124,29 +2124,25 @@
     })();
   }
 
-  // A popup with text in it that a function fills in (and can fill in again: Run again): Whois, Ping, Traceroute.
+  // A popup with text in it that a function fills in: Whois, Ping, Traceroute.
   // run(put, live) calls put(text) as often as it likes and returns when done; live() says whether the popup still wants it.
   function textPopup(title, run, extra) {
     const out = h("pre", { class: "nt-out", tabindex: "0", "aria-live": "off" }, "…");
-    const again = h("button", { class: "btn", type: "button", disabled: true }, "Run again");
     const d = h("dialog", { class: "cv-dialog nt-dialog", "aria-label": title });
     let alive = true, round = 0;
     const close = () => { alive = false; try { d.close(); } catch (_) { /* closed */ } d.remove(); };
     d.addEventListener("close", () => { alive = false; d.remove(); });
-    d.append(h("button", { class: "dlg-x", type: "button", "aria-label": "Close", title: "Close", onclick: close }, "✕"), h("h2", {}, title), out,
-      h("div", { class: "toolbar" }, extra || null, again, h("button", { class: "btn", type: "button", onclick: close }, "Close")));
+    d.append(h("h2", {}, title), out,
+      h("div", { class: "toolbar nt-bar" }, extra || null, h("button", { class: "btn", type: "button", onclick: close }, "Close")));
     root.append(d);
     d.showModal();
     const go = async () => {
       const me = ++round;
       const live = () => alive && me === round;
-      again.disabled = true;
       out.textContent = "…";
       const put = (text) => { if (!live()) return; const end = out.scrollTop + out.clientHeight >= out.scrollHeight - 4; out.textContent = text; if (end) out.scrollTop = out.scrollHeight; };
       try { await run(put, live); } catch (e) { if (live() && e.message !== "unauthenticated") out.textContent = e.message; }
-      if (live()) again.disabled = false;
     };
-    again.addEventListener("click", go);
     go();
   }
   // Ping / Traceroute of an address: ping or mtr run on the picked node, shown as it comes in
@@ -2184,7 +2180,7 @@
   function lookupPopup(name) {
     textPopup("Lookup " + name, async (put) => put((await api("GET", "/api/dnslookup/full?lookup=" + encodeURIComponent(name))).data.text));
   }
-  // Recheck: the device is asked again now, whatever its state (a login or a firewall rule was corrected); Run again asks once more
+  // Recheck: the device is asked again now, whatever its state (a login or a firewall rule was corrected)
   function recheckPopup(name) {
     const WORDS = { ok: "answering", warn: "refusing", bad: "unreachable", paused: "disabled" };
     textPopup("Recheck " + name, async (put) => {
@@ -2294,7 +2290,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161", flowdir: "19996", mediaencoder: "8765" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161", mediaencoder: "8765" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2464,16 +2460,6 @@
     { k: "format", l: "Message format", t: "select", options: ["rfc5424", "rfc3164"] },
     { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "PEM file. Empty: system CAs." },
     { k: "tls_insecure", l: "Do not check the server's certificate (tls)", t: "bool" },
-  ];
-  // Configure ▸ Settings ▸ DNS: this node puts its own addresses into DNS (per node, never replicated)
-  const DNSREG_FIELDS = [
-    { k: "enabled", l: "Register this node's addresses in DNS", t: "bool" },
-    { k: "key", l: "TSIG key", t: "secret", hint: "NAME:SECRET[:ALG], or a key file path." },
-    { k: "domain", l: "Domain", t: "text", hint: "Empty: the resolver's search domain." },
-    { k: "server", l: "Server", t: "text", hint: "Empty: the zone's primary (from the SOA)." },
-    { k: "interval_sec", l: "Check every (s)", t: "int", min: 30, max: 86400, def: 300 },
-    { k: "ttl", l: "TTL (s)", t: "int", min: 1, max: 604800, def: 900 },
-    { k: "skip_interfaces", l: "Leave out interfaces", t: "text", hint: "Names or patterns, e.g. docker*, veth*" },
   ];
   const LOG_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];
 
@@ -2887,7 +2873,7 @@
     ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", device42: "Device42", smax: "Micro Focus SMAX", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
-    netdir: "MCP Network Director", flowdir: "FlowDirector", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
+    netdir: "MCP Network Director", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
   };
   const platformName = (p) => PLATFORM_LABEL[p] || p;
   const PLATFORMS = Object.keys(PLATFORM_LABEL).sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b]));   // as the person reads them
@@ -2975,7 +2961,7 @@
   // Build inputs for one object; returns {el, get()} where get() reads values back with types.
   // With asCards, every {section} spec starts a card of its own (title in the header, optional note above the fields).
   // the gateway keys everybody knows, and the shortest key not called short (keep in step with gkey.go)
-  const WELL_KNOWN_KEYS = ["", "dnsdir", "ntpdir", "netdir", "flowdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
+  const WELL_KNOWN_KEYS = ["", "dnsdir", "ntpdir", "netdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
   // The address an MCP client connects to: the first gateway's shared (VIP) address on the MCP port (443 unless set), not the
@@ -3697,7 +3683,7 @@
   };
 
   const makeConfigView = (only) => {
-    let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {}, refreshDNSReg = () => {}, refreshLLDP = () => {};
+    let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {}, refreshLLDP = () => {};
     const tab = only;
 
     // Action results ("Saved", "Restored" …) are not announced; only errors, warnings and hints are.
@@ -3708,7 +3694,6 @@
       const set = cfg.settings = cfg.settings || {};
       mcpBaseURL = vipBase(cfg);
       const syslog = fieldset(SYSLOG_FIELDS, cfg.syslog || {});
-      const dnsreg = fieldset(DNSREG_FIELDS, Object.assign({}, cfg.dns_register || {}, { skip_interfaces: ((cfg.dns_register || {}).skip_interfaces || []).join(", ") }));
       const web = fieldset(WEB_FIELDS, cfg.web);
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
@@ -3812,12 +3797,6 @@
         cluster: cluster.get(),
         snmp: snmpLocal(),
         ...(() => { const v = syslog.get(); return v.enabled || v.server ? { syslog: v } : {}; })(), // empty settings leave no key
-        ...(() => {
-          const v = dnsreg.get();
-          const o = { enabled: v.enabled, key: v.key, domain: v.domain, server: v.server, interval_sec: v.interval_sec === 300 ? 0 : v.interval_sec, ttl: v.ttl === 900 ? 0 : v.ttl,
-            skip_interfaces: String(v.skip_interfaces || "").split(",").map((x) => x.trim()).filter(Boolean) };   // the defaults are not written
-          return o.enabled || o.key || o.domain || o.server || o.interval_sec || o.ttl || o.skip_interfaces.length ? { dns_register: o } : {};
-        })(),
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
         ...(cfg.ospf ? { ospf: cfg.ospf } : {}), // likewise
         ...(cfg.node_paused ? { node_paused: true } : {}), // set on the Node page
@@ -3927,41 +3906,6 @@
         syslogTest.disabled = false;
         refreshSyslog();
       });
-      // DNS registration: what the last run did is shown under the settings, with buttons that run it now or take the records out
-      const dnsState = h("div", { class: "hint" });
-      const dnsMsg = h("span", { class: "hint" });
-      refreshDNSReg = async () => {
-        try {
-          const st = (await api("GET", "/api/dnsreg")).data.status;
-          clear(dnsState);
-          if (!st.last_run) { dnsState.append(st.enabled ? "Registering shortly." : "Registration is off."); return; }
-          const when = new Date(st.last_run).toLocaleString();
-          dnsState.append(pill(st.failed ? "failed" : "ok", st.failed ? "bad tiny" : "ok tiny"),
-            " " + (st.action === "remove" ? "Removal" : "Last check") + " " + when + " · " + st.existing + " right, " + st.updated + " updated" + (st.removed ? ", " + st.removed + " removed" : "") + ", " + st.failed + " failed" + (st.server ? " · server " + st.server : ""));
-          const bad = (st.records || []).filter((x) => x.result === "failed").slice(0, 5);
-          if (st.last_error && !bad.length) dnsState.append(h("div", {}, st.last_error));   // a run that failed before any record: the one error
-          for (const r of bad) dnsState.append(h("div", {}, r.type + " " + r.name + ": " + (r.error || "failed")));
-        } catch (_) { clear(dnsState); }
-      };
-      refreshDNSReg();
-      const dnsBtn = (label, path, done) => {
-        const b = h("button", { class: "btn", type: "button" }, label);
-        b.addEventListener("click", async (ev) => {
-          ev.stopPropagation(); // not a config edit
-          if (path.endsWith("/remove") && b.dataset.sure !== "1") {   // a second click confirms
-            b.dataset.sure = "1"; b.textContent = "Click again to remove";
-            setTimeout(() => { b.dataset.sure = ""; b.textContent = label; }, 4000);
-            return;
-          }
-          b.dataset.sure = ""; b.textContent = label;
-          clear(dnsMsg); b.disabled = true; dnsMsg.textContent = "Working…";
-          try { await api("POST", path, {}); dnsMsg.textContent = done; }
-          catch (e) { if (e.message === "unauthenticated") throw e; dnsMsg.textContent = "Not done: " + (e.message || e); }
-          b.disabled = false;
-          refreshDNSReg();
-        });
-        return b;
-      };
       // the Settings page is tabs (every card stays in the page, so a save reads all of them)
       const settingsTabs = () => {
         const TABS = [
@@ -3969,8 +3913,6 @@
           ["logs", "Logs", h("div", {}, section("Log level", logs.el),
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
-          ["dns", "DNS", h("div", {}, section("DNS registration", dnsreg.el, h("div", { class: "toolbar" }, dnsBtn("Register now", "/api/dnsreg/now", "Checked."), dnsBtn("Remove records", "/api/dnsreg/remove", "Removed."), dnsMsg, dnsState),
-            h("p", { class: "hint" }, "This node puts its own addresses into DNS: its first address of each family as its host name, every interface as host-interface, and a PTR record for each address. The shared addresses of the gateways are never registered. Register now and Remove records use the saved settings. Turning this off leaves the records where they are; Remove records takes them out (turn this off first, or the next check puts them back). The setting is not copied to the other nodes.")))],
           ["upgrades", "Upgrades", updatesCard() || section("Upgrades", h("p", { class: "hint" }, "The upgrade settings cannot be read right now."))],
           ["cluster", "Cluster", section("Cluster", cluster.el)],
         ];
@@ -4059,7 +4001,6 @@
         clear(status);
         state.cfgInfo.exists = true;
         setTimeout(() => refreshSNMP(), 1500);   // snmpd was (re)started by the save
-        setTimeout(() => refreshDNSReg(), 6000); // and the DNS registration loop checks a few seconds after it starts
         setTimeout(() => refreshSyslog(), 800);  // so was the connection to the syslog server
         setTimeout(() => refreshLLDP(), 1500);   // and lldpd started or stopped
       } catch (e) {

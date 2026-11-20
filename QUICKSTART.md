@@ -5,7 +5,7 @@ From nothing to an assistant asking your devices, on one node.
 ## 1. Install
 
 ```
-tar xzf netdir_v228.tgz && cd netdir
+tar xzf netdir_v3.tgz && cd netdir
 sudo ./install.sh --add-user "$USER"
 ```
 

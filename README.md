@@ -54,7 +54,7 @@ The web GUI, taken in a lab: two Juniper routers and a Centreon server behind on
 |---|---|
 | VIP election, anycast, BGP, OSPF, LLDP, cluster, users, backups, scheduler, updates | built in |
 | Device inventory, credentials, MCP device tools | built in |
-| Drivers | `linux` (a Linux host over SSH), `ios` (classic Cisco IOS over SNMP, read only), `sdwan` (Cisco Catalyst SD-WAN Manager), `nsxt` (VMware NSX-T), `aci` (Cisco ACI APIC), `unimus` (Unimus config backup), `ad` (Microsoft Active Directory over LDAPS, read only), `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `pbs` (Proxmox Backup Server) and `pdm` (Proxmox Datacenter Manager) over their REST APIs, `observium` and `centreon` (monitoring systems over their REST APIs), `vcenter` (VMware vCenter over its REST API), `nsone` (NS1 hosted DNS over its REST API), `rcode0` (RcodeZero anycast DNS over its REST API), `ipfabric` (IP Fabric over its REST API), `device42` (Device42 inventory over its REST API), `smax` (Micro Focus SMAX service desk over its REST API), `aviatrix` (Aviatrix Controller), `aviatrixcopilot` (Aviatrix CoPilot), `dnsdir` (the DNS Director product, over its MCP endpoint), `flowdir` (FlowDirector, the NetFlow, IPFIX and sFlow collector, over its MCP endpoint; read only), `netdir` (another MCP Network Director; see *Federation*), `mediaencoder` (a multi-media[encoder] NVENC HEVC encoder, over its MCP endpoint) |
+| Drivers | `linux` (a Linux host over SSH), `ios` (classic Cisco IOS over SNMP, read only), `sdwan` (Cisco Catalyst SD-WAN Manager), `nsxt` (VMware NSX-T), `aci` (Cisco ACI APIC), `unimus` (Unimus config backup), `ad` (Microsoft Active Directory over LDAPS, read only), `iosxe` (Cisco Catalyst over RESTCONF), `nxos` (Cisco Nexus over NX-API), `eos` (Arista over eAPI), `junos` (Juniper Junos over its REST API), `aoscx` (Aruba CX over REST), `fortios` (FortiGate over REST), `panos` and `panorama` (Palo Alto firewalls and Panorama over the XML API), `nios` (Infoblox over WAPI), `technitium` (Technitium DNS Server over its HTTP API), `bigip` (F5 BIG-IP over iControl REST), `meraki` (Cisco Meraki over the Dashboard API), `entra` (Microsoft Entra ID over Microsoft Graph, read only: the devices of a user; browser sign-in or an application), `afc` (Aruba Fabric Composer over its REST API), `proxmox` (Proxmox VE over its REST API), `pbs` (Proxmox Backup Server) and `pdm` (Proxmox Datacenter Manager) over their REST APIs, `observium` and `centreon` (monitoring systems over their REST APIs), `vcenter` (VMware vCenter over its REST API), `nsone` (NS1 hosted DNS over its REST API), `rcode0` (RcodeZero anycast DNS over its REST API), `ipfabric` (IP Fabric over its REST API), `device42` (Device42 inventory over its REST API), `smax` (Micro Focus SMAX service desk over its REST API), `aviatrix` (Aviatrix Controller), `aviatrixcopilot` (Aviatrix CoPilot), `dnsdir` (the DNS Director product, over its MCP endpoint), `netdir` (another MCP Network Director; see *Federation*), `mediaencoder` (a multi-media[encoder] NVENC HEVC encoder, over its MCP endpoint) |
 | Writes to devices | typed port changes (description, shut, no shut, clear counters; `save` for the configuration) from plain English on Catalyst IOS-XE, Nexus NX-OS, Arista EOS, Aruba CX, Meraki switches, Junos, FortiOS and BIG-IP (`device_change`; PAN-OS: clearing interface counters only), and any configuration change on every platform (`device_change_raw`: REST request, PAN-OS action, or CLI lines); an `rw` key, ACL entry or GUI account may, `ro` may not; not yet run on real gear |
 | `show` commands, text running-configs | NX-OS, EOS and PAN-OS answer them over their APIs; IOS-XE, ArubaOS-CX and FortiOS need an SSH transport, not built yet; Infoblox and Technitium have none |
 | NX-OS, EOS, ArubaOS-CX, PAN-OS, Infoblox and Technitium drivers | built against vendor documentation and a test stub, not yet run on real gear (see the changelog) |
@@ -75,7 +75,7 @@ An MCP request for devices is answered by the node that receives it. That node o
 Supported systems are Ubuntu, Debian, Fedora, RHEL, Rocky, Alma, Arch and Manjaro, and their derivatives. netdir is Linux-only (macvlan, AF_PACKET, inotify).
 
 ```
-tar xzf netdir_v228.tgz && cd netdir
+tar xzf netdir_v3.tgz && cd netdir
 sudo ./install.sh [--add-user NAME] [--no-start] [-y] [--dry-run]
 sudo netdir-uninstall [--purge]
 ```
@@ -117,7 +117,7 @@ Devices and their logins go in the shared `settings` block:
 | Field | Meaning |
 |---|---|
 | `name` | unique; letters, digits, `.`, `-`, `_` |
-| `platform` | `iosxe`, `ios`, `sdwan`, `nsxt`, `aci`, `unimus`, `nxos`, `eos`, `aoscx`, `fortios`, `panos`, `panorama`, `nios`, `technitium`, `bigip`, `meraki`, `entra`, `afc`, `proxmox` (Proxmox VE), `pbs`, `pdm`, `dnsdir`, `netdir`, `flowdir` or `mediaencoder` |
+| `platform` | `iosxe`, `ios`, `sdwan`, `nsxt`, `aci`, `unimus`, `nxos`, `eos`, `aoscx`, `fortios`, `panos`, `panorama`, `nios`, `technitium`, `bigip`, `meraki`, `entra`, `afc`, `proxmox` (Proxmox VE), `pbs`, `pdm`, `dnsdir`, `netdir` or `mediaencoder` |
 | `address` | IP address or host name, no port or scheme |
 | `port` | the API port; default 443 |
 | `credential` | the name of an entry of `device_credentials` |
@@ -221,15 +221,6 @@ The DNS Director product, managed through its own MCP endpoint (`POST /mcp` on i
 - **Show** takes `show NAME [node=… range=… top=… gateway=… transport=…]`, where NAME is one of the director's read tools: `nodes`, `topology`, `gateways`, `alerts`, `log`, `query-stats`, `host-stats`, `server-stats`, `schedule`, `updates`, `node-status`, `lldp`, and `dns`. **API** reads any `/api/…` route of the director's GUI API (the catalog lists them); **Config** is its configuration.
 - Each director hides its own secrets in every answer. No ports, routes, VLANs or firewall.
 - **Changes** (`device_change_raw`, rw key): method `SET` merges the JSON body into the director's configuration (`{"dns": {"cache_entries": 200000}}`; a dry run asks the director to check it without saving), and `POST` or `PUT` with a path under `/api/` calls a route of its GUI API. The director keeps every configuration change in its own history, which is the way back; netdir does not put it back itself. Login, logout, the session and sign-in routes are refused.
-
-### FlowDirector (`flowdir`)
-
-The NetFlow, IPFIX and sFlow collector, managed through its own MCP endpoint (`POST /mcp` on its GUI port, 19996). The credential's token is an **MCP key** made on FlowDirector (Configure ▸ Monitoring ▸ MCP ▸ Keys); FlowDirector only reads, so a `ro` key is enough and the key's level changes nothing. A password is not used. A cluster answers for all its nodes, so any node's address will do.
-
-- **Facts** are the node that answered and its release (`v13`), with the number of nodes in the cluster.
-- **Show** takes `show NAME [key=value ...]`, where NAME is `nodes`, `topology`, `exporters` (who is sending, with the name each was given, format, last heard and sampling), `status` (every node's collector counters and storage), `top` (the biggest entries over a range) or `timeseries` (traffic over time). `top` and `timeseries` take `by=` (`conversation`, `flow`, `src`, `dst`, `host`, `service`, `protocol`, `exporter`, `interface`, `src_as`, `dst_as`), `range=` (`15m`, `1h`, `6h`, `1d`, `7d`, `30d`, `90d`, `1y` or `all`; or `from=` and `to=`), `metric=` (`bytes`, `packets`, `flows`), `limit=` (1 to 1000), `dedupe=on|off`, `step=` (timeseries), the narrowing keys `exporter`, `host`, `src`, `dst`, `port`, `proto`, `interface` and `as`, and `filter=` in double quotes, a filter with `AND`, `OR`, `NOT`, brackets and wildcards: `show top by=host range=1d filter="host=10.1.*.* AND !port=53"`.
-- FlowDirector hides its own secrets in every answer. It is not a network device: no interfaces, neighbors, ports, routes, VLANs, firewall or configuration (`not supported`), and nothing to change: `device_change_raw` is refused.
-- Tested against a stub of FlowDirector's endpoint (`device/flowdir_test.go`); the names of the answer's fields come from FlowDirector's own tools, not from a run against a real cluster.
 
 ### multi-media[encoder] (`mediaencoder`)
 
@@ -688,22 +679,6 @@ A `kill -9` takes it away within the lifetime. BGP and OSPF settings are per nod
 
 With `settings.lldp` on, every node runs lldpd. The switches then see the nodes, and each node reports the switch port it is on (`netdir --lldp` and the GUI). This is reporting only. The devices' own neighbor tables come from `device_neighbors`.
 
-## DNS registration
-
-Each node can put its own addresses into DNS, so its name follows the address it has (Configure ▸ Settings ▸ DNS, or `--dnsreg`). It uses RFC 2136 dynamic updates over TCP, signed with a TSIG key (hmac-md5, -sha1, -sha256, -sha384 or -sha512):
-
-- `host.domain`: the node's first IPv4 address (A) and first IPv6 address (AAAA).
-- `host-interface.domain`: every address of that interface.
-- A PTR record for each address, in its reverse zone (a /24 for IPv4, a /64 for IPv6), pointing at the first of its names.
-
-The domain is the first search domain in `/etc/resolv.conf` and the server is the primary named by the zone's SOA record, unless the `domain` and `server` settings say otherwise. A check runs every `interval_sec` (default 300, plus up to 30 % at random) and sends an update only for a record that is wrong or missing. Loopback, link-local and multicast addresses, interfaces that are down, interfaces matching `skip_interfaces`, and the gateways' own VIPs and anycast addresses are never registered. The setting is per node and never replicated (`dns_register` in the node's config file; the `key` is hidden from read-only accounts and from the troubleshooting bundle).
-
-```
-netdir --dnsreg-key ddns-key:c2VjcmV0c2VjcmV0 --dnsreg-enable
-netdir --dnsreg-now        # check now and list every record
-netdir --dnsreg-remove     # take this node's records out (turn registration off first)
-```
-
 ## Configuration file
 
 `/var/lib/netdir/netdir.conf` (JSON, mode 0600). Changes apply live: the daemon watches the file. `source/netdir.conf.example` is a starting point, and `netdir --help` lists every key. The top-level blocks are:
@@ -711,7 +686,7 @@ netdir --dnsreg-remove     # take this node's records out (turn registration off
 - `groups`: the gateways
 - `settings`: shared by the cluster
 - `web`: the GUI and MCP listener
-- `cluster`, `bgp`, `ospf`, `snmp`, `syslog`, `dns_register`, `log_level`
+- `cluster`, `bgp`, `ospf`, `snmp`, `syslog`, `log_level`
 
 Every change from any source is kept as a version in `/var/lib/netdir/versions`: `--versions`, `--version-diff`, `--version-restore`.
 
