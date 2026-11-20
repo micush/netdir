@@ -17,6 +17,7 @@ import (
 //	dnsdir   AnyName DNS Director: DNS proxy gateways served by a cluster of nodes (GUI and MCP port 53853)
 //	ntpdir   NTP Director: the same for NTP (port 12380)
 //	netdir   MCP Network Director: another one of these (port 22161); the devices it reaches are reachable here too (downstream.go)
+//	logdir   LogDirector: the syslog collector (logdir.go: read only, its own driver; port 443 of a gateway address)
 //
 // The credential is an MCP key as the token ("Authorization: Bearer KEY", made under Configure ▸ Monitoring ▸ MCP ▸ Keys of
 // that director); the key's ro or rw is the access, as everywhere here (an address of this gateway in the director's mcp_acl
@@ -45,7 +46,7 @@ func newDirector(d Device, c Credential, kind string) (Driver, error) {
 	if c.Token == "" {
 		return nil, fmt.Errorf("device %s: a director needs an MCP key as the credential's token (Configure ▸ Monitoring ▸ MCP ▸ Keys on the director)", d.Name)
 	}
-	port := map[string]int{"dns": 53853, "ntp": 12380, "net": 22161}[kind]
+	port := map[string]int{"dns": 53853, "ntp": 12380, "net": 22161, "log": 443}[kind]
 	api, err := newAPIClient(d, port)
 	if err != nil {
 		return nil, err
@@ -64,6 +65,8 @@ func (m *director) product() (vendor, model string) {
 		return "NTP Director", "NTP gateway cluster"
 	case "net":
 		return "MCP Network Director", "gateway cluster"
+	case "log":
+		return "LogDirector", "syslog collector"
 	}
 	return "AnyName", "DNS Director"
 }

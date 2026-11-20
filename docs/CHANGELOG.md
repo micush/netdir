@@ -1,5 +1,15 @@
 # Changelog
 
+## [v230] - 2026-11-20 — LogDirector driver
+
+### Added
+- **Platform `logdir`: LogDirector, the clustered syslog collector**, reached through its own MCP endpoint with an MCP key as the credential's token (`device/logdir.go`, sharing the call code of `director.go`). It only reads, as the collector's endpoint does: facts from `list_nodes` (vendor LogDirector, version, node count), and `show NAME` for `status`, `senders`, `nodes`, `topology`, `search`, `tail` and `stats`. `show search failed password and not root host=sw* severity=err range=6h limit=100` takes the words that are not keys as the search (so `user=root` is a word), and `range`, `from`, `to`, `host`, `program`, `severity`, `source`, `limit` (1 to 2000; 200 when absent), `oldest_first`; `tail` also `after`; `stats` also `step` and `top`. Every value is checked before it is sent, a pipe is refused, and the answer passes the same `Redact` and `RedactText` as the other drivers, so addresses and secrets in a log line are hidden. No interfaces, neighbors or configuration (`ErrUnsupported`), and a `RawChange` that always refuses (the platform list requires one), so no change can be sent.
+- The default port is **443**: the collector's MCP endpoint is on every gateway address there, so a gateway address keeps answering when a node is down. Port 11154 reaches one node's own GUI port when its allowed sources include this gateway.
+- GUI name (LogDirector), the well-known-key list (a key of `logdir` is refused as too weak), the usage text, the example configuration, devprobe's lab example, the Devices help, README and CLAUDE.md.
+
+### Verified
+- A new test against a TLS stub: key required, a wrong key refused, facts, unsupported reads, no change interface, a search with every key reaching the collector as sent (and no `node`), a word that looks like `key=value`, the default limit, seven valid commands, eleven refused ones that never reached the stub, and that an address and a password in a log line are hidden. The stub's tool names and fields are from LogDirector's own MCP tools; **not tried against a running LogDirector**.
+
 ## [v229] - 2026-11-20 — version bump
 
 ### Changed
