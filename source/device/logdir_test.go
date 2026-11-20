@@ -100,3 +100,76 @@ func TestLogdirDefaultPort(t *testing.T) {
 		t.Errorf("default port %d", DefaultPort("logdir"))
 	}
 }
+
+func flowdirTools() map[string]any {
+	return map[string]any{
+		"list_nodes":      []any{J{"addr": "fl1:11155", "name": "fl1", "reachable": true, "this_node": true, "version": "39"}},
+		"flow_status":     J{"nodes": []any{J{"node": "fl1", "records": 5}}},
+		"flow_exporters":  J{"exporters": []any{J{"addr": "10.1.1.1", "name": "core"}}},
+		"flow_top":        J{"rows": []any{J{"key": "10.1.1.5 -> 8.8.8.8", "bytes": 9}}},
+		"flow_timeseries": J{"points": []any{}},
+		"get_topology":    J{"gateways": []any{}},
+	}
+}
+
+func TestFlowdirDriver(t *testing.T) {
+	d, st := dirStub(t, flowdirTools())
+	d.Platform = "flowdir"
+	ctx := context.Background()
+	drv := open(t, d, Credential{Token: "ROKEY"})
+	f, err := drv.Facts(ctx)
+	if err != nil || f.Vendor != "FlowDirector" || f.Hostname != "fl1" || f.OSVersion != "v39" {
+		t.Fatalf("facts: %v %+v", err, f)
+	}
+	if _, err := drv.(RawChanger).RawChange(ctx, Raw{Method: "SET", Body: `{"a":1}`}, false); err == nil {
+		t.Error("a change was accepted")
+	}
+	out, err := drv.Show(ctx, "show top by=host range=1d metric=bytes host=10.1.0.0/16,10.2.1.1 and not port=53 limit=10")
+	if err != nil || !strings.Contains(out, "bytes") {
+		t.Fatalf("top: %v %s", err, out)
+	}
+	last := st.calls[len(st.calls)-1]
+	for _, want := range []string{`"by":"host"`, `"range":"1d"`, `"limit":10`, `"metric":"bytes"`, `"filter":"host=10.1.0.0/16,10.2.1.1 and not port=53"`} {
+		if !strings.Contains(last, want) {
+			t.Errorf("the call %s lacks %s", last, want)
+		}
+	}
+	for _, ok := range []string{"show status", "show exporters", "show nodes", "show topology", "show timeseries step=5m by=service"} {
+		if _, err := drv.Show(ctx, ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	n := len(st.calls)
+	for _, bad := range []string{"show search x", "show top limit=0", "show top host=a;b", "show status words", "show top range=1h&x=1"} {
+		if _, err := drv.Show(ctx, bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	if len(st.calls) != n {
+		t.Errorf("a refused command reached the collector")
+	}
+}
+
+// A device whose platform has no driver is refused for a new entry, and kept when the daemon is told to tolerate it (a configuration from
+// another version must not stop the daemon from starting).
+func TestUnknownPlatformTolerance(t *testing.T) {
+	creds := []Credential{{Name: "k", Token: "t"}}
+	mk := func() []Device {
+		return []Device{{Name: "x", Platform: "nosuchplatform", Address: "10.0.0.9", Credential: "k"}}
+	}
+	if err := Validate(mk(), creds); err == nil {
+		t.Fatal("an unknown platform was accepted by default")
+	}
+	TolerateUnknownPlatforms(true)
+	defer TolerateUnknownPlatforms(false)
+	devs := mk()
+	if err := Validate(devs, creds); err != nil {
+		t.Fatalf("tolerated: %v", err)
+	}
+	if u := UnknownPlatforms(devs); len(u) != 1 || u[0] != "x (nosuchplatform)" {
+		t.Errorf("unknown list: %v", u)
+	}
+	if _, err := Open(devs[0], creds[0]); err == nil || !strings.Contains(err.Error(), "no driver") {
+		t.Errorf("open: %v", err)
+	}
+}

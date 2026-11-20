@@ -46,7 +46,7 @@ func newDirector(d Device, c Credential, kind string) (Driver, error) {
 	if c.Token == "" {
 		return nil, fmt.Errorf("device %s: a director needs an MCP key as the credential's token (Configure ▸ Monitoring ▸ MCP ▸ Keys on the director)", d.Name)
 	}
-	port := map[string]int{"dns": 53853, "ntp": 12380, "net": 22161, "log": 443}[kind]
+	port := map[string]int{"dns": 53853, "ntp": 12380, "net": 22161, "log": 443, "flow": 443}[kind]
 	api, err := newAPIClient(d, port)
 	if err != nil {
 		return nil, err
@@ -67,6 +67,8 @@ func (m *director) product() (vendor, model string) {
 		return "MCP Network Director", "gateway cluster"
 	case "log":
 		return "LogDirector", "syslog collector"
+	case "flow":
+		return "FlowDirector", "flow collector"
 	}
 	return "AnyName", "DNS Director"
 }

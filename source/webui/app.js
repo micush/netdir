@@ -2873,7 +2873,7 @@
     ntpdir: "AnyTime NTP Director", entra: "Microsoft Entra ID", eos: "Arista EOS", fortios: "Fortinet FortiOS", ios: "Cisco IOS", iosxe: "Cisco IOS-XE", nsxt: "VMware NSX-T", unimus: "Unimus", device42: "Device42", smax: "Micro Focus SMAX", ad: "Active Directory", tools: "Network tools", sdwan: "Cisco Catalyst SD-WAN",
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
-    netdir: "MCP Network Director", logdir: "LogDirector", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
+    netdir: "MCP Network Director", logdir: "LogDirector", flowdir: "FlowDirector", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
   };
   const platformName = (p) => PLATFORM_LABEL[p] || p;
   const PLATFORMS = Object.keys(PLATFORM_LABEL).sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b]));   // as the person reads them
@@ -2961,7 +2961,7 @@
   // Build inputs for one object; returns {el, get()} where get() reads values back with types.
   // With asCards, every {section} spec starts a card of its own (title in the header, optional note above the fields).
   // the gateway keys everybody knows, and the shortest key not called short (keep in step with gkey.go)
-  const WELL_KNOWN_KEYS = ["", "dnsdir", "ntpdir", "netdir", "logdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
+  const WELL_KNOWN_KEYS = ["", "dnsdir", "ntpdir", "netdir", "logdir", "flowdir", "dgw", "ddgw", "change-me", "changeme", "secret", "password", "key", "test", "default"];
   const isWeakKey = (k) => k.length < 12 || WELL_KNOWN_KEYS.includes(k.trim().toLowerCase());
 
   // The address an MCP client connects to: the first gateway's shared (VIP) address on the MCP port (443 unless set), not the

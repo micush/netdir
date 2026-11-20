@@ -9,7 +9,7 @@ var _ = []RawChanger{(*afc)(nil), (*aoscx)(nil), (*bigip)(nil), (*director)(nil)
 
 func TestEveryPlatformIsWritable(t *testing.T) {
 	covered := map[string]bool{"afc": true, "aoscx": true, "bigip": true, "dnsdir": true, "ntpdir": true, "netdir": true, "entra": true, "eos": true, "fortios": true,
-		"iosxe": true, "ipfabric": true, "aviatrix": true, "aviatrixcopilot": true, "centreon": true, "junos": true, "nsone": true, "rcode0": true, "vcenter": true, "meraki": true, "nios": true, "nxos": true, "observium": true, "panos": true, "panorama": true, "proxmox": true, "pbs": true, "pdm": true, "technitium": true, "ios": true, "sdwan": true, "nsxt": true, "aci": true, "unimus": true, "device42": true, "smax": true, "ad": true, "tools": true, "linux": true, "windows": true, "mediaencoder": true, "logdir": true}
+		"iosxe": true, "ipfabric": true, "aviatrix": true, "aviatrixcopilot": true, "centreon": true, "junos": true, "nsone": true, "rcode0": true, "vcenter": true, "meraki": true, "nios": true, "nxos": true, "observium": true, "panos": true, "panorama": true, "proxmox": true, "pbs": true, "pdm": true, "technitium": true, "ios": true, "sdwan": true, "nsxt": true, "aci": true, "unimus": true, "device42": true, "smax": true, "ad": true, "tools": true, "linux": true, "windows": true, "mediaencoder": true, "logdir": true, "flowdir": true}
 	for _, p := range Platforms() {
 		if !covered[p] {
 			t.Errorf("platform %s is not in the list of writable drivers: give it a RawChange and add it here", p)

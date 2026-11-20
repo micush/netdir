@@ -1,5 +1,20 @@
 # Changelog
 
+## [v232] - 2026-11-20 — FlowDirector driver; an unknown platform no longer stops the daemon
+
+### Fixed
+- **A device whose platform has no driver in this build made the daemon refuse to start** (`Configuration error: device X: platform "flowdir" has no driver`), and systemd restarted it every two seconds, so nobody could open the GUI to remove the device. The daemon now starts, keeps the device, names it in the log at start (`devices with a platform this version has no driver for…`), and every request to it answers that there is no driver. A new device with an unknown platform is still refused where it is entered or imported (unchanged: the check stays on by default and only the daemon turns it off).
+
+### Added
+- **Platform `flowdir`: FlowDirector, the flow collector**, read only like `logdir` (the two share one table-driven driver in `device/logdir.go`). Facts from the node list; `show status`, `exporters`, `nodes`, `topology`, `show top [by=…] [range=…] [metric=…] [limit=…] [dedupe=…] [FILTER]` and `show timeseries [step=…] …`, where the words that are not one of those keys are the flow filter expression (`host=10.1.0.0/16 and not port=53`). Default port 443 (the gateway address's MCP listener). Names, GUI label, weak-key list, usage, example configuration, help, README and CLAUDE.md as for logdir.
+- The loose words of a `show` command may not hold `; | & < > $` or a backtick, nor a backslash.
+
+### Verified
+- Tests for the FlowDirector driver (every key reaching the collector as sent, refused commands that never reach it, the change method refusing), for the tolerance (refused by default, kept when the daemon allows it, listed, and `Open` says there is no driver), the whole `device` suite with `-race`, the platform-label test, and the leak test. **Not tried against a running FlowDirector**; its tool names and arguments are from its own MCP tool definitions.
+
+### Not verified
+- My tree is the one I was given as netdir_v229 plus the LogDirector driver. If your repository has commits after v229 that I never saw (a different v230, a `flowdir` driver you wrote, DNS registration files), this tree does not contain them.
+
 ## [v231] - 2026-11-20 — version bump
 
 ### Changed

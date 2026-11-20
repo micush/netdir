@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrUnsupported is what a driver answers for a request its platform has no way to serve.
@@ -155,6 +156,27 @@ func Open(d Device, c Credential) (Driver, error) {
 	return f(d, c)
 }
 
+// tolerateUnknown lets Validate keep a device whose platform has no driver in this build.  The daemon sets it: a configuration written by
+// another version (or by hand) must not stop it from starting, and in a crash loop nobody can open the GUI to fix it.  The device stays
+// in the list, every request to it says there is no driver, and the log names it at start (UnknownPlatforms).
+var tolerateUnknown atomic.Bool
+
+// TolerateUnknownPlatforms switches the leniency above on or off (it is off by default, so a new device with a wrong platform is refused).
+func TolerateUnknownPlatforms(on bool) { tolerateUnknown.Store(on) }
+
+// UnknownPlatforms lists "name (platform)" for each device whose platform has no driver.
+func UnknownPlatforms(devs []Device) []string {
+	var out []string
+	regMu.RLock()
+	defer regMu.RUnlock()
+	for _, d := range devs {
+		if _, ok := registry[strings.ToLower(strings.TrimSpace(d.Platform))]; !ok {
+			out = append(out, d.Name+" ("+d.Platform+")")
+		}
+	}
+	return out
+}
+
 var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // Validate checks the inventory and the credentials together and writes them the same way: platform in lower case, tags
@@ -196,7 +218,7 @@ func Validate(devs []Device, creds []Credential) error {
 		regMu.RLock()
 		_, known := registry[d.Platform]
 		regMu.RUnlock()
-		if !known {
+		if !known && !tolerateUnknown.Load() {
 			return fmt.Errorf("device %s: platform %q has no driver (there are: %s)", d.Name, d.Platform, strings.Join(Platforms(), ", "))
 		}
 		d.Address = strings.TrimSpace(d.Address)
