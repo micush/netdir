@@ -1,5 +1,21 @@
 # Changelog
 
+## [v227] - 2026-11-19 — a FlowDirector driver (`flowdir`)
+
+### Added
+- **Platform `flowdir`: FlowDirector**, the clustered NetFlow, IPFIX and sFlow collector, as a device (`device/flowdir.go`). It is reached through its own MCP endpoint (`POST /mcp` on its GUI port, 19996) with an MCP key as the credential's token (Configure ▸ Monitoring ▸ MCP ▸ Keys on FlowDirector); FlowDirector only reads, so a `ro` key is enough. Any node of its cluster will do.
+- **Facts** from `list_nodes` (the node that answered, its release, the node count). **Show** takes `show nodes|topology|exporters|status|top|timeseries`; `top` and `timeseries` take `by=`, `range=` (15m to 90d, 1y, all) or `from=` and `to=`, `metric=`, `limit=`, `dedupe=`, `step=`, `exporter=`, `host=`, `src=`, `dst=`, `port=`, `proto=`, `interface=`, `as=` and `filter="…"` (double quotes, so a filter with spaces, AND, OR, NOT and wildcards such as `host=10.1.*.*` or `*.example.com` is one value). Every value is checked here before it is sent: a wrong `by`, `range`, `metric`, `limit` or `step`, an unknown key, a pipe, a control character or an unclosed quote never reaches FlowDirector.
+- Not a network device: interfaces, neighbors and configuration answer `not supported`, and `device_change_raw` is refused (FlowDirector has nothing to change through MCP). The refusal is a `RawChange`, as `TestEveryPlatformIsWritable` requires of every platform.
+- Wired in: default port 19996 (`device.go`, the GUI's port box and the health check), the platform's name in the GUI, `flowdir` as a well-known MCP key to avoid (`gkey.go`, the GUI), the platform lists in the usage text, `netdir.conf.example`, `tools/devprobe/lab.json.example`, `device_show`'s and `device_change_raw`'s descriptions, `webui/help.js`, the README (a section of its own) and this file's list of drivers; `leakcapture_test.go` records its answers.
+
+### Verified
+- `device/flowdir_test.go` against a TLS stub of FlowDirector's MCP endpoint: registration and port, facts (the node that answered, the release, the node count), a missing key and a wrong key (401), nothing sent for interfaces, neighbors, configuration or a change, every show name, a secret in an answer hidden, the arguments of a quoted filter reaching the tool, and 22 bad commands refused with no call made.
+- gofmt, `go vet ./...`, `go test -count=1 ./device`, `go test -race -count=1 ./device`, `sh tools/leaktest.sh` (37 platforms, nothing leaked), `go test .` with cgo off (all but `TestUpdateBuildApplyAndRollbackGuard`, which needs the PAM headers), `node --check` on `app.js` and `help.js`, cross-builds for linux/amd64, arm64, arm, 386 and riscv64.
+
+### Not verified
+- Against a real FlowDirector: the field names read from `list_nodes` (`name`, `this_node`, `version`) are those of FlowDirector's source; the flow answers are passed on as JSON without being read field by field.
+- The GUI page for adding a device in a browser (only `node --check`); the full main-package suite with cgo.
+
 ## [v226] - 2026-11-19 — `get_topology`: the answering node's VIP state and anycast state are under `this_node` too
 
 ### Fixed

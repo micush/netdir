@@ -25,7 +25,7 @@ import (
 //	panos       method "reboot" (the operational command request restart system)
 //	eos, nxos   the one line "reload" (also "reload now")
 //
-// Not offered: nios, technitium, afc, dnsdir, ntpdir, mediaencoder, observium and entra have no restart in the API this driver uses.
+// Not offered: nios, technitium, afc, dnsdir, ntpdir, flowdir, mediaencoder, observium and entra have no restart in the API this driver uses.
 
 var (
 	merakiRebootRE = regexp.MustCompile(`^/devices/[A-Za-z0-9-]+/reboot$`)
