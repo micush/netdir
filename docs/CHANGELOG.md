@@ -1,5 +1,10 @@
 # Changelog
 
+## [v231] - 2026-11-20 — version bump
+
+### Changed
+- Same tree as v230 (the LogDirector driver), numbered 231 on request: the tag v230 already existed on the remote at an older commit.
+
 ## [v230] - 2026-11-20 — LogDirector driver
 
 ### Added
