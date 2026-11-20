@@ -195,6 +195,7 @@ Shared settings ("settings" block, the same on every node of a cluster):
   mcp_port           the port of the MCP listeners on the gateway addresses (default 443)
   mcp_acl            who may use /mcp by address: "10.1.0.0/24" reads, "10.1.1.50 rw" may also change things; a note may follow a #
   mcp_keys           keys that may use /mcp from any address ("Authorization: Bearer KEY"); kept with its hash, never shown to MCP
+  (web block) sso_mcp  true lets MCP clients sign in with the SSO providers (OAuth) as the people in sso_users, ro or rw (default false)
   mcp_log            true writes every /mcp request and reply to /var/lib/netdir/mcp-content.log (the --state-dir) (default false)
   mcp_log_mb         the most disk that log may use, 1 to 1000 (default 50)
   mcp_log_entry_kb   the most of one request or reply it writes, 1 to 8192 (default 256)

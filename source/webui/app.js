@@ -2324,12 +2324,13 @@
     { shared: true, k: "sso_oidc_client_id", l: "OpenID Connect client ID", t: "text" },
     { shared: true, k: "sso_oidc_client_secret", l: "OpenID Connect client secret", t: "secret" },
     { shared: true, k: "sso_oidc_skip_verify", l: "Do not check the provider's certificate", t: "bool" },
+    { shared: true, k: "sso_mcp", l: "SSO sign-in for MCP", t: "bool" },
     { shared: true, k: "sso_users", l: "Users", t: "rows", rows: "ssousers", wide: true },
   ];
 
   // Configure ▸ Users ▸ SSO: a tab for the settings every provider shares (the console's address, who may sign in) and one for each provider
   const SSO_TABS = [
-    ["General", ["sso_base_url", "sso_users"]],
+    ["General", ["sso_base_url", "sso_mcp", "sso_users"]],
     ["Google", ["sso_google_client_id", "sso_google_client_secret"]],
     ["Microsoft", ["sso_entra_tenant", "sso_entra_client_id", "sso_entra_client_secret"]],
     ["OpenID Connect", ["sso_oidc_name", "sso_oidc_issuer", "sso_oidc_client_id", "sso_oidc_client_secret", "sso_oidc_skip_verify"]],

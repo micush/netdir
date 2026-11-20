@@ -56,12 +56,15 @@ type SSOConfig struct {
 	// BaseURL is the address the provider sends the browser back to ("https://dns1.example.com:22161"); empty uses the
 	// address the browser used to reach this node.  It must be registered with the provider as BaseURL/api/sso/callback.
 	BaseURL string `json:"sso_base_url,omitempty"`
+	// MCPSignIn lets an MCP client sign people in with the providers above (OAuth, mcpoauth.go): a person on Users gets
+	// the access written beside their address.  Keys and the address list work as before.  Off unless set.
+	MCPSignIn bool `json:"sso_mcp,omitempty"`
 }
 
 func (c SSOConfig) empty() bool {
 	return c.GoogleClientID == "" && c.GoogleClientSecret == "" && c.EntraTenant == "" && c.EntraClientID == "" &&
 		c.EntraClientSecret == "" && c.OIDCName == "" && c.OIDCIssuer == "" && c.OIDCClientID == "" && c.OIDCClientSecret == "" && !c.OIDCSkipVerify &&
-		len(c.Users) == 0 && c.BaseURL == ""
+		len(c.Users) == 0 && c.BaseURL == "" && !c.MCPSignIn
 }
 
 func (c SSOConfig) clone() *SSOConfig {
@@ -584,6 +587,14 @@ func (w *WebServer) handleSSOStart(rw http.ResponseWriter, r *http.Request) {
 
 // handleSSOCallback finishes a sign-in.
 func (w *WebServer) handleSSOCallback(rw http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Query().Get("state"), oauthStatePref) { // a sign-in an MCP client started (mcpoauth.go)
+		if !w.oauthOn() {
+			http.NotFound(rw, r)
+			return
+		}
+		w.oauthCallback(rw, r)
+		return
+	}
 	ip := clientIP(r)
 	q := r.URL.Query()
 	c, err := r.Cookie(ssoCookie)

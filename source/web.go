@@ -347,6 +347,7 @@ func (w *WebServer) Handler() http.Handler {
 	mux.HandleFunc("GET /api/login/state", w.handleLoginState)
 	mux.HandleFunc("GET /api/sso/start", w.handleSSOStart)
 	mux.HandleFunc("GET /api/sso/callback", w.handleSSOCallback)
+	w.registerOAuth(mux, false) // MCP clients signing in with SSO (mcpoauth.go)
 	mux.HandleFunc("POST /api/ldap/test", w.authed(w.handleLDAPTest))
 	mux.HandleFunc("POST /api/logout", w.authed(w.handleLogout))
 	mux.HandleFunc("GET /api/session", w.authed(w.handleSession))

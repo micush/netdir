@@ -466,20 +466,39 @@ func (w *WebServer) handleMCP(rw0 http.ResponseWriter, r *http.Request) {
 	// a key (Authorization: Bearer KEY) opens it from any address; a wrong one is refused, whatever the address list says
 	key, ok := mcpBearer(r)
 	if !ok {
-		rw.Header().Set("WWW-Authenticate", `Bearer realm="mcp"`)
+		w.mcpChallenge(rw, r, "")
 		http.Error(rw, "the Authorization header must be: Bearer KEY", http.StatusUnauthorized)
 		return
 	}
+	// a token from the SSO sign-in (mcpoauth.go): the person's access is what sso_users says now
+	var oauthFail error
+	if strings.HasPrefix(key, oauthPrefix) && w.oauthOn() {
+		if em, _, ro, err := w.oauthAccess(key); err == nil {
+			kacc := "rw"
+			if ro {
+				kacc = "ro"
+			}
+			access, who = maxAccess(access, kacc), em+"@"+from
+			key = ""
+		} else {
+			oauthFail = err // it may still be a key that happens to start the same way
+		}
+	}
 	if key != "" {
 		name, kacc := mcpKeyAccess(w.status.sup.mcpKeys(), key)
+		if name == "" && oauthFail != nil && !errors.Is(oauthFail, errOAuthBad) {
+			w.mcpChallenge(rw, r, "invalid_token")
+			http.Error(rw, "this sign-in is no longer valid: "+oauthFail.Error(), http.StatusUnauthorized)
+			return
+		}
 		if name == "" && mcpKeyExpired(w.status.sup.mcpKeys(), key) {
-			rw.Header().Set("WWW-Authenticate", `Bearer realm="mcp", error="invalid_token"`)
+			w.mcpChallenge(rw, r, "invalid_token")
 			http.Error(rw, "this key has expired (Configure ▸ MCP ▸ Keys)", http.StatusUnauthorized)
 			return
 		}
 		if name == "" {
 			mcpWarnBadKey(from)
-			rw.Header().Set("WWW-Authenticate", `Bearer realm="mcp", error="invalid_token"`)
+			w.mcpChallenge(rw, r, "invalid_token")
 			http.Error(rw, "this key is not one of the MCP keys (Configure ▸ MCP ▸ Keys)", http.StatusUnauthorized)
 			return
 		}
@@ -490,6 +509,11 @@ func (w *WebServer) handleMCP(rw0 http.ResponseWriter, r *http.Request) {
 	lq.who, lq.access = who, access
 	devs := newDevScope(w.status.sup.mcpSourceDevices(ap.Addr()), keyDevs) // the devices this caller may use (devscope.go)
 	devs.bind(w.status.sup.config)
+	if access == "" && w.oauthOn() { // nothing sent and not listed: tell the client where to sign in
+		w.mcpChallenge(rw, r, "")
+		http.Error(rw, "unauthorized: this address is not in the MCP access list and no key or sign-in was sent", http.StatusUnauthorized)
+		return
+	}
 	if access == "" {
 		http.Error(rw, "forbidden: this address is not in the MCP access list, and no key was sent (Authorization: Bearer KEY)", http.StatusForbidden)
 		return

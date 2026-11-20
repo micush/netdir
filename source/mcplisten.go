@@ -193,6 +193,7 @@ func (m *mcpListeners) closeAllLocked() {
 func (m *mcpListeners) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", m.w.handleMCP)
+	m.w.registerOAuth(mux, true)
 	return mux
 }
 
