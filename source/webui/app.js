@@ -2473,6 +2473,9 @@
   // spec: {cols: [{name, ph, opts?}], parse(line) -> [cell, ...], format(cells) -> [line, ...], mark(cells) -> true when the row is
   // not complete (outlined and not saved), empty: text for no rows}.
   const rowClips = {};
+  // A row copied here is pasted from the page's own clipboard: reading the system clipboard makes the browser show its own "Paste" button, which had to be pressed a second time.
+  // After the person has been in another window the system clipboard may hold something else, so the next Paste reads it.
+  window.addEventListener("blur", () => { for (const k of Object.keys(rowClips)) delete rowClips[k]; });
   // the short lists (a handful of rows) have no filter box and no paging; the long ones (clients, domains, users) do
   const SMALL_TABLES = new Set(["ldapservers", "neighbors", "morevip4", "morevip6", "community", "snmpacl", "metricsacl", "mcpacl"]);
   // The devices a key or an allowed source may use: a pill for each device name or tag:TAG, and the two special ones, all (no pills) and none.
@@ -2803,9 +2806,8 @@
     // pasted rows: the cells separated by tabs, one row to a line (the lines of a spreadsheet), or one line of the list's own form
     const parseText = (txt) => txt.split(/\r?\n/).filter((l) => l.trim()).map((l) => (l.includes("\t") ? l.split("\t").map((x) => x.trim()) : spec.parse(l.trim())));
     async function paste(after) {
-      let list = [];
-      try { list = parseText(await navigator.clipboard.readText()); } catch (e) { /* no permission: the last copied row is used */ }
-      if (!list.length && rowClips[spec.key]) list = [rowClips[spec.key]];
+      let list = rowClips[spec.key] ? [rowClips[spec.key]] : [];
+      if (!list.length) { try { list = parseText(await navigator.clipboard.readText()); } catch (e) { /* no permission: nothing to paste */ } }
       if (!list.length) return;
       let at = after;
       for (const v of list) at = insert(v, at);

@@ -1,5 +1,16 @@
 # Changelog
 
+## [v234] - 2026-11-20 — Paste in a table no longer needs a second click
+
+### Fixed
+- **Right-click ▸ Paste on a table row (Configure ▸ Devices and the other row tables) showed the browser's own "Paste" button, and the paste only happened after pressing it a second time.** The menu's Paste read the system clipboard first, and Chromium-based browsers ask for a click before a page may read it. A row copied in the page is now pasted from the page's own copy at once, with no browser prompt. The system clipboard is read only when nothing was copied in the page, or after the window lost focus (the person may have copied something else, such as rows from a spreadsheet, in the meantime); the browser's button can then still appear once, which is the browser's rule.
+
+### Verified
+- `node --check webui/app.js`.
+
+### Not verified
+- Not run in a browser, and `go build`/`go test` were not run: the sandbox has no PAM headers (`libpam0g-dev` has no installation candidate). The change is in `webui/app.js` only.
+
 ## [v233] - 2026-11-20 — MCP sign-in with single sign-on (OAuth)
 
 ### Added
