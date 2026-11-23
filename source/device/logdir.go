@@ -153,6 +153,12 @@ func (l *logdirDev) Show(ctx context.Context, cmd string) (string, error) {
 				return "", fmt.Errorf("%s=%s: a number from 1 to %d", k, v, logdirMaxLimit)
 			}
 			args[k] = n
+		case "m": // minutes a link lasts
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 1440 {
+				return "", fmt.Errorf("%s=%s: minutes, 1 to 1440", k, v)
+			}
+			args[k] = n
 		case "n":
 			if _, err := strconv.ParseInt(v, 10, 64); err != nil {
 				return "", fmt.Errorf("%s=%s: a time in milliseconds since 1970", k, v)

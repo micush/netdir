@@ -1,5 +1,13 @@
 # Changelog
 
+## [v237] - 2026-11-23 — Big files to and from FileDirector
+
+### Added
+- **FileDirector links for big files.** *device_change_raw* with method `UPLOAD-URL` (path `FOLDER:dir/file`, body the minutes the link lasts, default 15) asks the director for a link that takes one file as the body of a PUT, and `show download-url folder=F path=P [minutes=N]` asks for a link that downloads one. They use filedir 42's `files_upload_url` and `files_download_url`. The file is then sent with `curl -T FILE URL` (or fetched with `curl -o FILE URL`) from a machine that can reach the gateway address, so it never passes through the conversation as base64. PUT and PUT-BASE64 stay for files up to 256 KB. A dry run of `UPLOAD-URL` makes no link. Needs an rw key for the upload link and a FileDirector of version 42 or later.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, `node --check`. A new test covers both links, the minutes limits, bad paths, and that a dry run asks for nothing. They were run against a stand-in for the director, not a real filedir.
+
 ## [v236] - 2026-11-23 — DNS registration, gateway names in DNS, popup buttons on the right, a page icon of its own
 
 ### Added
