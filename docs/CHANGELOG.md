@@ -1,5 +1,26 @@
 # Changelog
 
+## [v236] - 2026-11-23 — DNS registration, gateway names in DNS, popup buttons on the right, a page icon of its own
+
+### Added
+
+- **DNS registration** (Configure ▸ Settings ▸ DNS, `--dnsreg`, `dns_register` in the node's config file), as in logdir and filedir: a node puts its own addresses into DNS by RFC 2136 dynamic update, signed with a TSIG key: `host.domain` (its first IPv4 and IPv6 address), `host-interface.domain` (every address of the interface) and a PTR record for each address. A check runs every 5 minutes by default and sends an update only for a record that is wrong or missing. The setting is per node and never replicated, and leaves no key in the file until it is used, so older versions still read the file. Register now and Remove records buttons, `--dnsreg-now` and `--dnsreg-remove`, and the state of the last run on the page; the troubleshooting bundle has `netdir/dnsreg.json` (the key is hidden).
+- **Every gateway has two new optional fields, VIP FQDN and Anycast FQDN** (Topology ▸ New gateway and Edit gateway, and Configure ▸ Gateways; `fqdn` and `anycast_fqdn` in the file). They are shared by the cluster, checked as host names, and left out of the file when empty, so a configuration that never used them reads the same in older versions. Setting one while a node of the cluster runs an older version is refused, naming the node, because that node would drop the names when the settings reach it.
+- **DNS registration keeps the two names right.** The VIP FQDN gets the gateway's shared addresses (A and AAAA) and the Anycast FQDN its anycast addresses that are not paused. Every address of a name gets a PTR record pointing back at it. Every node with registration turned on does this, so whichever node is up keeps the names right, and **Remove records** (`--dnsreg-remove`) takes out only this node's own records, never the gateway names.
+
+### Changed
+
+- **The buttons of every popup are on the right**, as in filedir (they were on the left).
+- **The page icon (the one on the tab and the bookmark) is now purple, an N**, so the six products can be told apart in a list of bookmarks. It was the same blue D in every product.
+
+### Verified
+
+- gofmt, vet, `go test -race ./...`, `node --check` on `app.js` and `help.js`, builds for linux amd64, arm64, arm, 386 and riscv64. The DNS registration tests of logdir and filedir came with it, and the help-coverage tests know the new page.
+
+### Not verified
+
+- A live run against a real DNS server and real nodes: the DNS side was tried against the fake server in the tests only. The new Settings tab, the popups and the icon were looked at in Chromium only through a mock page, not on a running daemon.
+
 ## [v235] - 2026-11-23 — FileDirector driver, and Proxmox container disks can be grown
 
 ### Added

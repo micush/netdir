@@ -40,6 +40,7 @@ func TestHelpCoversEveryField(t *testing.T) {
 		{"MCP_FIELDS", "config_mcp"},
 		{"TOPO_FIELDS", "config_general"},
 		{"LLDP_FIELDS", "config_general"},
+		{"DNSREG_FIELDS", "config_dns"},
 		{"DEVICE_FIELDS", "config_devices"},
 		{"DEVCRED_FIELDS", "config_logins"},
 		{"DEVCHECK_FIELDS", "config_checks"},

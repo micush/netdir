@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -127,6 +128,7 @@ func (m *Mgmt) OnConfigLoaded(dc *DaemonConfig) {
 	m.webPolicy.Store(&w)
 	m.bgp.Apply(dc)
 	sysSink.Apply(dc.Syslog)
+	dnsRegistrar.Apply(dc)
 	m.sched.SetTasks(dc.Settings.Schedule)
 	m.certs.Refresh()
 	if _, raw, err := m.LiveConfig(); err == nil {
@@ -187,6 +189,11 @@ func (m *Mgmt) PutConfigBase(dc *DaemonConfig, actor, note, base string) error {
 	}
 	if err := checkVIPsNotNodes(cur, dc, m.cl); err != nil {
 		return err
+	}
+	if m.cl.Enabled() {
+		if err := gatewayNamesNeedNewNodes(cur, dc, m.cl.View().Peers); err != nil {
+			return err
+		}
 	}
 	if m.cl.Enabled() && m.cl.Snapshot().Role == RoleReplica && sharedOf(dc).hash() != sharedOf(cur).hash() {
 		payload := adminSharedConfig{Shared: sharedOf(dc), Seeds: seedsOf(dc), Base: base}
@@ -651,3 +658,37 @@ func (m *Mgmt) localGwIPs() []string {
 
 // closeDevicePool closes the device drivers kept open for reads (the daemon is stopping).
 func closeDevicePool() { device.PoolFlush() }
+
+// gatewayNamesFromVersion is the first version that keeps a gateway's fqdn and anycast_fqdn when it shares the settings.
+const gatewayNamesFromVersion = 236
+
+// gatewayNamesNeedNewNodes refuses a change to a gateway's VIP FQDN or Anycast FQDN while a node of the cluster runs a version that does
+// not know them: that node would drop the names when the primary's settings reach it (or, as the primary, when it shares them), and they
+// would disappear from every node a moment after they were saved.  Said now, with the node's name, instead of lost silently.
+func gatewayNamesNeedNewNodes(cur, dc *DaemonConfig, peers []PeerView) error {
+	had := map[int][2]string{}
+	if cur != nil {
+		for _, g := range cur.Groups {
+			had[g.GroupID] = [2]string{g.FQDN, g.AnycastFQDN}
+		}
+	}
+	changed := false
+	for _, g := range dc.Groups {
+		if (g.FQDN != "" || g.AnycastFQDN != "") && had[g.GroupID] != [2]string{g.FQDN, g.AnycastFQDN} {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	for _, p := range peers {
+		if p.Self || p.Version == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(p.Version), "v")); err == nil && n < gatewayNamesFromVersion {
+			name := firstNonEmpty(p.Hostname, p.Addr)
+			return fmt.Errorf("node %s runs version %d, which drops the VIP FQDN and Anycast FQDN when it shares the settings: update it to version %d or later (Operate ▸ Upgrade), then set the names", name, n, gatewayNamesFromVersion)
+		}
+	}
+	return nil
+}

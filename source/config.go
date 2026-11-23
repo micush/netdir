@@ -119,6 +119,11 @@ type GroupConfig struct {
 	// against the interface) that every running node holds on lo and answers on
 	// while it is healthy (health.go).  Shared across the cluster.
 	ExtraVIPs []string `json:"extra_vips,omitempty"`
+	// FQDN is the DNS name people use for the gateway's shared address, AnycastFQDN the one for its anycast addresses; either may be
+	// empty.  Shared.  DNS registration (dnsreg.go) keeps each pointing at its addresses.  Omitted when empty so a configuration that
+	// never used them stays readable by older versions.
+	FQDN        string `json:"fqdn,omitempty"`
+	AnycastFQDN string `json:"anycast_fqdn,omitempty"`
 	// Devices are the managed devices this gateway is for, by name (settings.devices): the squares under its circle on the
 	// Topology page, and what the target gateway:N picks.  A device may be on several gateways.  Shared across the cluster.
 	Devices []string `json:"devices,omitempty"`
@@ -323,6 +328,11 @@ func (g *GroupConfig) Validate() error {
 	}
 	if err := validGatewayName(g.Name); err != nil {
 		return fmt.Errorf("%s: %v", pre, err)
+	}
+	for _, n := range []struct{ k, v string }{{"fqdn", g.FQDN}, {"anycast_fqdn", g.AnycastFQDN}} {
+		if n.v != "" && (strings.Contains(n.v, ":") || strings.Contains(n.v, "/") || !validHostname(n.v)) {
+			return fmt.Errorf("%s: %s %q is not a host name (give the name alone, e.g. files.example.com)", pre, n.k, n.v)
+		}
 	}
 	if g.VIP4 == "" && g.VIP6 == "" {
 		return fmt.Errorf("%s: at least one of vip4 or vip6 must be set", pre)
@@ -565,6 +575,9 @@ type DaemonConfig struct {
 	OSPF *OSPFConfig `json:"ospf,omitempty"`
 	// Syslog is this node's log forwarding to a syslog server (see syslog.go), per node, never replicated.  Nil when never used: no "syslog" key.
 	Syslog *SyslogConfig `json:"syslog,omitempty"`
+	// DNSReg is this node's registration of its own addresses in DNS by dynamic update (see dnsreg.go), per node, never
+	// replicated.  Nil when never used: no "dns_register" key.
+	DNSReg *DNSRegConfig `json:"dns_register,omitempty"`
 	// SNMP is this node's snmpd settings (see snmp.go).  A pointer with omitempty so a config that never used SNMP has no
 	// "snmp" key and older versions still read it.  Local to the node, never replicated.
 	SNMP *SNMPConfig `json:"snmp,omitempty"`
@@ -848,6 +861,14 @@ func (dc *DaemonConfig) Validate() error {
 		}
 		if dc.Syslog.empty() {
 			dc.Syslog = nil
+		}
+	}
+	if dc.DNSReg != nil {
+		if err := dc.DNSReg.Validate(); err != nil {
+			return err
+		}
+		if dc.DNSReg.empty() {
+			dc.DNSReg = nil
 		}
 	}
 	return dc.Cluster.Validate()

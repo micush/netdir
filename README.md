@@ -44,6 +44,7 @@ The web GUI, taken in a lab: two Juniper routers and a Centreon server behind on
 - [Clustering](#clustering)
 - [Anycast addresses, BGP and OSPF](#anycast-addresses-bgp-and-ospf)
 - [Neighbor discovery (LLDP)](#neighbor-discovery-lldp)
+- [DNS registration](#dns-registration)
 - [Configuration file](#configuration-file)
 - [Build from source](#build-from-source)
 - [License](#license)
@@ -680,6 +681,22 @@ A `kill -9` takes it away within the lifetime. BGP and OSPF settings are per nod
 
 With `settings.lldp` on, every node runs lldpd. The switches then see the nodes, and each node reports the switch port it is on (`netdir --lldp` and the GUI). This is reporting only. The devices' own neighbor tables come from `device_neighbors`.
 
+## DNS registration
+
+Each node can put its own addresses into DNS, so its name follows the address it has (Configure ▸ Settings ▸ DNS, or `--dnsreg`). It uses RFC 2136 dynamic updates over TCP, signed with a TSIG key (hmac-md5, -sha1, -sha256, -sha384 or -sha512):
+
+- `host.domain` gets the node's first IPv4 address (A) and first IPv6 address (AAAA).
+- `host-interface.domain` gets every address of that interface.
+- Each address gets a PTR record in its reverse zone (a /24 for IPv4, a /64 for IPv6), pointing at the first of its names.
+
+The domain is the first search domain in `/etc/resolv.conf`, and the server is the primary named by the zone's SOA record, unless the `domain` and `server` settings say otherwise. A check runs every `interval_sec` (default 300, plus up to 30 % at random) and sends an update only for a record that's wrong or missing. Loopback, link-local and multicast addresses, interfaces that are down, interfaces matching `skip_interfaces`, and the gateways' own VIPs and anycast addresses are never registered under the node's name. The names given to a gateway are registered too: its VIP FQDN holds its shared addresses (A and AAAA) and its Anycast FQDN its anycast addresses, and each of those addresses gets a PTR record pointing back at its name (a paused anycast address gets neither), every node with registration turned on keeps them right. The setting is per node and never replicated (`dns_register` in the node's config file). The `key` is hidden from read-only accounts and from the troubleshooting bundle.
+
+```
+netdir --dnsreg-key ddns-key:c2VjcmV0c2VjcmV0 --dnsreg-enable
+netdir --dnsreg-now        # check now and list every record
+netdir --dnsreg-remove     # take this node's records out (turn registration off first)
+```
+
 ## Configuration file
 
 `/var/lib/netdir/netdir.conf` (JSON, mode 0600). Changes apply live: the daemon watches the file. `source/netdir.conf.example` is a starting point, and `netdir --help` lists every key. The top-level blocks are:
@@ -687,7 +704,7 @@ With `settings.lldp` on, every node runs lldpd. The switches then see the nodes,
 - `groups`: the gateways
 - `settings`: shared by the cluster
 - `web`: the GUI and MCP listener
-- `cluster`, `bgp`, `ospf`, `snmp`, `syslog`, `log_level`
+- `cluster`, `bgp`, `ospf`, `snmp`, `syslog`, `dns_register`, `log_level`
 
 Every change from any source is kept as a version in `/var/lib/netdir/versions`: `--versions`, `--version-diff`, `--version-restore`.
 

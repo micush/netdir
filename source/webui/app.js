@@ -629,7 +629,7 @@
   function helpTopicKey() {
     const k = (() => {
       switch (state.tab) {
-      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "general" ? "config_general" : "config_logs";
+      case "cfg_general": return state.settingsTab === "cluster" ? "config_cluster" : state.settingsTab === "upgrades" ? "config_upgrades" : state.settingsTab === "dns" ? "config_dns" : state.settingsTab === "general" ? "config_general" : "config_logs";
       case "cfg_groups": return "config_groups";
       case "cfg_devices": return state.devTab === 3 ? "config_tags" : state.devTab === 2 ? "config_checks" : state.devTab === 1 ? "config_logins" : "config_devices";
       case "cfg_web": return "config_web";
@@ -1821,6 +1821,8 @@
       form(g ? "Edit gateway" : "New gateway", [
         { k: "id", l: "Group number", v: String(g ? g.group_id : nextGroupId()), disabled: !!g },
         { k: "name", l: "Name", v: g ? (g.name || "") : "", ph: "optional, e.g. Core" },
+        { k: "fqdn", l: "VIP FQDN", v: g ? (g.fqdn || "") : "", ph: "optional, vip.example.com" },
+        { k: "afqdn", l: "Anycast FQDN", v: g ? (g.anycast_fqdn || "") : "", ph: "optional, any.example.com" },
         { k: "vip4", l: "IPv4 address / prefix", v: g ? g.vip4 : "", ph: "10.0.0.1/24" },
         { k: "vip6", l: "IPv6 address / prefix", v: g ? g.vip6 : "", ph: "optional, 2001:db8::1/64" },
         { k: "more4", l: "More IPv4 addresses", v: g ? (g.more_vip4 || []).join(", ") : "", ph: "optional, same subnet: 10.0.0.2, 10.0.0.3" },
@@ -1828,6 +1830,7 @@
         { k: "iface", l: "Listening interface", v: g ? g.interface : (base ? base.interface : "eth0") },
       ], (v) => {
         if ((v.name || "").length > 40) return "The name can be at most 40 characters.";
+        if ([v.fqdn, v.afqdn].some((n) => n && !/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$/.test(n.trim()))) return "A name is a host name alone, e.g. vip.example.com.";
         if (!v.vip4 && !v.vip6) return "Give the gateway an IPv4 or IPv6 address, e.g. 10.0.0.1/24.";
         if (v.vip4 && !/^\d+\.\d+\.\d+\.\d+\/\d+$/.test(v.vip4)) return "The IPv4 address needs a prefix length, e.g. 10.0.0.1/24.";
         if (v.vip6 && !(v.vip6.includes(":") && /^[0-9a-fA-F:.]+\/\d+$/.test(v.vip6))) return "The IPv6 address needs a prefix length, e.g. 2001:db8::1/64.";
@@ -1845,12 +1848,14 @@
           if (more4.length) g.more_vip4 = more4; else delete g.more_vip4;
           if (more6.length) g.more_vip6 = more6; else delete g.more_vip6;
           if (v.name.trim()) g.name = v.name.trim(); else delete g.name;
+          if ((v.fqdn || "").trim()) g.fqdn = v.fqdn.trim().toLowerCase(); else delete g.fqdn;
+          if ((v.afqdn || "").trim()) g.anycast_fqdn = v.afqdn.trim().toLowerCase(); else delete g.anycast_fqdn;
           return null;
         }
         const id = Number(v.id);
         if (!(id >= 1 && id <= 255) || groups().some((x) => x.group_id === id)) return "Pick an unused group number between 1 and 255.";
         const gkey = [...crypto.getRandomValues(new Uint8Array(16))].map((x) => x.toString(16).padStart(2, "0")).join("");   // a new gateway starts with a random key, as the daemon's own add does
-        groups().push({ ...(v.name.trim() ? { name: v.name.trim() } : {}), group_id: id, interface: v.iface, vip4: v.vip4, vip6: v.vip6, ...(more4.length ? { more_vip4: more4 } : {}), ...(more6.length ? { more_vip6: more6 } : {}), real_macs: true, key: gkey });
+        groups().push({ ...(v.name.trim() ? { name: v.name.trim() } : {}), ...((v.fqdn || "").trim() ? { fqdn: v.fqdn.trim().toLowerCase() } : {}), ...((v.afqdn || "").trim() ? { anycast_fqdn: v.afqdn.trim().toLowerCase() } : {}), group_id: id, interface: v.iface, vip4: v.vip4, vip6: v.vip6, ...(more4.length ? { more_vip4: more4 } : {}), ...(more6.length ? { more_vip6: more6 } : {}), real_macs: true, key: gkey });
         setGid(id); cv.sel = { kind: "gw" };
         // the first gateway also gets the one MCP key (Configure ▸ MCP shows it)
         const st = (cv.cfg.settings = cv.cfg.settings || {});
@@ -2297,6 +2302,8 @@
     { shared: true, k: "name", l: "Name", t: "text", hint: "Optional label." },
     { shared: true, k: "group_id", l: "Group ID", t: "int", min: 1, max: 255, def: 1 },
     { k: "interface", l: "Interface", t: "text" },
+    { shared: true, k: "fqdn", l: "VIP FQDN", t: "text", hint: "Optional, e.g. vip.example.com." },
+    { shared: true, k: "anycast_fqdn", l: "Anycast FQDN", t: "text", hint: "Optional, e.g. any.example.com." },
     { shared: true, k: "vip4", l: "IPv4 VIP/prefix", t: "text", hint: "e.g. 10.0.0.1/24 — empty to disable" },
     { shared: true, k: "vip6", l: "IPv6 VIP/prefix", t: "text", hint: "e.g. 2001:db8::1/64 — empty to disable" },
     { shared: true, k: "more_vip4", l: "More IPv4 addresses", t: "rows", rows: "morevip4", wide: true, hint: "Same subnet, one per row." },
@@ -2461,6 +2468,16 @@
     { k: "format", l: "Message format", t: "select", options: ["rfc5424", "rfc3164"] },
     { k: "ca_file", l: "CA certificate file (tls)", t: "text", hint: "PEM file. Empty: system CAs." },
     { k: "tls_insecure", l: "Do not check the server's certificate (tls)", t: "bool" },
+  ];
+  // Configure ▸ Settings ▸ DNS: this node puts its own addresses into DNS (per node, never replicated)
+  const DNSREG_FIELDS = [
+    { k: "enabled", l: "Register this node's addresses in DNS", t: "bool" },
+    { k: "key", l: "TSIG key", t: "secret", hint: "NAME:SECRET[:ALG], or a key file path." },
+    { k: "domain", l: "Domain", t: "text", hint: "Empty: the resolver's search domain." },
+    { k: "server", l: "Server", t: "text", hint: "Empty: the zone's primary (from the SOA)." },
+    { k: "interval_sec", l: "Check every (s)", t: "int", min: 30, max: 86400, def: 300 },
+    { k: "ttl", l: "TTL (s)", t: "int", min: 1, max: 604800, def: 900 },
+    { k: "skip_interfaces", l: "Leave out interfaces", t: "text", hint: "Names or patterns, e.g. docker*, veth*" },
   ];
   const LOG_FIELDS = [{ k: "log_level", l: "Log level", t: "select", options: ["debug", "info", "warning", "error"] }];
 
@@ -3686,7 +3703,7 @@
   };
 
   const makeConfigView = (only) => {
-    let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {}, refreshLLDP = () => {};
+    let holder, status, collect = null, refreshSNMP = () => {}, refreshSyslog = () => {}, refreshDNSReg = () => {}, refreshLLDP = () => {};
     const tab = only;
 
     // Action results ("Saved", "Restored" …) are not announced; only errors, warnings and hints are.
@@ -3697,6 +3714,7 @@
       const set = cfg.settings = cfg.settings || {};
       mcpBaseURL = vipBase(cfg);
       const syslog = fieldset(SYSLOG_FIELDS, cfg.syslog || {});
+      const dnsreg = fieldset(DNSREG_FIELDS, Object.assign({}, cfg.dns_register || {}, { skip_interfaces: ((cfg.dns_register || {}).skip_interfaces || []).join(", ") }));
       const web = fieldset(WEB_FIELDS, cfg.web);
       const sso = ssoTabs(cfg.web);
       const ldap = ldapTab(cfg.web);
@@ -3800,6 +3818,12 @@
         cluster: cluster.get(),
         snmp: snmpLocal(),
         ...(() => { const v = syslog.get(); return v.enabled || v.server ? { syslog: v } : {}; })(), // empty settings leave no key
+        ...(() => {
+          const v = dnsreg.get();
+          const o = { enabled: v.enabled, key: v.key, domain: v.domain, server: v.server, interval_sec: v.interval_sec === 300 ? 0 : v.interval_sec, ttl: v.ttl === 900 ? 0 : v.ttl,
+            skip_interfaces: String(v.skip_interfaces || "").split(",").map((x) => x.trim()).filter(Boolean) };   // the defaults are not written
+          return o.enabled || o.key || o.domain || o.server || o.interval_sec || o.ttl || o.skip_interfaces.length ? { dns_register: o } : {};
+        })(),
         ...(cfg.bgp ? { bgp: cfg.bgp } : {}), // edited on the Anycast page
         ...(cfg.ospf ? { ospf: cfg.ospf } : {}), // likewise
         ...(cfg.node_paused ? { node_paused: true } : {}), // set on the Node page
@@ -3909,6 +3933,41 @@
         syslogTest.disabled = false;
         refreshSyslog();
       });
+      // DNS registration: what the last run did is shown under the settings, with buttons that run it now or take the records out
+      const dnsState = h("div", { class: "hint" });
+      const dnsMsg = h("span", { class: "hint" });
+      refreshDNSReg = async () => {
+        try {
+          const st = (await api("GET", "/api/dnsreg")).data.status;
+          clear(dnsState);
+          if (!st.last_run) { dnsState.append(st.enabled ? "Registering shortly." : "Registration is off."); return; }
+          const when = new Date(st.last_run).toLocaleString();
+          dnsState.append(pill(st.failed ? "failed" : "ok", st.failed ? "bad tiny" : "ok tiny"),
+            " " + (st.action === "remove" ? "Removal" : "Last check") + " " + when + " · " + st.existing + " right, " + st.updated + " updated" + (st.removed ? ", " + st.removed + " removed" : "") + ", " + st.failed + " failed" + (st.server ? " · server " + st.server : ""));
+          const bad = (st.records || []).filter((x) => x.result === "failed").slice(0, 5);
+          if (st.last_error && !bad.length) dnsState.append(h("div", {}, st.last_error));   // a run that failed before any record: the one error
+          for (const r of bad) dnsState.append(h("div", {}, r.type + " " + r.name + ": " + (r.error || "failed")));
+        } catch (_) { clear(dnsState); }
+      };
+      refreshDNSReg();
+      const dnsBtn = (label, path, done) => {
+        const b = h("button", { class: "btn", type: "button" }, label);
+        b.addEventListener("click", async (ev) => {
+          ev.stopPropagation(); // not a config edit
+          if (path.endsWith("/remove") && b.dataset.sure !== "1") {   // a second click confirms
+            b.dataset.sure = "1"; b.textContent = "Click again to remove";
+            setTimeout(() => { b.dataset.sure = ""; b.textContent = label; }, 4000);
+            return;
+          }
+          b.dataset.sure = ""; b.textContent = label;
+          clear(dnsMsg); b.disabled = true; dnsMsg.textContent = "Working…";
+          try { await api("POST", path, {}); dnsMsg.textContent = done; }
+          catch (e) { if (e.message === "unauthenticated") throw e; dnsMsg.textContent = "Not done: " + (e.message || e); }
+          b.disabled = false;
+          refreshDNSReg();
+        });
+        return b;
+      };
       // the Settings page is tabs (every card stays in the page, so a save reads all of them)
       const settingsTabs = () => {
         const TABS = [
@@ -3916,6 +3975,8 @@
           ["logs", "Logs", h("div", {}, section("Log level", logs.el),
             section("Syslog", syslog.el, h("div", { class: "toolbar" }, syslogTest, syslogMsg, syslogState),
               h("p", { class: "hint" }, "Every line the log shows is also sent to the server, from this node only: the setting is not copied to the other nodes. A server that is down never holds anything up; the newest messages wait in a queue and the oldest are dropped if it fills.")))],
+          ["dns", "DNS", h("div", {}, section("DNS registration", dnsreg.el, h("div", { class: "toolbar" }, dnsBtn("Register now", "/api/dnsreg/now", "Checked."), dnsBtn("Remove records", "/api/dnsreg/remove", "Removed."), dnsMsg, dnsState),
+            h("p", { class: "hint" }, "This node puts its own addresses into DNS: its first address of each family as its host name, every interface as host-interface, and a PTR record for each address. The names given to the gateways are registered too: a gateway's VIP FQDN holds its shared addresses and its Anycast FQDN its anycast addresses, each address with a PTR record back to its name (set them under Topology ▸ Edit gateway); the shared addresses are never registered under this node's own name. Register now and Remove records use the saved settings. Turning this off leaves the records where they are; Remove records takes them out (turn this off first, or the next check puts them back). The setting is not copied to the other nodes.")))],
           ["upgrades", "Upgrades", updatesCard() || section("Upgrades", h("p", { class: "hint" }, "The upgrade settings cannot be read right now."))],
           ["cluster", "Cluster", section("Cluster", cluster.el)],
         ];
@@ -4005,6 +4066,7 @@
         state.cfgInfo.exists = true;
         setTimeout(() => refreshSNMP(), 1500);   // snmpd was (re)started by the save
         setTimeout(() => refreshSyslog(), 800);  // so was the connection to the syslog server
+        setTimeout(() => refreshDNSReg(), 6000); // and the DNS registration loop checks a few seconds after it starts
         setTimeout(() => refreshLLDP(), 1500);   // and lldpd started or stopped
       } catch (e) {
         if (e.message === "unauthenticated") return;

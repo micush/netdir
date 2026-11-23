@@ -341,7 +341,7 @@ svg.cv text.sm { font-size: 11px; }
 dialog.cv-dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 1.1rem 1.25rem; width: min(34rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow-y: auto; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
 dialog.cv-dialog::backdrop { background: rgba(10, 14, 22, .55); }
 dialog.cv-dialog h2 { margin-bottom: .8rem; }
-dialog.cv-dialog .toolbar { margin: 1rem 0 0; position: sticky; bottom: -1.1rem; padding: .6rem 0 1.1rem; background: var(--surface); }
+dialog.cv-dialog .toolbar { justify-content: flex-end; margin: 1rem 0 0; position: sticky; bottom: -1.1rem; padding: .6rem 0 1.1rem; background: var(--surface); }
 dialog.cv-dialog .dlg-x { position: sticky; top: 0; float: right; z-index: 2; width: 2rem; height: 2rem; margin: -.4rem -.6rem 0 .5rem; padding: 0; line-height: 1; font-size: 1.1rem; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--muted); cursor: pointer; }
 dialog.cv-dialog .dlg-x:hover { color: var(--text); background: var(--info-bg); }
 .cv-menu { position: fixed; z-index: 50; min-width: 12rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .3); padding: .25rem; display: flex; flex-direction: column; }

@@ -19,15 +19,17 @@ import (
 type SharedGroup struct {
 	// Name is omitted when empty so a cluster with no names keeps the same hash
 	// as before (members on different versions during a rolling update agree).
-	Name     string   `json:"name,omitempty"`
-	GroupID  int      `json:"group_id"`
-	VIP4     string   `json:"vip4"`
-	VIP6     string   `json:"vip6"`
-	LBMethod LBMethod `json:"lb_method"`
-	HelloMS  int      `json:"hello_ms"`
-	HoldMS   int      `json:"hold_ms"`
-	MaxAFNs  int      `json:"max_afns"`
-	Key      string   `json:"key"`
+	Name        string   `json:"name,omitempty"`
+	FQDN        string   `json:"fqdn,omitempty"`
+	AnycastFQDN string   `json:"anycast_fqdn,omitempty"`
+	GroupID     int      `json:"group_id"`
+	VIP4        string   `json:"vip4"`
+	VIP6        string   `json:"vip6"`
+	LBMethod    LBMethod `json:"lb_method"`
+	HelloMS     int      `json:"hello_ms"`
+	HoldMS      int      `json:"hold_ms"`
+	MaxAFNs     int      `json:"max_afns"`
+	Key         string   `json:"key"`
 	// ExtraVIPs are the anycast addresses (omitted when none, so the hash of a
 	// cluster without any is unchanged).
 	ExtraVIPs []string `json:"extra_vips,omitempty"`
@@ -120,7 +122,7 @@ func sharedOf(dc *DaemonConfig) SharedConfig {
 	sc.Settings = cloneSettings(sc.Settings)
 	for _, g := range dc.Groups {
 		sc.Groups = append(sc.Groups, SharedGroup{
-			GroupID: g.GroupID, Name: g.Name, VIP4: g.VIP4, VIP6: g.VIP6, LBMethod: g.LBMethod,
+			GroupID: g.GroupID, Name: g.Name, FQDN: g.FQDN, AnycastFQDN: g.AnycastFQDN, VIP4: g.VIP4, VIP6: g.VIP6, LBMethod: g.LBMethod,
 			HelloMS: g.HelloMS, HoldMS: g.HoldMS, MaxAFNs: g.MaxAFNs, Key: g.Key,
 			ExtraVIPs: nonEmpty(g.ExtraVIPs), Devices: nonEmpty(g.Devices), MoreVIP4: nonEmpty(g.MoreVIP4), MoreVIP6: nonEmpty(g.MoreVIP6), PausedVIPs: nonEmpty(g.PausedVIPs), PausedAll: g.PausedAll, Neighbors: nonEmpty(g.Neighbors), RealMACs: g.RealMACs, ExcludedNodes: nonEmpty(g.ExcludedNodes), NodeOrder: nonEmpty(g.NodeOrder),
 		})
@@ -164,6 +166,7 @@ func (s SharedConfig) Validate() error {
 
 func applySharedGroup(gc *GroupConfig, g SharedGroup) {
 	gc.GroupID, gc.Name, gc.VIP4, gc.VIP6, gc.LBMethod = g.GroupID, g.Name, g.VIP4, g.VIP6, g.LBMethod
+	gc.FQDN, gc.AnycastFQDN = g.FQDN, g.AnycastFQDN
 	gc.HelloMS, gc.HoldMS, gc.MaxAFNs, gc.Key = g.HelloMS, g.HoldMS, g.MaxAFNs, g.Key
 	gc.ExtraVIPs = append([]string(nil), g.ExtraVIPs...)
 	gc.Devices = nonEmpty(g.Devices)
