@@ -67,6 +67,9 @@ the web GUI):
                                          --device-save also saves the configuration (IOS-XE, EOS, Aruba CX).)
                    --device-raw "METHOD PATH" [--device-body TEXT|@FILE] --target DEVICES [--device-save] [--dry-run] [--yes]
                    --device-lines FILE --target DEVICES [--device-save] [--dry-run] [--yes]
+                   --device-mcp list|TOOL [--device-body JSON|@FILE] --target DEVICES [--device-write] [--dry-run] [--yes]
+                                        (any tool of a dnsdir, ntpdir, netdir, logdir, flowdir or filedir device's own MCP endpoint: "list" gives the
+                                        tools; a tool that changes things needs --device-write and is planned, shown and asked about first.)
                                         (any configuration change in the platform's own terms: a REST request, a PAN-OS
                                          action with an XPath, or lines of CLI configuration for Arista EOS and NX-OS;
                                          planned first, --device-save keeps it over a reboot)

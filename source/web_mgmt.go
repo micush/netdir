@@ -22,6 +22,7 @@ func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/devices/signin/poll", w.authed(w.op("device.signin_poll", nil)))
 	mux.HandleFunc("POST /api/devices/capture", w.authed(w.op("device.capture", nil)))         // packet capture on a device: MCP device_capture (devcapture.go)
 	mux.HandleFunc("POST /api/devices/raw", w.authed(w.op("device.raw", nil)))                 // arbitrary configuration change: MCP device_change_raw (devraw.go)
+	mux.HandleFunc("POST /api/devices/mcp", w.authed(w.op("device.mcp", nil)))                 // any tool of a device's own MCP endpoint: MCP device_mcp, device_mcp_write (devmcp.go)
 	mux.HandleFunc("POST /api/devices/import", w.authed(w.op("device.import_observium", nil))) // devimport.go: GUI and CLI only, not MCP
 	mux.HandleFunc("POST /api/devices/change", w.authed(w.op("device.change", nil)))           // as --device-change: used by the MCP tool device_change (devchange.go)
 	mux.HandleFunc("GET /api/versions", w.authed(w.op("versions.list", nil)))

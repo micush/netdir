@@ -47,14 +47,15 @@ const (
 var filedirFolderRE = regexp.MustCompile(`^(/|[A-Za-z0-9][A-Za-z0-9._-]{0,63})$`)
 
 var filedirSpec = &collectorSpec{kind: "file", product: "FileDirector",
-	shows: map[string]string{"nodes": "list_nodes", "topology": "get_topology", "status": "files_status", "list": "files_list", "read": "files_read", "download-url": "files_download_url"},
+	shows: map[string]string{"nodes": "list_nodes", "topology": "get_topology", "status": "files_status", "list": "files_list", "read": "files_read", "download-url": "files_download_url", "trash": "files_trash"},
 	args: map[string]map[string]string{
 		"files_list":         {"folder": "f", "path": "p", "limit": "i"},
 		"files_read":         {"folder": "f", "path": "p", "offset": "o", "length": "L", "encoding": "e"},
 		"files_download_url": {"folder": "f", "path": "p", "minutes": "m"},
+		"files_trash":        {"folder": "f", "when": "w", "path": "p"},
 	},
 	limitTools: map[string]bool{"files_list": true},
-	required:   map[string][]string{"files_list": {"folder"}, "files_read": {"folder", "path"}, "files_download_url": {"folder", "path"}},
+	required:   map[string][]string{"files_list": {"folder"}, "files_read": {"folder", "path"}, "files_download_url": {"folder", "path"}, "files_trash": {"folder"}},
 	defaults:   map[string]map[string]any{"files_read": {"length": filedirDefaultRead}},
 }
 
@@ -108,8 +109,11 @@ func (f *filedirDev) RawChange(ctx context.Context, r Raw, dry bool) (RawResult,
 	if method == "UPLOAD-URL" {
 		return f.uploadURL(ctx, r, dry)
 	}
+	if filedirOps[method] {
+		return f.fileOp(ctx, method, r, dry)
+	}
 	if method != "PUT" && method != "PUT-BASE64" {
-		return res, fmt.Errorf("method %q: PUT (write a file from text), PUT-BASE64 (from base64) or UPLOAD-URL (a link to send a big file to with curl); FileDirector's MCP cannot delete or rename, and its settings are changed in its own GUI", r.Method)
+		return res, fmt.Errorf("method %q: PUT (write a file from text), PUT-BASE64 (from base64), UPLOAD-URL (a link to send a big file to with curl), MKDIR, DELETE, MOVE, RENAME, COPY, TRASH-RESTORE or EMPTY-TRASH; FileDirector's settings are changed in its own GUI", r.Method)
 	}
 	if len(r.Body) > rawMaxBody {
 		return res, errors.New("body: larger than 256 KB; a larger file is put in with the Files page")

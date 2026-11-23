@@ -1,5 +1,24 @@
 # Changelog
 
+## [v239] - 2026-11-23 — Every tool of a device's own MCP endpoint, without code for each
+
+### Added
+- **`device_mcp` and `device_mcp_write`** (API `POST /api/devices/mcp`, CLI `--device-mcp list|TOOL [--device-body JSON|@FILE] --target DEVICES [--device-write] [--dry-run] [--yes]`). For a dnsdir, ntpdir, netdir, logdir, flowdir or filedir device, netdir asks the device for its tool list and calls any tool by name, so a tool the device gains later needs no release here. The device's own description decides: its input schema checks the arguments (required, unknown names, type, enum) before anything is sent, and a tool that does not say `readOnlyHint` is a change: refused by `device_mcp`, run by `device_mcp_write` (rw callers only, logged, `--dry-run` checks and says what would be called). Answers pass the secret filter; a text answer comes back as text. The curated `show` words and change methods stay as shortcuts.
+
+### Verified
+- gofmt, vet, a driver test across all six platforms (unknown tool, missing and unknown arguments, wrong type, enum, a change run as a read, a tool that says nothing about itself, secrets hidden, a refused call never reaching the device). Not run against a live cluster. The tool list a remote (below) director passes on has not been tried either, and there is no GUI form for it, as for `device_change_raw`.
+
+## [v238] - 2026-11-23 — Everything FileDirector can do to its files, through netdir
+
+### Added
+- **FileDirector (filedir 43 or later): make folders, delete, move, rename, copy, and the trash.** *device_change_raw* takes the methods `MKDIR`, `DELETE` (to the folder's trash), `MOVE` and `RENAME` (path `FOLDER:path`, body the new place: `new/path` in the same folder, `OTHER:new/path` in another, or `{"to": "...", "to_folder": "...", "unique": true}`), `COPY`, `TRASH-RESTORE` (path `FOLDER`, body `WHEN NAME`) and `EMPTY-TRASH` (path `FOLDER`: removes the trash for good, on the node that answers, since each node keeps its own). `show trash folder=F [when=… path=…]` lists the trash. With v237's `UPLOAD-URL` and `show download-url` and the existing PUT, PUT-BASE64, `show list` and `show read`, a file can be listed, uploaded, downloaded, copied, moved, renamed and deleted without leaving netdir. A dry run checks the arguments, reads the folder (is the path there? is the new name taken?) and changes nothing. They need an rw key.
+
+### Changed
+- `DELETE` used to be refused with "FileDirector's MCP cannot delete"; it is now a method.
+
+### Verified
+- gofmt, vet, `go test -race ./...`, `node --check`, five linux builds. A new test covers every method, the dry runs (which change nothing), a path that is not there, bad new places, a refused trash restore and `show trash`. They run against a stand-in for filedir, not a real one.
+
 ## [v237] - 2026-11-23 — Big files to and from FileDirector
 
 ### Added

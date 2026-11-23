@@ -412,7 +412,7 @@ func (m *Mgmt) withBelow(tool string, raw json.RawMessage, actor string, here fu
 		}
 	}
 	if _, has := out["op"]; !has {
-		out["op"] = map[string]string{"device_change_raw": "raw", "device_change": "change", "device_capture": "capture"}[tool]
+		out["op"] = map[string]string{"device_change_raw": "raw", "device_change": "change", "device_capture": "capture", "device_mcp": "mcp", "device_mcp_write": "mcp"}[tool]
 	}
 	out["asked"], out["failed"], out["results"] = len(results), failed, results
 	return out, nil

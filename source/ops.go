@@ -21,6 +21,9 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	if cmd == "device.raw" {
 		return m.deviceRaw(raw, actor)
 	}
+	if cmd == "device.mcp" {
+		return m.deviceMCP(raw, actor)
+	}
 	if cmd == "device.capture" {
 		return m.deviceCapture(raw, actor)
 	}

@@ -127,9 +127,16 @@ func (m *director) callPlain(ctx context.Context, tool string, args map[string]a
 	}
 	var v any
 	if err := json.Unmarshal([]byte(text), &v); err != nil {
-		return nil, fmt.Errorf("%s: the answer is cut or not JSON (ask for less): %.80q", tool, text)
+		return nil, &plainTextError{tool: tool, text: text}
 	}
 	return v, nil
+}
+
+// plainTextError is an answer that is text and not JSON: callAny hands it on as text; everywhere else it is the error it always was.
+type plainTextError struct{ tool, text string }
+
+func (e *plainTextError) Error() string {
+	return fmt.Sprintf("%s: the answer is cut or not JSON (ask for less): %.80q", e.tool, e.text)
 }
 
 func (m *director) Facts(ctx context.Context) (Facts, error) {

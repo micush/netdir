@@ -153,6 +153,11 @@ func (l *logdirDev) Show(ctx context.Context, cmd string) (string, error) {
 				return "", fmt.Errorf("%s=%s: a number from 1 to %d", k, v, logdirMaxLimit)
 			}
 			args[k] = n
+		case "w": // the time of a deletion in the trash, as the listing gives it
+			if !trashWhenRE.MatchString(v) {
+				return "", fmt.Errorf("%s=%s: a deletion's time as show trash lists it", k, v)
+			}
+			args[k] = v
 		case "m": // minutes a link lasts
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 1 || n > 1440 {
@@ -251,4 +256,10 @@ var flowdirSpec = &collectorSpec{kind: "flow", product: "FlowDirector",
 	},
 	words:      map[string]string{"flow_top": "filter", "flow_timeseries": "filter"},
 	limitTools: map[string]bool{},
+}
+
+// The product's MCP tools, all of them (mcppass.go).
+func (l *logdirDev) MCPTools(ctx context.Context) ([]MCPTool, error) { return l.m.MCPTools(ctx) }
+func (l *logdirDev) MCPCall(ctx context.Context, tool string, args map[string]any, allowWrite bool) (any, error) {
+	return l.m.MCPCall(ctx, tool, args, allowWrite)
 }

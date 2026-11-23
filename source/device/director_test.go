@@ -57,6 +57,10 @@ func dirStub(t *testing.T, tools map[string]any) (Device, *dirState) {
 		}
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &q)
+		if q.Method == "tools/list" { // the tool list is tools["__list"], as a director's tools/list would give it
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": q.ID, "result": map[string]any{"tools": tools["__list"]}})
+			return
+		}
 		st.mu.Lock()
 		st.calls = append(st.calls, q.Params.Name+" "+string(q.Params.Arguments))
 		st.mu.Unlock()
