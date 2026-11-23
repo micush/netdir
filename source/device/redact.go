@@ -50,11 +50,26 @@ func secretWord(lw string) bool {
 	return hit
 }
 
+// gluedKey is a plain name in front of a "=" or ":" (not a quoted JSON key, which the JSON rules handle).
+var gluedKey = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
 // redactLine hides what follows a secret word on one line of text: the rest of the line reads "(hidden)".
 func redactLine(ln string) string {
 	fs := strings.Fields(ln)
 	for j, w := range fs {
-		if !secretWord(strings.ToLower(strings.TrimRight(w, ":="))) || j == len(fs)-1 {
+		if !secretWord(strings.ToLower(strings.TrimRight(w, ":="))) {
+			continue
+		}
+		// the value glued to the word (password=hunter2, token:abc): it is in the same word, so it is cut there, last word or not
+		if k := strings.IndexAny(w, ":="); k > 0 && k < len(w)-1 && gluedKey.MatchString(w[:k]) && secretWord(strings.ToLower(w[:k])) {
+			idx := 0
+			for q := 0; q < j; q++ {
+				idx = strings.Index(ln[idx:], fs[q]) + idx + len(fs[q])
+			}
+			idx = strings.Index(ln[idx:], w) + idx
+			return ln[:idx+k+1] + "(hidden)"
+		}
+		if j == len(fs)-1 {
 			continue
 		}
 		// keep the indentation and the words up to and including the keyword

@@ -35,7 +35,7 @@ func (s *dirState) count(tool string) int {
 func dirStub(t *testing.T, tools map[string]any) (Device, *dirState) {
 	t.Helper()
 	st := &dirState{}
-	write := map[string]bool{"edit_config": true, "api_request": true}
+	write := map[string]bool{"edit_config": true, "api_request": true, "files_write": true}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mcp" || r.Method != http.MethodPost {
 			t.Errorf("unexpected %s %s", r.Method, r.URL)

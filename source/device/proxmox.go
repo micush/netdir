@@ -451,8 +451,14 @@ func pveRawGuard(method, p string) error {
 		return errors.New("path: no query on a change (the parameters go in the JSON body)")
 	}
 	segs := strings.Split(strings.Trim(pp, "/"), "/")
+	// a PUT changes what is there (a setting, a disk size, a user): it is allowed on any path; the rules below are for creating, deleting and running things
+	put := method == http.MethodPut
 	switch segs[0] {
 	case "nodes", "cluster", "pools", "storage":
+	case "access":
+		if !put {
+			return errors.New("path: Proxmox is changed below /nodes, /cluster, /pools or /storage")
+		}
 	default:
 		return errors.New("path: Proxmox is changed below /nodes, /cluster, /pools or /storage")
 	}
@@ -460,9 +466,15 @@ func pveRawGuard(method, p string) error {
 		if !pveSegRE.MatchString(s) {
 			return fmt.Errorf("path: %q is not a path segment", s)
 		}
+		if put {
+			continue
+		}
 		if why, no := pveDenyWrite[strings.ToLower(s)]; no {
 			return fmt.Errorf("path: %q is not changed here (%s)", s, why)
 		}
+	}
+	if put {
+		return nil
 	}
 	if segs[0] == "cluster" && len(segs) > 1 && strings.EqualFold(segs[1], "config") {
 		return errors.New("path: the cluster's membership (create, join, remove nodes) is not changed here")
@@ -488,7 +500,7 @@ func pveRawGuard(method, p string) error {
 
 // pveBodyCheck refuses a body that restores a backup (archive) or asks for data to be destroyed along with the change.
 func pveBodyCheck(r Raw) error {
-	if !guardsOn || strings.TrimSpace(r.Body) == "" {
+	if !guardsOn || strings.TrimSpace(r.Body) == "" || strings.EqualFold(r.Method, http.MethodPut) {
 		return nil
 	}
 	var m map[string]any

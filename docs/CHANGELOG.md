@@ -1,5 +1,22 @@
 # Changelog
 
+## [v235] - 2026-11-23 — FileDirector driver, and Proxmox container disks can be grown
+
+### Added
+- **`filedir` driver (FileDirector, the clustered file sync).** Through its MCP endpoint with an MCP key, on port 443 by default. Read (`device_show`): `nodes`, `topology`, `status`, `list` (a folder, with a path and a limit), `read` (a file, with offset, length and encoding). Write (`device_change_raw`, rw key): `PUT` (text) or `PUT-BASE64` of one file, path `FOLDER:dir/file`, 256 KB at most; a dry run says whether the file is new or replaced and shows what is there now. No delete, no rename. Listed in the GUI, the help, the README and the tool texts.
+
+### Fixed
+- **Growing an LXC disk (`PUT /nodes/N/lxc/ID/resize`) was refused.** The change reads the path first to keep a copy for rolling back; Proxmox answers a read of an action endpoint with "not implemented" (501), and that stopped the change. A 501 or 405 on that read now means "an action, nothing to put back": the change goes ahead, and a dry run says so. Any other failure of the read still stops the change.
+- **Proxmox: every PUT is allowed.** A PUT changes what is already there, so it is no longer held to the path and body rules (the deny list, the path roots, `archive`, `purge`): `PUT /access/users/ID`, `…/unlink`, certificates, ACLs and the like now go through. POST and DELETE keep their rules.
+- **Secrets glued to their name (`password=hunter2`, `token:abc`) were left in text output.** The value is now cut, also as the last word of a line. Quoted JSON keys are left to the JSON rules.
+
+### Verified
+- gofmt, vet, `go test -race ./...` (device package included), the leak test, `CGO_ENABLED=0` vet and tests, and builds for linux amd64, arm64, arm, 386 and riscv64.
+- New tests: the FileDirector driver (read, write, limits, redaction, default port), the container resize with a 501 read plus its dry run, and glued secrets.
+
+### Not verified
+- No real FileDirector or Proxmox was reachable: the FileDirector tool names and field names (`files_list`, `files_read`, `files_write`, `folder`, `path`, `content`, `encoding`) were only seen in a stub built from FileDirector's own source, and the Proxmox 501 is as reported by the user, not seen on a host.
+
 ## [v234] - 2026-11-20 — Paste in a table no longer needs a second click
 
 ### Fixed

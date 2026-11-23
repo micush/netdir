@@ -171,6 +171,9 @@ func restRaw(ctx context.Context, s restSpec, r Raw, dry bool) (RawResult, error
 		switch {
 		case errors.As(err, &se) && se.Code == http.StatusNotFound:
 			res.Note = "the path holds nothing now, so there is nothing to put back"
+		case errors.As(err, &se) && (se.Code == http.StatusNotImplemented || se.Code == http.StatusMethodNotAllowed):
+			// an action (Proxmox PUT …/lxc/ID/resize, …): the path can be written and not read, so there is no copy to take and none to put back
+			res.Note = "the path cannot be read (it is an action), so there is nothing to put back"
 		case err != nil:
 			return res, fmt.Errorf("the copy of what is there now could not be read (nothing was changed): %w", err)
 		default:

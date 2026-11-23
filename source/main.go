@@ -199,7 +199,7 @@ Shared settings ("settings" block, the same on every node of a cluster):
   mcp_log            true writes every /mcp request and reply to /var/lib/netdir/mcp-content.log (the --state-dir) (default false)
   mcp_log_mb         the most disk that log may use, 1 to 1000 (default 50)
   mcp_log_entry_kb   the most of one request or reply it writes, 1 to 8192 (default 256)
-  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|logdir|flowdir|mediaencoder|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|aviatrixcopilot|centreon|junos|linux|windows|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
+  devices            the managed switches and firewalls: {"name", "platform" (iosxe|ios|nxos|eos|aoscx|fortios|panos|panorama|nios|technitium|bigip|dnsdir|ntpdir|netdir|logdir|filedir|flowdir|mediaencoder|meraki|entra|afc|proxmox|pbs|pdm|observium|ipfabric|aviatrix|aviatrixcopilot|centreon|junos|linux|windows|nsone|rcode0|vcenter|sdwan|nsxt|aci|unimus|ad|device42|smax), "address", "port",
                      "credential", "tags", "insecure", "ca_pem", "options", "disabled"}
   device_credentials the logins they use: {"name", "username", "password"} or {"name", "token"}; never shown to a
                      read-only account or to any MCP caller

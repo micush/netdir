@@ -32,8 +32,10 @@ type collectorSpec struct {
 	kind, product string
 	shows         map[string]string
 	args          map[string]map[string]string
-	words         map[string]string // tool -> the argument the loose words of a show command are sent as (q, filter)
-	limitTools    map[string]bool   // tools that get the default limit
+	words         map[string]string         // tool -> the argument the loose words of a show command are sent as (q, filter)
+	limitTools    map[string]bool           // tools that get the default limit
+	required      map[string][]string       // tool -> the arguments a show command must give
+	defaults      map[string]map[string]any // tool -> arguments sent when the command gives none
 }
 
 type logdirDev struct {
@@ -124,6 +126,27 @@ func (l *logdirDev) Show(ctx context.Context, cmd string) (string, error) {
 			continue
 		}
 		switch typ {
+		case "f": // a synced folder's name, or / for the root folder
+			if !filedirFolderRE.MatchString(v) {
+				return "", fmt.Errorf("%s=%s: a folder name from show status (letters, digits, . _ -), or / for the root folder", k, v)
+			}
+			args[k] = v
+		case "p": // a path inside a synced folder
+			if err := checkFilePath(v); err != nil {
+				return "", fmt.Errorf("%s=%s: %w", k, v, err)
+			}
+			args[k] = v
+		case "e":
+			if v != "auto" && v != "text" && v != "base64" {
+				return "", fmt.Errorf("%s=%s: auto, text or base64", k, v)
+			}
+			args[k] = v
+		case "o", "L": // a byte offset (from 0), a byte count
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 || (typ == "L" && (n < 1 || n > filedirMaxRead)) || n > 1<<40 {
+				return "", fmt.Errorf("%s=%s: a number of bytes (a length from 1 to %d)", k, v, filedirMaxRead)
+			}
+			args[k] = n
 		case "i":
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 1 || n > logdirMaxLimit {
@@ -175,6 +198,16 @@ func (l *logdirDev) Show(ctx context.Context, cmd string) (string, error) {
 			return "", errors.New("the search words: no ; | & < > $ ` or \\")
 		}
 		args[key] = q
+	}
+	for _, k := range l.spec.required[tool] {
+		if _, has := args[k]; !has {
+			return "", fmt.Errorf("show %s needs %s=…", f[1], k)
+		}
+	}
+	for k, v := range l.spec.defaults[tool] {
+		if _, has := args[k]; !has {
+			args[k] = v
+		}
 	}
 	if _, has := args["limit"]; !has && l.spec.limitTools[tool] {
 		args["limit"] = 200 // the answer lands in a caller's context: ask for what the collector's own default is, not more

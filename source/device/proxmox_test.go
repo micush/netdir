@@ -104,9 +104,15 @@ func pveStub(t *testing.T, st *pveState) Device {
 			out(200, map[string]any{"name": "web", "memory": 1024, "cipassword": "hunter2hunter2", "digest": "abc"})
 		case r.Method == "GET" && (p == "/nodes/pve2/qemu/100/resize" || p == "/nodes/pve2/qemu/100" || p == "/nodes/pve1/lxc/200"): // the read before a change
 			out(200, map[string]any{})
+		case strings.HasPrefix(p, "/access/users/") && r.Method == "GET", p == "/nodes/pve2/qemu/100/unlink" && r.Method == "GET":
+			out(501, nil)
+		case strings.HasPrefix(p, "/access/users/") && r.Method == "PUT", p == "/nodes/pve2/qemu/100/unlink" && r.Method == "PUT":
+			out(200, nil)
+		case p == "/nodes/pve1/lxc/200/resize" && r.Method == "GET": // an action: Proxmox answers a read of it with "not implemented"
+			out(501, nil)
 		case p == "/nodes/pve2/qemu/100/status/current":
 			out(200, map[string]any{"status": "stopped", "vmid": 100})
-		case p == "/nodes/pve2/qemu/100/config" && r.Method == "PUT", p == "/nodes/pve2/qemu/100/resize" && r.Method == "PUT",
+		case p == "/nodes/pve2/qemu/100/config" && r.Method == "PUT", p == "/nodes/pve2/qemu/100/resize" && r.Method == "PUT", p == "/nodes/pve1/lxc/200/resize" && r.Method == "PUT",
 			p == "/nodes/pve1/qemu" && r.Method == "POST", p == "/nodes/pve1/lxc" && r.Method == "POST",
 			p == "/nodes/pve2/qemu/100" && r.Method == "DELETE", p == "/nodes/pve1/lxc/200" && r.Method == "DELETE":
 			out(200, nil)
@@ -245,7 +251,6 @@ func TestProxmoxChange(t *testing.T) {
 	ctx := context.Background()
 	for _, bad := range []Raw{
 		{Method: "POST", Path: "/access/users", Body: `{}`},
-		{Method: "PUT", Path: "/access/acl", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/status", Body: `{"command":"shutdown"}`},
 		{Method: "POST", Path: "/nodes/pve1/stopall", Body: `{}`},
 		{Method: "POST", Path: "/nodes/pve1/services/pveproxy/stop", Body: `{}`},
@@ -268,7 +273,6 @@ func TestProxmoxChange(t *testing.T) {
 		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config"},
 		{Method: "GET", Path: "/version"},
 		{Method: "POST", Path: "/nodes/pve2/qemu/100/status/start", Body: `{"purge":1}`},
-		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config", Body: `{"destroy-unreferenced-disks":1}`}, // only the deletion of a guest may say how far it goes
 		{Method: "DELETE", Path: "/nodes/pve2/qemu/100/config", Body: `{"purge":1}`},
 	} {
 		if _, err := rc.RawChange(ctx, bad, false); err == nil {
@@ -308,6 +312,7 @@ func TestProxmoxGuestLifecycle(t *testing.T) {
 		{Method: "POST", Path: "/nodes/pve1/lxc", Body: `{"vmid":301,"ostemplate":"local:vztmpl/debian-12.tar.zst","memory":512,"cores":1,"rootfs":"local-lvm:8"}`},
 		{Method: "PUT", Path: "/nodes/pve2/qemu/100/config", Body: `{"cores":4,"memory":8192}`},
 		{Method: "PUT", Path: "/nodes/pve2/qemu/100/resize", Body: `{"disk":"scsi0","size":"+10G"}`},
+		{Method: "PUT", Path: "/nodes/pve1/lxc/200/resize", Body: `{"disk":"rootfs","size":"+2G"}`}, // a container's disk: the endpoint cannot be read
 		{Method: "DELETE", Path: "/nodes/pve2/qemu/100", Body: `{"purge":1,"destroy-unreferenced-disks":1}`},
 		{Method: "DELETE", Path: "/nodes/pve1/lxc/200"},
 	} {
@@ -315,7 +320,22 @@ func TestProxmoxGuestLifecycle(t *testing.T) {
 			t.Errorf("%+v: %+v %v", ok, r, err)
 		}
 	}
-	if len(st.writes) != 6 {
+	if len(st.writes) != 7 {
 		t.Errorf("writes: %v", st.writes)
+	}
+	// every PUT is allowed, whatever the path or the body
+	for _, put := range []Raw{
+		{Method: "PUT", Path: "/access/users/bob@pve", Body: `{"enable":0}`},
+		{Method: "PUT", Path: "/nodes/pve2/qemu/100/unlink", Body: `{"idlist":"scsi1","force":1}`},
+	} {
+		if r, err := rc.RawChange(ctx, put, false); err != nil || !r.Applied {
+			t.Errorf("%+v: %+v %v", put, r, err)
+		}
+	}
+	// the plan of it says so, and sends nothing
+	n := len(st.writes)
+	r, err := rc.RawChange(ctx, Raw{Method: "PUT", Path: "/nodes/pve1/lxc/200/resize", Body: `{"disk":"rootfs","size":"+2G"}`}, true)
+	if err != nil || r.Applied || !r.DryRun || !strings.Contains(r.Note, "cannot be read") || len(st.writes) != n {
+		t.Errorf("dry run of a resize of a container: %+v %v", r, err)
 	}
 }
