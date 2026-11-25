@@ -1,5 +1,18 @@
 # Changelog
 
+## [v242] - 2026-11-25 — SMAX: the phase property is PhaseId, and a failed answer inside HTTP 200 is an error
+
+### Fixed
+- **`smax`**: every list came back empty or failed ("Illegal query structure: DQL exception encountered") on a real tenant because the default layouts asked for a property `Phase`, which SMAX does not have on these entities; it is `PhaseId`. The layouts of Request, Incident, Change and Problem and the single-record layout now use `PhaseId`, and `show … phase=NAME` filters on `PhaseId`. Found on a real tenant (EU8): `Id,DisplayLabel,Phase` answers `FAILED`, `Id,DisplayLabel,PhaseId` answers `OK`; `Status`, `Priority`, `Description`, `CreateTime`, `LastUpdateTime` answered `OK`.
+- **`smax`**: SMAX answers a query it cannot run with **HTTP 200** and `meta.completion_status` `FAILED` (the 500 is inside `errorDetails`). The driver only looked at the HTTP status, so such an answer was taken as an empty list and the short-layout retry never ran. It now reads the failure, reports SMAX's own message, and retries once with the short layout on a 400 or 500.
+
+### Verified
+- gofmt, `go vet ./device/`, `go test ./device/` (new `TestSMAXFailedAnswerInsideHTTP200`). Property names checked one at a time against a real tenant with the answer's `completion_status`, not only the HTTP code.
+
+### Not verified
+- The `PhaseId='…'` filter of `show … phase=` and the combined `(PhaseId='X') and (LastUpdateTime gt N)` were not confirmed on the real tenant (the one test of it timed out). The full default layout (`Id,DisplayLabel,PhaseId,Status,CreateTime,LastUpdateTime`) was not run as one request there; its parts were. The main package was not built here (PAM headers missing): no version test, cross-compiles or `CGO_ENABLED=0` run. `VERSION` set to 242 by hand.
+- **Slow answers are not fixed.** About one request in four to the tenant hung for 60 seconds with no answer (curl status 000), in no pattern and on every property; the driver does not retry those.
+
 ## [v241] - 2026-11-25 — SMAX: lists work on a tenant with more than 10,000 records
 
 ### Fixed

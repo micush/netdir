@@ -64,11 +64,11 @@ var (
 	// the entities that are read: tickets.  People, groups, roles and settings are not among them.
 	smaxTypes = map[string]string{"requests": "Request", "incidents": "Incident", "changes": "Change", "problems": "Problem",
 		"request": "Request", "incident": "Incident", "change": "Change", "problem": "Problem"}
-	smaxLayouts = map[string]string{"Request": "Id,DisplayLabel,Phase,Status,CreateTime,LastUpdateTime",
-		"Incident": "Id,DisplayLabel,Phase,Status,Priority,CreateTime,LastUpdateTime",
-		"Change":   "Id,DisplayLabel,Phase,Status,CreateTime,LastUpdateTime",
-		"Problem":  "Id,DisplayLabel,Phase,Status,CreateTime,LastUpdateTime"}
-	smaxOneLayout = "Id,DisplayLabel,Description,Phase,Status,CreateTime,LastUpdateTime"
+	smaxLayouts = map[string]string{"Request": "Id,DisplayLabel,PhaseId,Status,CreateTime,LastUpdateTime",
+		"Incident": "Id,DisplayLabel,PhaseId,Status,Priority,CreateTime,LastUpdateTime",
+		"Change":   "Id,DisplayLabel,PhaseId,Status,CreateTime,LastUpdateTime",
+		"Problem":  "Id,DisplayLabel,PhaseId,Status,CreateTime,LastUpdateTime"}
+	smaxOneLayout = "Id,DisplayLabel,Description,PhaseId,Status,CreateTime,LastUpdateTime"
 	smaxMinLayout = "Id,DisplayLabel,CreateTime"
 )
 
@@ -167,8 +167,32 @@ func (s *smax) get(ctx context.Context, path string) (any, error) {
 		if err := json.Unmarshal(b, &v); err != nil {
 			return nil, fmt.Errorf("GET %s: the answer is not JSON: %v", path, err)
 		}
+		if err := smaxFailed(v); err != nil {
+			return nil, err
+		}
 		return v, nil
 	}
+}
+
+// smaxFailed reads the failure SMAX reports inside an HTTP 200 answer: {"entities": [], "meta": {"completion_status": "FAILED",
+// "errorDetails": {"httpStatus": 500, "message": "Illegal query structure: DQL exception encountered", ...}}}.  A property of a
+// layout that the tenant does not know (the old "Phase": it is PhaseId) is answered this way.
+func smaxFailed(v any) error {
+	m, _ := v.(map[string]any)
+	meta, _ := m["meta"].(map[string]any)
+	if !strings.EqualFold(str(meta["completion_status"]), "FAILED") {
+		return nil
+	}
+	code, msg := http.StatusBadRequest, "the query failed"
+	if ed, ok := meta["errorDetails"].(map[string]any); ok {
+		if n, ok := ed["httpStatus"].(float64); ok && n >= 400 {
+			code = int(n)
+		}
+		if x := str(ed["message"]); x != "" {
+			msg = x
+		}
+	}
+	return &statusError{Code: code, Body: msg}
 }
 
 // smaxRows flattens the entities of an answer: the properties of each, with the entity type.
@@ -196,8 +220,8 @@ func smaxRows(v any) []map[string]any {
 	return out
 }
 
-// query reads entities of one type.  A layout or an order the tenant does not know is refused with 400: the read is then repeated
-// with the short layout and no order.
+// query reads entities of one type.  A layout or an order the tenant does not know is refused with 400, or with a 500 "DQL
+// exception" (as an HTTP error or inside an HTTP 200 answer): the read is then repeated with the short layout and no order.
 func (s *smax) query(ctx context.Context, typ, layout string, q url.Values) (any, error) {
 	build := func(layout string, withOrder bool) string {
 		qq := url.Values{}
@@ -215,7 +239,7 @@ func (s *smax) query(ctx context.Context, typ, layout string, q url.Values) (any
 	}
 	v, err := s.get(ctx, build(layout, true))
 	var se *statusError
-	if err != nil && errors.As(err, &se) && se.Code == http.StatusBadRequest && layout != smaxMinLayout {
+	if err != nil && errors.As(err, &se) && (se.Code == http.StatusBadRequest || se.Code == http.StatusInternalServerError) && layout != smaxMinLayout {
 		if v2, err2 := s.get(ctx, build(smaxMinLayout, false)); err2 == nil {
 			return v2, nil
 		}
@@ -342,7 +366,7 @@ func (s *smax) Show(ctx context.Context, cmd string) (string, error) {
 	}
 	q := url.Values{"size": {strconv.Itoa(smaxPage)}, "order": {"LastUpdateTime desc"}}
 	if p := a["phase"]; p != "" {
-		f := "Phase='" + strings.ReplaceAll(p, "'", "''") + "'"
+		f := "PhaseId='" + strings.ReplaceAll(p, "'", "''") + "'"
 		if w := s.window(); w != "" {
 			f = "(" + f + ") and (" + w + ")"
 		}
@@ -447,9 +471,9 @@ func (s *smax) APIGet(ctx context.Context, path string) (any, bool, error) {
 func (s *smax) APICatalog(context.Context) (any, error) {
 	return map[string]any{
 		"how": "Entities below /rest/<tenant>/ems: Request, Incident, Change and Problem (one record: /ems/Request/<id>). Parameters: layout (the properties wanted, " +
-			"named one by one, no wildcard; the default is Id, DisplayLabel, Phase, Status, CreateTime, LastUpdateTime), filter (Phase='Validation', DisplayLabel sw('PROD')), " +
+			"named one by one, no wildcard; the default is Id, DisplayLabel, PhaseId, Status, CreateTime, LastUpdateTime), filter (PhaseId='Validation', DisplayLabel sw('PROD')), " +
 			"order (LastUpdateTime desc), size (up to 500) and skip. People, groups, roles and settings are refused. Changes are device_change_raw: POST /ems/bulk (CREATE or UPDATE of Request, Incident, Change, Problem).",
-		"examples": []string{"/ems/Request?size=20", "/ems/Request?filter=Phase='Validation'&size=20", "/ems/Request/5013940?layout=Id,DisplayLabel,Description,Phase", "/ems/Incident?size=20"},
+		"examples": []string{"/ems/Request?size=20", "/ems/Request?filter=PhaseId='Validation'&size=20", "/ems/Request/5013940?layout=Id,DisplayLabel,Description,PhaseId", "/ems/Incident?size=20"},
 		"tip":      "show requests, show request ID (device_show) read the same in one call; property names are the tenant's own and may differ from these.",
 	}, nil
 }

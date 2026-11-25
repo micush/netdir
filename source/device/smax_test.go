@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -18,6 +19,7 @@ type smaxState struct {
 	logins    int
 	expire    bool // answer 401 once to the first entity read
 	badLayout bool // refuse any layout longer than the short one with 400
+	failed200 bool // answer any layout longer than the short one with HTTP 200 and completion_status FAILED (a property the tenant does not know)
 }
 
 func smaxStub(t *testing.T, st *smaxState) Device {
@@ -50,13 +52,18 @@ func smaxStub(t *testing.T, st *smaxState) Device {
 			jout(w, 400, map[string]any{"error": "unknown property"})
 			return
 		}
+		if st.failed200 && q.Get("layout") != smaxMinLayout {
+			jout(w, 200, map[string]any{"entities": []any{}, "meta": map[string]any{"completion_status": "FAILED", "total_count": 3180,
+				"errorDetails": map[string]any{"httpStatus": 500, "message": "Illegal query structure: DQL exception encountered"}}})
+			return
+		}
 		ent := func(id, label, phase string) map[string]any {
 			return map[string]any{"entity_type": "Request", "properties": map[string]any{"Id": id, "DisplayLabel": label, "Phase": phase, "Description": "read-only account in Centreon, password: hunter2"}}
 		}
 		switch r.URL.Path {
 		case "/rest/223939732/ems/Request":
 			all := []any{ent("5013940", "PROD and Lab server : Support", "Validation"), ent("4995175", "Read access to Entra ID", "Approval")}
-			if f := q.Get("filter"); strings.HasPrefix(f, "(Phase='Approval') and (LastUpdateTime gt ") {
+			if f := q.Get("filter"); strings.HasPrefix(f, "(PhaseId='Approval') and (LastUpdateTime gt ") {
 				all = all[1:]
 			}
 			if q.Get("skip") != "0" && q.Get("skip") != "" {
@@ -293,5 +300,37 @@ func TestSMAXListWindow(t *testing.T) {
 		if strings.Contains(c, "LastUpdateTime+gt") {
 			t.Errorf("days=0 still filtered: %s", c)
 		}
+	}
+}
+
+// SMAX reports an unknown property of a layout as HTTP 200 with completion_status FAILED: that is an error (so the short layout
+// is tried), not an empty list.
+func TestSMAXFailedAnswerInsideHTTP200(t *testing.T) {
+	st := &smaxState{failed200: true}
+	drv := smaxOpen(t, st)
+	ctx := context.Background()
+	out, err := drv.Show(ctx, "show requests")
+	if err != nil || !strings.Contains(out, "5013940") {
+		t.Fatalf("the short layout was not tried: %s %v", out, err)
+	}
+	g := drv.(APIer)
+	if _, _, err := g.APIGet(ctx, "/ems/Request?layout=Id,Nope"); err != nil {
+		t.Fatalf("a layout the tenant refuses falls back to the short one: %v", err)
+	}
+	var sawFull, sawMin bool
+	for _, c := range st.calls {
+		sawFull = sawFull || strings.Contains(c, "PhaseId")
+		sawMin = sawMin || strings.Contains(c, "layout=Id%2CDisplayLabel%2CCreateTime&")
+	}
+	if !sawFull || !sawMin {
+		t.Errorf("full layout %v, short layout %v: %v", sawFull, sawMin, st.calls)
+	}
+	if v := smaxFailed(map[string]any{"meta": map[string]any{"completion_status": "OK"}}); v != nil {
+		t.Errorf("OK taken as a failure: %v", v)
+	}
+	err = smaxFailed(map[string]any{"meta": map[string]any{"completion_status": "FAILED", "errorDetails": map[string]any{"httpStatus": float64(500), "message": "DQL"}}})
+	var se *statusError
+	if !errors.As(err, &se) || se.Code != 500 || !strings.Contains(err.Error(), "DQL") {
+		t.Errorf("a failed answer: %v", err)
 	}
 }
