@@ -1,5 +1,40 @@
 # Changelog
 
+## [v245] - 2026-11-25 — confluence: API v2 as well as v1, whichever answers
+
+### Added
+- **`confluence`** on Cloud uses the API v2 (`/wiki/api/v2`) as well as v1 (Data Center has v1 only and never sends a v2 request).
+  - **Reads** (`show spaces|pages|page`, the connection check): v2 first, v1 when v2 answers 404, 405, 410 or 501; the API that answered is remembered per kind of read and asked first next time. Any other failure (sign-in, rights, a server error, no answer) is returned as it is, because the other API would say the same. When both said "gone", the error names both. `show pages` with `search=` or `label=` uses v1 only (v2 has no text search or label filter; the error says so). Space IDs of v2 are shown as keys, the editor as `modified_by_account` (v2 gives an account ID, not a name).
+  - **`device_api_get`**: v2 paths `/pages`, `/blogposts`, `/spaces`, `/footer-comments`, `/inline-comments` (by ID, with `children`, `descendants`, `ancestors`, `labels`, `versions`, `attachments`; `limit` up to 250, `cursor`, `body-format`, `sort`, `space-id`, `ids`, `keys`, `include-labels`); on Data Center they are refused. A v1 read that v1 has dropped is sent to the v2 path that does the same (`/content/ID`, its `child/page`, `label` and `version`, `/content`, `/space`, `/space/KEY`); a CQL search has none, and the error says so.
+  - **`device_change_raw`**: the v2 forms `POST /pages|/blogposts|/footer-comments` and `PUT /pages|/blogposts/ID`, read first and put back (as the next version) when the site does not answer a read afterwards. A v1 create or update of a page or a blog post that v1 no longer has is translated (the space key to its ID, the last ancestor to `parentId`) and sent through v2; the result's note says so. A v1 write is retried only after an answer that means the endpoint does not exist, which changed nothing.
+
+### Fixed
+- The cursor check of the v2 reads used a repeat count that Go's regexp refuses (found by the tests before release).
+
+### Verified
+- gofmt, `go vet`, `go test ./device/` and, with `CGO_ENABLED=0`, `go test .`: everything passes except `TestUpdateBuildApplyAndRollbackGuard` (needs `security/pam_appl.h`, absent here). New tests against a stub Cloud with both APIs and switches that remove either one: v2 preferred and remembered, fallback both ways, a text search with v1 gone, both gone, a 500 not retried, Data Center never touching v2, the v2 path whitelist, translated reads, translated creates and updates, a dry run, the put-back through v2.
+
+### Not verified
+- **Not run against a real Confluence.** The v2 paths, parameters and answer shapes (`spaceId`, `version.createdAt`, `labels.results`, `body.storage.value`, the `_links.base`) are from Atlassian's documentation and a stub; v2 `PUT` and `POST` bodies are as documented. Whether and when Atlassian removes particular v1 endpoints is theirs to decide; the driver adapts when an endpoint answers 404 or 410.
+- v2 has no add-label endpoint, so a label write is v1 only; no attachments; no `tshoot` integration.
+
+## [v244] - 2026-11-25 — New driver: `confluence` (Atlassian Confluence, Cloud and Data Center)
+
+### Added
+- **`confluence`** platform (`device/confluence.go`): Confluence Cloud (`https://SITE.atlassian.net/wiki/rest/api`, the e-mail address and an API token as user name and password, Basic) and Data Center / Server (`/rest/api`, a personal access token as Bearer, or a user name and a password; option `context` for an installation with a context path). The flavor follows the address (`.atlassian.net` is Cloud) or option `flavor`. The secret is in a header, never in a URL.
+  - **Show**: `show spaces`, `show pages [space=KEY] [search=TEXT] [label=NAME] [limit=N]` (CQL, newest change first), `show page ID` (location, last editor and time, labels, link and the text as plain text, 20,000 characters at most).
+  - **`device_api_get`**: `/content` (an item and its `child`, `descendant`, `label`, `version`, `history`), `/content/search` and `/search` (CQL), `/space`; users, groups, permissions, restrictions, audit and settings are refused. Answers pass the secret hiding.
+  - **`device_change_raw`** (rw key): `POST /content` (page, blogpost, comment), `PUT /content/ID` (read first, put back as the next version when the site does not answer a read afterwards) and `POST /content/ID/label`; deletes and other paths are refused with the guards on (`NETDIR_DEVICE_GUARDS=1`), as for the other platforms.
+- README, the help text, the platform name in the GUI and the CLI help list the new platform.
+
+### Verified
+- gofmt, `go vet`, `go test ./device/`: six new tests against a stub that behaves like both flavors (the sign-in of each, Show, the text of a page with macros, CDATA and entities, the refused paths, a create, a dry run, a PUT and its put-back, the write checks) and `TestEveryPlatformIsWritable` with the new platform.
+
+### Not verified
+- **Not run against a real Confluence, Cloud or Data Center.** The paths, the parameters (`expand`, `cql`, `limit`) and the shape of the answers are from the documentation and a stub. Atlassian has been retiring parts of the v1 API on Cloud in favour of v2 (`/wiki/api/v2`); if a v1 path answers 410 or 404 there, the driver reports it as the site's own answer.
+- The put-back of a PUT and the XSRF header (`X-Atlassian-Token: no-check`) are as the documentation describes them; a page with restrictions or an editor that is not allowed to edit answers 403 and nothing is changed.
+- No attachments (multipart), no space or user changes, no import and no troubleshooting (`tshoot`) integration.
+
 ## [v243] - 2026-11-25 — tshoot: a user's three newest SMAX tickets
 
 ### Added
