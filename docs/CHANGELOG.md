@@ -1,5 +1,20 @@
 # Changelog
 
+## [v241] - 2026-11-25 — SMAX: lists work on a tenant with more than 10,000 records
+
+### Fixed
+- **`smax`**: SMAX answers HTTP 400 `query.num.of.entities.exceeded` to any list that matches more than 10,000 records, even with `size=1`. The connection check (`Request`, `size=1`) and `show requests|incidents|changes|problems` sent no filter, so on a large tenant the device stayed red. Every list now carries `LastUpdateTime gt <now minus 90 days>`. `show … phase=NAME` sends `(Phase='NAME') and (LastUpdateTime gt …)`. A `device_api_get` list with its own `filter` is sent as it is; one record by ID is never filtered.
+
+### Added
+- **Option `days`** for the `smax` device (0 to 3650, default 90; `0` turns the window off). A bad value is refused when the device is opened.
+
+### Verified
+- gofmt, `go vet ./device/`, `go test ./device/` (new `TestSMAXListWindow`: window on the check and on lists, not on a caller's filter or a single record, `days=0` and bad values). A real tenant (EU8) answered HTTP 200 to `filter=LastUpdateTime gt <ms>` and `LastUpdateTime>ms` on `/ems/Request` (3,177 records in 30 days), and 400 without a filter.
+
+### Not verified
+- The combined `(Phase='X') and (LastUpdateTime gt N)` filter of `show … phase=` was tested against a stub only, not a real tenant. Only the `device` package was built and tested: the main package needs the PAM headers (`security/pam_appl.h`), which this sandbox lacks, so the version test, the cross-compiles and the `CGO_ENABLED=0` vet and test were not run. `VERSION` was set to 241 by hand.
+- Change on the real tenant answered nothing (curl status 000) in one earlier test; not re-tested.
+
 ## [v240] - 2026-11-24 — Updates page: Nodes table laid out evenly, Fetch from online ticked by default
 
 ### Changed

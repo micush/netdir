@@ -56,7 +56,7 @@ func smaxStub(t *testing.T, st *smaxState) Device {
 		switch r.URL.Path {
 		case "/rest/223939732/ems/Request":
 			all := []any{ent("5013940", "PROD and Lab server : Support", "Validation"), ent("4995175", "Read access to Entra ID", "Approval")}
-			if f := q.Get("filter"); f == "Phase='Approval'" {
+			if f := q.Get("filter"); strings.HasPrefix(f, "(Phase='Approval') and (LastUpdateTime gt ") {
 				all = all[1:]
 			}
 			if q.Get("skip") != "0" && q.Get("skip") != "" {
@@ -231,5 +231,67 @@ func TestSMAXSetup(t *testing.T) {
 	drv2, _ := Open(bad, Credential{Username: "ro", Password: "wrong"})
 	if _, err := drv2.Facts(context.Background()); err == nil || strings.Contains(err.Error(), "wrong") {
 		t.Fatalf("expected an error without the password: %v", err)
+	}
+}
+
+// A tenant with more than 10,000 records refuses an unfiltered list (HTTP 400): every list carries a recent-activity window, the
+// option days sets it and 0 turns it off, and a filter of the caller's own is left alone.
+func TestSMAXListWindow(t *testing.T) {
+	ctx := context.Background()
+	st := &smaxState{}
+	drv := smaxOpen(t, st)
+	g := drv.(APIer)
+	if _, err := drv.Facts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := g.APIGet(ctx, "/ems/Request?size=20"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := g.APIGet(ctx, "/ems/Request?filter=Phase%3D%27Approval%27"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := g.APIGet(ctx, "/ems/Request/5013940"); err != nil {
+		t.Fatal(err)
+	}
+	var facts, inc, own, one string
+	for _, c := range st.calls {
+		switch {
+		case strings.Contains(c, "/Request?") && strings.HasSuffix(c, "size=1"):
+			facts = c
+		case strings.Contains(c, "/Request?") && strings.Contains(c, "size=20"):
+			inc = c
+		case strings.Contains(c, "/Request?") && strings.Contains(c, "Approval"):
+			own = c
+		case strings.Contains(c, "/Request/5013940"):
+			one = c
+		}
+	}
+	if !strings.Contains(facts, "filter=LastUpdateTime+gt+") || !strings.Contains(inc, "filter=LastUpdateTime+gt+") {
+		t.Errorf("no window on a list: %q %q", facts, inc)
+	}
+	if strings.Contains(own, "LastUpdateTime+gt") || strings.Contains(one, "filter=") {
+		t.Errorf("a caller's filter or a single record was changed: %q %q", own, one)
+	}
+	d := smaxStub(t, &smaxState{})
+	for _, bad := range []string{"-1", "x", "99999"} {
+		d.Options = map[string]string{"tenant": "223939732", "days": bad}
+		if _, err := Open(d, Credential{Username: "ro", Password: "pw-smax"}); err == nil {
+			t.Errorf("days=%s accepted", bad)
+		}
+	}
+	st2 := &smaxState{}
+	d2 := smaxStub(t, st2)
+	d2.Options = map[string]string{"tenant": "223939732", "days": "0"}
+	drv2, err := Open(d2, Credential{Username: "ro", Password: "pw-smax"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drv2.Facts(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range st2.calls {
+		if strings.Contains(c, "LastUpdateTime+gt") {
+			t.Errorf("days=0 still filtered: %s", c)
+		}
 	}
 }

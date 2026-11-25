@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SMAX, Micro Focus (now OpenText) Service Management Automation X: the service desk behind the "Anywhere Service Portal"
@@ -49,6 +50,7 @@ type smax struct {
 	tenant string
 	user   string
 	pass   string
+	days   int // list reads cover the records updated in this many days; 0 = no window
 
 	mu  sync.Mutex
 	tok string
@@ -73,7 +75,18 @@ var (
 const (
 	smaxPage     = 100
 	smaxMaxPages = 5
+	// SMAX refuses a list that matches more than 10,000 records (HTTP 400 query.num.of.entities.exceeded), whatever the size, so
+	// every list is limited to the records updated lately unless the caller sends a filter of its own.
+	smaxDefaultDays = 90
 )
+
+// window is the filter that keeps a list below the tenant's limit ("" when the window is turned off).
+func (s *smax) window() string {
+	if s.days <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("LastUpdateTime gt %d", time.Now().Add(-time.Duration(s.days)*24*time.Hour).UnixMilli())
+}
 
 func newSMAX(d Device, c Credential) (Driver, error) {
 	if c.Username == "" || c.Password == "" {
@@ -83,12 +96,20 @@ func newSMAX(d Device, c Credential) (Driver, error) {
 	if !smaxTenantRE.MatchString(t) {
 		return nil, fmt.Errorf("device %s: option tenant is the tenant ID, the number after TENANTID= in the address of the portal", d.Name)
 	}
+	days := smaxDefaultDays
+	if v := strings.TrimSpace(d.Options["days"]); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 3650 {
+			return nil, fmt.Errorf("device %s: option days is a number from 0 to 3650 (the days of activity a list covers; 0 = all records)", d.Name)
+		}
+		days = n
+	}
 	api, err := newAPIClient(d, 443)
 	if err != nil {
 		return nil, err
 	}
 	api.hdr.Set("User-Agent", "netdir")
-	return &smax{d: d, api: api, tenant: t, user: c.Username, pass: c.Password}, nil
+	return &smax{d: d, api: api, tenant: t, user: c.Username, pass: c.Password, days: days}, nil
 }
 
 // token is the session token the next request carries (a sign-in is made when there is none).
@@ -187,6 +208,9 @@ func (s *smax) query(ctx context.Context, typ, layout string, q url.Values) (any
 			qq[k] = v
 		}
 		qq.Set("layout", layout)
+		if w := s.window(); w != "" && qq.Get("filter") == "" && !strings.Contains(typ, "/") {
+			qq.Set("filter", w)
+		}
 		return "/ems/" + typ + "?" + qq.Encode()
 	}
 	v, err := s.get(ctx, build(layout, true))
@@ -318,7 +342,11 @@ func (s *smax) Show(ctx context.Context, cmd string) (string, error) {
 	}
 	q := url.Values{"size": {strconv.Itoa(smaxPage)}, "order": {"LastUpdateTime desc"}}
 	if p := a["phase"]; p != "" {
-		q.Set("filter", "Phase='"+strings.ReplaceAll(p, "'", "''")+"'")
+		f := "Phase='" + strings.ReplaceAll(p, "'", "''") + "'"
+		if w := s.window(); w != "" {
+			f = "(" + f + ") and (" + w + ")"
+		}
+		q.Set("filter", f)
 	}
 	var out []map[string]any
 	read := 0
