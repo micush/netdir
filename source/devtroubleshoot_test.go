@@ -39,7 +39,7 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 			w.WriteHeader(code)
 			_ = json.NewEncoder(w).Encode(v)
 		}
-		if r.Method != "GET" && !strings.HasSuffix(r.URL.Path, "/token") {
+		if r.Method != "GET" && !strings.HasSuffix(r.URL.Path, "/token") && !strings.HasSuffix(r.URL.Path, "/authenticate/login") {
 			t.Errorf("%s %s", r.Method, r.URL)
 		}
 		type J = map[string]any
@@ -95,6 +95,21 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 			out(200, J{"value": []J{dev("d1", "OLD-PC", "2026-10-01T08:00:00Z"), dev("d2", "JSMITH-LAPTOP", "2026-11-05T09:30:00Z")}})
 		case strings.HasSuffix(p, "/ownedDevices/microsoft.graph.device"):
 			out(200, J{"value": []J{}})
+		case strings.HasSuffix(p, "/authenticate/login"):
+			_, _ = io.Copy(io.Discard, r.Body)
+			_, _ = w.Write([]byte("smax-session"))
+		case p == "/rest/777/ems/Person":
+			f := r.URL.Query().Get("filter")
+			if f == "Upn='joe@contoso.com'" {
+				out(200, J{"entities": []J{{"entity_type": "Person", "properties": J{"Id": "1001", "Name": "Joe Smith"}}}, "meta": J{"completion_status": "OK"}})
+			} else {
+				out(200, J{"entities": []J{}, "meta": J{"completion_status": "OK"}})
+			}
+		case p == "/rest/777/ems/Request":
+			out(200, J{"entities": []J{{"entity_type": "Request", "properties": J{"Id": "5", "DisplayLabel": "VPN keeps dropping", "PhaseId": "Fulfill", "CreateTime": 1700000003000}},
+				{"entity_type": "Request", "properties": J{"Id": "4", "DisplayLabel": "Laptop battery", "PhaseId": "Close", "CreateTime": 1700000001000}}}, "meta": J{"completion_status": "OK"}})
+		case p == "/rest/777/ems/Incident":
+			out(200, J{"entities": []J{{"entity_type": "Incident", "properties": J{"Id": "9", "DisplayLabel": "Cannot print", "PhaseId": "Close", "CreateTime": 1700000002000}}}, "meta": J{"completion_status": "OK"}})
 		case p == "/api/v1/organizations/1/networks":
 			troubleNetReads++
 			out(200, []J{{"id": "L_1", "name": "HQ"}})
@@ -447,5 +462,68 @@ func TestDeviceAnswerCache(t *testing.T) {
 	}
 	if answerCacheable(&session{}, "facts", "", "") || answerCacheable(&session{mcp: true, raw: true}, "facts", "", "") || answerCacheable(&session{mcp: true}, "facts", "", "1") {
 		t.Error("the GUI, a raw caller or a fresh read was answered from memory")
+	}
+}
+
+// With a SMAX device in the inventory a user's three newest tickets are part of the answer; a host is not asked for, and without
+// the device there is nothing about tickets at all.
+func TestTroubleshootUserTickets(t *testing.T) {
+	e, _ := troubleEnv(t)
+	run := func(args string) string {
+		v, err := e.mg.Op("device.troubleshoot", json.RawMessage(args), "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(v)
+		return string(b)
+	}
+	if b := run(`{"user":"joe@contoso.com"}`); strings.Contains(b, `"tickets"`) || strings.Contains(b, "SMAX") {
+		t.Errorf("no SMAX device, and tickets are mentioned: %s", b)
+	}
+	dc, _, err := e.mg.LiveConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host, port string
+	for _, d := range dc.Settings.Devices {
+		if d.Name == "entra" {
+			host, port = d.Address, strconv.Itoa(d.Port)
+		}
+	}
+	pn, _ := strconv.Atoi(port)
+	dc.Settings.DeviceCredentials = append(dc.Settings.DeviceCredentials, device.Credential{Name: "sm", Username: "ro", Password: "pw"})
+	dc.Settings.Devices = append(dc.Settings.Devices, device.Device{Name: "desk", Platform: "smax", Address: host, Port: pn, Credential: "sm", Insecure: true, Options: map[string]string{"tenant": "777"}})
+	attachDevices(dc)
+	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Tickets struct {
+			Device    string `json:"smax_device"`
+			Requester string
+			Error     string
+			Tickets   []map[string]any
+		}
+	}
+	b := run(`{"user":"joe@contoso.com"}`)
+	if err := json.Unmarshal([]byte(b), &r); err != nil {
+		t.Fatalf("%v: %s", err, b)
+	}
+	ts := r.Tickets.Tickets
+	if r.Tickets.Device != "desk" || r.Tickets.Requester != "Joe Smith" || len(ts) != 3 || ts[0]["Id"] != "5" || ts[1]["Id"] != "9" || ts[2]["Id"] != "4" {
+		t.Fatalf("the three newest tickets, newest first: %s", b)
+	}
+	if !strings.Contains(b, "JSMITH-LAPTOP") { // the rest of the answer is still there
+		t.Errorf("the devices are missing: %s", b)
+	}
+	// a user SMAX does not know is a note, not a failure
+	if b := run(`{"user":"joe@contoso.com","smax":"desk"}`); !strings.Contains(b, `"tickets"`) {
+		t.Errorf("smax named: %s", b)
+	}
+	if v, err := e.mg.Op("device.troubleshoot", json.RawMessage(`{"user":"joe@contoso.com","smax":"entra"}`), "alice"); err == nil {
+		t.Errorf("a device that is not a SMAX device was accepted: %v", v)
+	}
+	if b := run(`{"host":"JSMITH-LAPTOP"}`); strings.Contains(b, `"tickets"`) {
+		t.Errorf("a host is not asked for tickets: %s", b)
 	}
 }

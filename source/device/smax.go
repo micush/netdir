@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -403,6 +404,87 @@ func (s *smax) Show(ctx context.Context, cmd string) (string, error) {
 		res["note"] = fmt.Sprintf("search looks in the %d newest rows that were read", read)
 	}
 	return obsText(res), nil
+}
+
+// ---- the tickets of a person ----
+
+// ErrNoRequester is a person that SMAX does not have.
+var ErrNoRequester = errors.New("SMAX has no person that matches")
+
+var smaxNameRE = regexp.MustCompile(`^[^\x00-\x1f\\"*%]{1,128}$`)
+
+// UserTickets is TicketLooker.  The person is found by sign-in name (Upn), e-mail address (Email) or name, each as an exact match
+// and in that order; the tickets are those whose RequestedByPerson is that person.  The kinds read are Request and Incident (a
+// change or a problem is not asked for by a person), the newest first by creation.
+func (s *smax) UserTickets(ctx context.Context, who []string, n int) (string, []map[string]any, error) {
+	if n < 1 || n > 20 {
+		n = 3
+	}
+	q1 := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+	var pid, pname string
+find:
+	for _, w := range who {
+		w = strings.TrimSpace(w)
+		if w == "" || !smaxNameRE.MatchString(w) {
+			continue
+		}
+		for _, prop := range []string{"Upn", "Email", "Name"} {
+			v, err := s.query(ctx, "Person", "Id,Name", url.Values{"filter": {prop + "=" + q1(w)}, "size": {"2"}})
+			if err != nil {
+				continue // a tenant without that property: the next
+			}
+			rows := smaxRows(v)
+			if len(rows) == 0 || prop == "Name" && len(rows) > 1 {
+				continue
+			}
+			pid, pname = str(rows[0]["Id"]), str(rows[0]["Name"])
+			if smaxIDRE.MatchString(pid) {
+				break find
+			}
+			pid = ""
+		}
+	}
+	if pid == "" {
+		return "", nil, fmt.Errorf("%w %s", ErrNoRequester, strings.Join(who, " or "))
+	}
+	var all []map[string]any
+	var firstErr error
+	failed := 0
+	for _, typ := range []string{"Request", "Incident"} {
+		v, err := s.query(ctx, typ, smaxLayouts[typ], url.Values{"filter": {"RequestedByPerson=" + q1(pid)}, "order": {"CreateTime desc"}, "size": {strconv.Itoa(n)}})
+		if err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: %w", typ, err)
+			}
+			continue
+		}
+		for _, r := range smaxRows(v) {
+			r["type"] = typ
+			if ms, ok := r["CreateTime"].(float64); ok && ms > 0 {
+				r["created"] = time.UnixMilli(int64(ms)).UTC().Format(time.RFC3339)
+			}
+			all = append(all, r)
+		}
+	}
+	if failed == 2 {
+		return pname, nil, firstErr
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		a, _ := all[i]["CreateTime"].(float64)
+		b, _ := all[j]["CreateTime"].(float64)
+		return a > b
+	})
+	if len(all) > n {
+		all = all[:n]
+	}
+	out := make([]map[string]any, 0, len(all))
+	for _, r := range all {
+		if m, ok := obsScrub(Redact(r)).(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return pname, out, firstErr
 }
 
 // ---- reading through the API ----

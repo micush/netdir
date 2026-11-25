@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -332,5 +333,77 @@ func TestSMAXFailedAnswerInsideHTTP200(t *testing.T) {
 	var se *statusError
 	if !errors.As(err, &se) || se.Code != 500 || !strings.Contains(err.Error(), "DQL") {
 		t.Errorf("a failed answer: %v", err)
+	}
+}
+
+// The tickets of a person: the person is found by sign-in name, then e-mail, then name (exact matches); the newest requests and
+// incidents they asked for come back newest first.
+func TestSMAXUserTickets(t *testing.T) {
+	var persons, tickets []string
+	d := tlsDevice(t, "smax", "smax", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/authentication-endpoint/authenticate/login" {
+			w.Write([]byte(smaxTok))
+			return
+		}
+		q := r.URL.Query()
+		ent := func(typ, id, label string, created float64) map[string]any {
+			return map[string]any{"entity_type": typ, "properties": map[string]any{"Id": id, "DisplayLabel": label, "CreateTime": created, "Description": "password: hunter2"}}
+		}
+		ok := func(es ...any) {
+			jout(w, 200, map[string]any{"entities": es, "meta": map[string]any{"completion_status": "OK"}})
+		}
+		switch r.URL.Path {
+		case "/rest/223939732/ems/Person":
+			f := q.Get("filter")
+			persons = append(persons, f)
+			if f == "Email='joe@contoso.com'" {
+				ok(map[string]any{"entity_type": "Person", "properties": map[string]any{"Id": "1001", "Name": "Joe Smith"}})
+				return
+			}
+			if strings.HasPrefix(f, "Upn=") { // a tenant without that property
+				jout(w, 200, map[string]any{"entities": []any{}, "meta": map[string]any{"completion_status": "FAILED", "errorDetails": map[string]any{"httpStatus": 500, "message": "DQL exception"}}})
+				return
+			}
+			ok()
+		case "/rest/223939732/ems/Request":
+			tickets = append(tickets, "Request "+q.Get("filter")+" "+q.Get("order")+" "+q.Get("size"))
+			ok(ent("Request", "11", "VPN does not connect", 1700000003000), ent("Request", "10", "New laptop", 1700000001000))
+		case "/rest/223939732/ems/Incident":
+			tickets = append(tickets, "Incident "+q.Get("filter"))
+			ok(ent("Incident", "12", "Outlook crashes", 1700000002000))
+		default:
+			jout(w, 404, map[string]any{})
+		}
+	}))
+	d.Options = map[string]string{"tenant": "223939732"}
+	drv, err := Open(d, Credential{Username: "ro", Password: "pw-smax"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl, isTL := drv.(TicketLooker)
+	if !isTL {
+		t.Fatal("smax is not a TicketLooker")
+	}
+	who, ts, err := tl.UserTickets(context.Background(), []string{"joe@contoso.com", "joe", "Joe Smith"}, 3)
+	if err != nil || who != "Joe Smith" || len(ts) != 3 {
+		t.Fatalf("%q %v %v", who, ts, err)
+	}
+	if ts[0]["Id"] != "11" || ts[1]["Id"] != "12" || ts[2]["Id"] != "10" || ts[0]["type"] != "Request" || ts[1]["type"] != "Incident" || ts[0]["created"] != "2023-11-14T22:13:23Z" {
+		t.Errorf("newest first, with the type and the time: %v", ts)
+	}
+	if strings.Contains(fmt.Sprint(ts), "hunter2") {
+		t.Errorf("a secret in a ticket was not hidden: %v", ts)
+	}
+	if len(persons) != 3 || persons[0] != "Upn='joe@contoso.com'" || persons[1] != persons[0] /* the retry with the short layout */ || persons[2] != "Email='joe@contoso.com'" {
+		t.Errorf("the person is looked up by sign-in name, then e-mail address, and the search stops at the first found: %v", persons)
+	}
+	if len(tickets) != 2 || !strings.Contains(tickets[0], "RequestedByPerson='1001' CreateTime desc 3") || !strings.Contains(tickets[1], "RequestedByPerson='1001'") {
+		t.Errorf("the tickets are asked for by the person's number, newest first: %v", tickets)
+	}
+	if _, _, err := tl.UserTickets(context.Background(), []string{"nobody@contoso.com", "a'b"}, 3); !errors.Is(err, ErrNoRequester) {
+		t.Errorf("an unknown person: %v", err)
+	}
+	if _, _, err := tl.UserTickets(context.Background(), []string{"x\"*y"}, 3); !errors.Is(err, ErrNoRequester) {
+		t.Errorf("a name with a wildcard or a quote was searched: %v", err)
 	}
 }

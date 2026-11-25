@@ -113,11 +113,12 @@ const (
 	tsThreatLogs  = 20
 	tsMaxAddrs    = 4
 	tsMaxHosts    = 3
+	tsTickets     = 3 // the newest tickets of the user read from a SMAX device
 )
 
 func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error) {
 	var a struct {
-		User, Host, Hours, Devices, Network, Entra, Meraki, Panorama, AD string
+		User, Host, Hours, Devices, Network, Entra, Meraki, Panorama, AD, SMAX string
 	}
 	var in map[string]any
 	if err := json.Unmarshal(raw, &in); err != nil {
@@ -132,7 +133,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		}
 		return ""
 	}
-	a.User, a.Host, a.Hours, a.Devices, a.Network, a.Entra, a.Meraki, a.Panorama, a.AD = get("user"), get("host"), get("hours"), get("devices"), get("network"), get("entra"), get("meraki"), get("panorama"), get("ad")
+	a.User, a.Host, a.Hours, a.Devices, a.Network, a.Entra, a.Meraki, a.Panorama, a.AD, a.SMAX = get("user"), get("host"), get("hours"), get("devices"), get("network"), get("entra"), get("meraki"), get("panorama"), get("ad"), get("smax")
 	switch {
 	case a.User == "" && a.Host == "":
 		return nil, errors.New("user: a sign-in name, an object ID or a name (or host: a machine's name)")
@@ -177,6 +178,10 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	adv, aerr := pickDevice(devs, a.AD, "ad", nil)
 	if a.AD != "" && aerr != nil {
 		return nil, aerr
+	}
+	sd, serr := pickDevice(devs, a.SMAX, "smax", nil)
+	if a.SMAX != "" && serr != nil {
+		return nil, serr
 	}
 	md, merr := pickDevice(devs, a.Meraki, "meraki", func(d device.Device) bool { return d.Options["serial"] == "" })
 	if a.Entra != "" && eerr != nil {
@@ -337,6 +342,70 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 			if len(recs) > 1 {
 				note("Active Directory has %d accounts that match; the best match is first", len(recs))
 			}
+		}
+	}
+
+	// ---- the user's newest tickets (when there is a SMAX device; none is said when there is none) ----
+	if a.User != "" {
+		switch {
+		case serr == nil:
+			who := []string{}
+			add := func(v any) {
+				x := strings.TrimSpace(fmt.Sprint(v))
+				if x == "" || x == "<nil>" {
+					return
+				}
+				for _, y := range who {
+					if strings.EqualFold(x, y) {
+						return
+					}
+				}
+				who = append(who, x)
+			}
+			u, _ := out["user"].(map[string]any)
+			add(u["userPrincipalName"])
+			add(u["mail"])
+			add(a.User)
+			add(short)
+			add(u["displayName"])
+			type got struct {
+				Who     string
+				Tickets []map[string]any
+			}
+			var partial error
+			tv, err := ask(sd, 150*time.Second, func(ctx context.Context, d device.Driver) (any, error) {
+				l, ok := d.(device.TicketLooker)
+				if !ok {
+					return nil, errors.New("this device cannot look up tickets")
+				}
+				w, ts, err := l.UserTickets(ctx, who, tsTickets)
+				if err != nil && len(ts) > 0 {
+					partial, err = err, nil
+				}
+				return got{w, ts}, err
+			})
+			switch {
+			case err != nil && strings.Contains(err.Error(), device.ErrNoRequester.Error()): // the error has crossed a fan-out as text
+				out["tickets"] = map[string]any{"smax_device": sd.Name, "tickets": []any{}}
+				note("%s: %v", sd.Name, err)
+			case err != nil:
+				out["tickets"] = map[string]any{"smax_device": sd.Name, "error": err.Error()}
+			default:
+				g := tv.(got)
+				ts := g.Tickets
+				if ts == nil {
+					ts = []map[string]any{}
+				}
+				out["tickets"] = map[string]any{"smax_device": sd.Name, "requester": g.Who, "tickets": ts}
+				if len(ts) == 0 {
+					note("SMAX has no request or incident asked for by %s", g.Who)
+				}
+				if partial != nil {
+					note("%s: %v", sd.Name, partial)
+				}
+			}
+		case strings.HasPrefix(serr.Error(), "several"):
+			note("no tickets: %v", serr)
 		}
 	}
 
@@ -524,7 +593,8 @@ func mcpDeviceTroubleshootTool() mcpTool {
 			"for a wireless client its Wi-Fi now (SSID, AP, RSSI and SNR), its signal quality, data rate and latency over the window, its connection statistics, connectivity events and failed connections; for a wired one its switch port's status (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. " +
 			"Last, the firewall's newest traffic and threat log entries for the addresses found (the VPN address, the address on the network). " +
 			"When there is an Active Directory device the account (or the computer's account) is added as directory: enabled, locked out, when the password last changed, last sign-in, groups. " +
-			"The answer has: user or host and last_user, devices (each with entra and network), directory, vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
+			"For a user, when there is a SMAX service desk device, the user's three newest tickets (requests and incidents they asked for, newest first, with number, title, phase, status and creation time) are added as tickets. " +
+			"The answer has: user or host and last_user, devices (each with entra and network), directory, tickets (the user's newest SMAX tickets), vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
 			"The firewall logs are those of the Panorama in the inventory (or of the one PAN-OS firewall); a system that is not configured is left out with a note. The systems are matched by name (case and domain ignored); a phone often has a different host name, so a device may be reported as not seen. Read only.",
 		props: []mcpProp{
 			{name: "user", typ: "string", desc: "The user: a sign-in name (joe.smith@contoso.com), an account name (msmith), an object ID or a name. A name that matches several users is refused with the candidates listed. Give this or host."},
@@ -536,11 +606,12 @@ func mcpDeviceTroubleshootTool() mcpTool {
 			{name: "meraki", typ: "string", desc: "The Meraki organization device's name in list_devices, when there are several."},
 			{name: "panorama", typ: "string", desc: "The Panorama's or firewall's name in list_devices, when there are several."},
 			{name: "ad", typ: "string", desc: "The Active Directory device's name in list_devices, when there are several."},
+			{name: "smax", typ: "string", desc: "The SMAX device's name in list_devices, when there are several."},
 		},
 		run: func(c *mcpCtx) (any, error) {
 			q := "/api/devices/troubleshoot?"
 			sep := ""
-			for _, k := range []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad"} {
+			for _, k := range []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad", "smax"} {
 				if v := c.str(k); v != "" {
 					q += sep + k + "=" + urlQ(v)
 					sep = "&"

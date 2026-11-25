@@ -12,6 +12,14 @@ type UserDeviceLooker interface {
 	UserDevices(ctx context.Context, who string) (user map[string]any, devices []map[string]any, err error)
 }
 
+// TicketLooker is a service desk (SMAX) that knows the tickets a person asked for.
+type TicketLooker interface {
+	// UserTickets finds the person by one of these names (a sign-in name, an e-mail address, a name; tried in this order) and
+	// returns the n newest tickets they asked for (requests and incidents), newest first.  requester is the person found; a
+	// person nobody here matches is ErrNoRequester.
+	UserTickets(ctx context.Context, who []string, n int) (requester string, tickets []map[string]any, err error)
+}
+
 // ClientQuery is what to look for on a network: clients with one of these names (a DHCP host name, with or without a domain), MACs or users,
 // seen in the last Hours hours, in one network or in all of them.
 type ClientQuery struct {

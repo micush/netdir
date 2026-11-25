@@ -1,5 +1,18 @@
 # Changelog
 
+## [v243] - 2026-11-25 — tshoot: a user's three newest SMAX tickets
+
+### Added
+- **`tshoot user NAME`** (`device_troubleshoot_user`, `GET /api/devices/troubleshoot?user=…`) adds `tickets` when a `smax` device is in the inventory: the user's three newest tickets, requests and incidents together, newest first, each with number, title, phase, status and creation time (`created`, UTC). The person is found in SMAX by sign-in name, then e-mail address, then name (exact matches; a name that matches several people is not used), the tickets are those whose `RequestedByPerson` is that person. With no SMAX device nothing about tickets is said; a user SMAX does not know is a note (`SMAX has no person that matches …`); a failed read is `tickets.error` and the rest of the answer is still given. New argument `smax=NAME` for the case of several SMAX devices (an unusable name is an error, as for `entra=` and the others). A host is not asked for tickets.
+- `device.TicketLooker` (`device/clients.go`) and `smax.UserTickets` (`device/smax.go`). Ticket text is passed through the secret hiding like the other reads.
+
+### Verified
+- gofmt, `CGO_ENABLED=0 go vet ./...`, `CGO_ENABLED=0 go test ./...`: everything passes except `TestUpdateBuildApplyAndRollbackGuard`, which builds with cgo and needs `security/pam_appl.h`, absent here. New tests: `TestSMAXUserTickets` (order of the lookups, the retry after a `FAILED` answer, the person's number in the ticket filter, newest first, secrets hidden, an unknown name, a name with a quote or a wildcard) and `TestTroubleshootUserTickets` (no SMAX device: nothing; with one: the three tickets in order and the rest of the answer; `smax=` naming a device of another platform is refused; a host gets none).
+
+### Not verified
+- **Not run against the real tenant.** The property names of the person (`Upn`, `Email`, `Name`) and of the requester (`RequestedByPerson`) and the filter form `RequestedByPerson='ID'` are from the SMAX documentation and a stub; on a tenant where they differ the answer is a note or `tickets.error`, not a wrong list. The 90-day window is not added to this read (the requester filter keeps it small).
+- About one request in four to the tenant hung for 60 seconds earlier; the ticket read has no retry for that, so it can show `tickets.error` on a slow answer while the rest of the troubleshooting is still given.
+
 ## [v242] - 2026-11-25 — SMAX: the phase property is PhaseId, and a failed answer inside HTTP 200 is an error
 
 ### Fixed
