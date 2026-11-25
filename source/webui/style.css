@@ -870,3 +870,11 @@ table.policy.rows.t-devices th:nth-child(8) { width: 8rem; } table.policy.rows.t
 .listfilterbox { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; }
 .listfilterbox .listfilter { flex: 1 1 auto; min-width: 0; }
 .listfilterbox .hint { white-space: nowrap; }
+
+/* Updates ▸ Nodes: the node name gets the room, the versions are narrow, the pills sit together; all left-aligned */
+table.evencols { table-layout: fixed; width: 100%; }
+table.evencols th.w-cb { width: 3rem; }
+table.evencols th.w-node { width: 26%; }
+table.evencols th.w-ver { width: 11%; }
+table.evencols th.w-pill { width: 15%; }
+table.evencols td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

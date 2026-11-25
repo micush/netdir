@@ -1,5 +1,17 @@
 # Changelog
 
+## [v240] - 2026-11-24 — Updates page: Nodes table laid out evenly, Fetch from online ticked by default
+
+### Changed
+- **Operate ▸ Updates ▸ Nodes.** The Running and Source versions now come right after the node name, ahead of Reachable. The table has set column widths (the node name widest, the versions narrow, Reachable, Queued and State evenly spaced), everything left-aligned, and a long name is cut with an ellipsis. The same layout as filedir v106–v110.
+- **Operate ▸ Updates ▸ Upload a Release.** Fetch from online is ticked when the page opens, so Upload fetches the newest release from GitHub; untick it to choose an archive file (the file chooser is greyed out until then).
+
+### Verified
+- `node --check webui/app.js`, gofmt, `go vet .`, and the version, update and web asset tests. The page was checked in headless Chrome for filedir (the same code); it was not opened in a browser for this product.
+
+### Not verified
+- The Go code is unchanged, so the platform cross-compiles were not repeated. Not run against a live cluster.
+
 ## [v239] - 2026-11-23 — Every tool of a device's own MCP endpoint, without code for each
 
 ### Added

@@ -4589,14 +4589,14 @@
         const cb = h("td", {}, h("input", { type: "checkbox", checked: selected.has(n.addr), disabled: v.intent.auto_all, "aria-label": "Select " + n.addr, onchange: (ev) => { if (ev.target.checked) selected.add(n.addr); else selected.delete(n.addr); VIEWS.updates.poll(); } }));
         return h("tr", { class: n.self ? "local" : "" }, v.clustered ? cb : null,
           h("td", { class: "mono" }, n.addr, n.self ? " ★" : "", soakMark(n.soak_sec)),
+          h("td", {}, n.running || "–"), h("td", {}, n.source || "–"),
           h("td", {}, n.reachable ? pill("yes", "ok") : n.restarting ? pill("restarting", "info") : pill("NO", "bad")),
-          h("td", { class: "num" }, n.running || "–"), h("td", { class: "num" }, n.source || "–"),
           h("td", {}, n.queued ? pill(v.intent.auto_all ? "auto" : "queued", "info") : ""), h("td", {}, state));
       });
-      const heads = (v.clustered ? [""] : []).concat(["Node", "Reachable", "Running", "Source", "Queued", "State"]);
+      const heads = (v.clustered ? [""] : []).concat(["Node", "Running", "Source", "Reachable", "Queued", "State"]);
       const off = v.clustered ? 1 : 0;
       dyn.append(h("div", { class: "card" }, h("header", { class: "bar" }, h("h2", {}, tc("Nodes")), h("span", { class: "grow" }), go),
-        h("div", { class: "scroll" }, h("table", {}, h("thead", {}, h("tr", {}, heads.map((t, i) => h("th", { class: i === 2 + off || i === 3 + off ? "num" : "" }, t)))), h("tbody", {}, rows)))));
+        h("div", { class: "scroll" }, h("table", { class: "evencols" }, h("thead", {}, h("tr", {}, heads.map((t, i) => h("th", { class: t === "Node" ? "w-node" : t === "Running" || t === "Source" ? "w-ver" : t === "" ? "w-cb" : "w-pill" }, t)))), h("tbody", {}, rows)))));
       const row = (e) => h("tr", {}, h("td", {}, when(e.at)), h("td", { class: "mono" }, e.node), h("td", {}, pill(e.kind, e.kind === "failed" || e.kind === "rolled-back" ? "bad" : e.kind === "applied" ? "ok" : "info")),
         h("td", { class: "num" }, (e.from ? e.from + " → " : "") + (e.to || "")), h("td", { class: "wrap" }, [e.detail, e.by ? " (by " + e.by + ")" : ""].join("")));
       const pages = Math.max(1, Math.ceil(v.history.length / HIST_PAGE));
@@ -4618,9 +4618,9 @@
         status = h("div", { "aria-live": "polite" });
         dyn = h("div", {});
         stats = h("div", { class: "stats" });
-        const file = h("input", { type: "file", accept: ".tgz,.tar.gz,.zip,application/gzip,application/zip", "aria-label": "Release archive" });
+        const file = h("input", { type: "file", accept: ".tgz,.tar.gz,.zip,application/gzip,application/zip", "aria-label": "Release archive", disabled: true });
         const note = h("span", { class: "muted small", role: "status", "aria-live": "polite" });
-        const online = h("input", { type: "checkbox", "aria-label": "Fetch from online", title: "Download the newest release from GitHub instead of using a file", onchange: () => { file.disabled = online.checked; note.textContent = ""; } });
+        const online = h("input", { type: "checkbox", checked: true, "aria-label": "Fetch from online", title: "Download the newest release from GitHub instead of using a file", onchange: () => { file.disabled = online.checked; note.textContent = ""; } });
         const up = h("button", { class: "btn primary hdr", type: "button", onclick: async (ev) => {
           const f = file.files[0];
           if (!online.checked && !f) { note.textContent = "Choose a release archive first, or tick Fetch from online."; return; }
