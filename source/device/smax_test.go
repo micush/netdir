@@ -356,11 +356,11 @@ func TestSMAXUserTickets(t *testing.T) {
 		case "/rest/223939732/ems/Person":
 			f := q.Get("filter")
 			persons = append(persons, f)
-			if f == "Email='joe@contoso.com'" {
+			if f == "Name='Joe Smith'" {
 				ok(map[string]any{"entity_type": "Person", "properties": map[string]any{"Id": "1001", "Name": "Joe Smith"}})
 				return
 			}
-			if strings.HasPrefix(f, "Upn=") { // a tenant without that property
+			if strings.HasPrefix(f, "Email=") { // a tenant without that property
 				jout(w, 200, map[string]any{"entities": []any{}, "meta": map[string]any{"completion_status": "FAILED", "errorDetails": map[string]any{"httpStatus": 500, "message": "DQL exception"}}})
 				return
 			}
@@ -384,7 +384,7 @@ func TestSMAXUserTickets(t *testing.T) {
 	if !isTL {
 		t.Fatal("smax is not a TicketLooker")
 	}
-	who, ts, err := tl.UserTickets(context.Background(), []string{"joe@contoso.com", "joe", "Joe Smith"}, 3)
+	who, ts, err := tl.UserTickets(context.Background(), []string{"Joe Smith", "joe@contoso.com"}, 3)
 	if err != nil || who != "Joe Smith" || len(ts) != 3 {
 		t.Fatalf("%q %v %v", who, ts, err)
 	}
@@ -394,11 +394,15 @@ func TestSMAXUserTickets(t *testing.T) {
 	if strings.Contains(fmt.Sprint(ts), "hunter2") {
 		t.Errorf("a secret in a ticket was not hidden: %v", ts)
 	}
-	if len(persons) != 3 || persons[0] != "Upn='joe@contoso.com'" || persons[1] != persons[0] /* the retry with the short layout */ || persons[2] != "Email='joe@contoso.com'" {
-		t.Errorf("the person is looked up by sign-in name, then e-mail address, and the search stops at the first found: %v", persons)
+	if len(persons) != 1 || persons[0] != "Name='Joe Smith'" {
+		t.Errorf("the person is looked up by full name first, and the search stops at the first found: %v", persons)
 	}
 	if len(tickets) != 2 || !strings.Contains(tickets[0], "RequestedByPerson='1001' CreateTime desc 3") || !strings.Contains(tickets[1], "RequestedByPerson='1001'") {
 		t.Errorf("the tickets are asked for by the person's number, newest first: %v", tickets)
+	}
+	persons = nil
+	if _, _, err := tl.UserTickets(context.Background(), []string{"nobody@contoso.com"}, 3); !errors.Is(err, ErrNoRequester) || len(persons) < 3 || persons[0] != "Name='nobody@contoso.com'" {
+		t.Errorf("a name nobody has is tried as a name, an address and a sign-in name: %v %v", err, persons)
 	}
 	if _, _, err := tl.UserTickets(context.Background(), []string{"nobody@contoso.com", "a'b"}, 3); !errors.Is(err, ErrNoRequester) {
 		t.Errorf("an unknown person: %v", err)

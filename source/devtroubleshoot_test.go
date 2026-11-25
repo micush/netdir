@@ -100,7 +100,8 @@ func troubleEnvWith(t *testing.T, pan bool, acl ...string) (*webEnv, func(msg st
 			_, _ = w.Write([]byte("smax-session"))
 		case p == "/rest/777/ems/Person":
 			f := r.URL.Query().Get("filter")
-			if f == "Upn='joe@contoso.com'" {
+			smaxFilters = append(smaxFilters, f)
+			if f == "Name='Joe Smith'" {
 				out(200, J{"entities": []J{{"entity_type": "Person", "properties": J{"Id": "1001", "Name": "Joe Smith"}}}, "meta": J{"completion_status": "OK"}})
 			} else {
 				out(200, J{"entities": []J{}, "meta": J{"completion_status": "OK"}})
@@ -465,6 +466,9 @@ func TestDeviceAnswerCache(t *testing.T) {
 	}
 }
 
+// smaxFilters are the person lookups the stub SMAX got.
+var smaxFilters []string
+
 // With a SMAX device in the inventory a user's three newest tickets are part of the answer; a host is not asked for, and without
 // the device there is nothing about tickets at all.
 func TestTroubleshootUserTickets(t *testing.T) {
@@ -505,7 +509,11 @@ func TestTroubleshootUserTickets(t *testing.T) {
 			Tickets   []map[string]any
 		}
 	}
-	b := run(`{"user":"joe@contoso.com"}`)
+	smaxFilters = nil
+	b := run(`{"user":"joe@contoso.com"}`) // what was typed is not what SMAX is searched by: Entra gives the full name
+	if len(smaxFilters) != 1 || smaxFilters[0] != "Name='Joe Smith'" {
+		t.Errorf("SMAX is searched by the full name, not by what was typed: %v", smaxFilters)
+	}
 	if err := json.Unmarshal([]byte(b), &r); err != nil {
 		t.Fatalf("%v: %s", err, b)
 	}

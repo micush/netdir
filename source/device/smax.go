@@ -413,8 +413,8 @@ var ErrNoRequester = errors.New("SMAX has no person that matches")
 
 var smaxNameRE = regexp.MustCompile(`^[^\x00-\x1f\\"*%]{1,128}$`)
 
-// UserTickets is TicketLooker.  The person is found by sign-in name (Upn), e-mail address (Email) or name, each as an exact match
-// and in that order; the tickets are those whose RequestedByPerson is that person.  The kinds read are Request and Incident (a
+// UserTickets is TicketLooker.  SMAX is searched by full name, so each name given is tried as the person's Name first, then as an
+// e-mail address (Email) and a sign-in name (Upn), each as an exact match (the caller puts the full name first); the tickets are those whose RequestedByPerson is that person.  The kinds read are Request and Incident (a
 // change or a problem is not asked for by a person), the newest first by creation.
 func (s *smax) UserTickets(ctx context.Context, who []string, n int) (string, []map[string]any, error) {
 	if n < 1 || n > 20 {
@@ -428,7 +428,7 @@ find:
 		if w == "" || !smaxNameRE.MatchString(w) {
 			continue
 		}
-		for _, prop := range []string{"Upn", "Email", "Name"} {
+		for _, prop := range []string{"Name", "Email", "Upn"} {
 			v, err := s.query(ctx, "Person", "Id,Name", url.Values{"filter": {prop + "=" + q1(w)}, "size": {"2"}})
 			if err != nil {
 				continue // a tenant without that property: the next

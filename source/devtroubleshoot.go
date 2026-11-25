@@ -190,7 +190,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	if a.Panorama != "" && lerr != nil {
 		return nil, lerr
 	}
-	if eerr != nil && lerr != nil {
+	if eerr != nil && lerr != nil && aerr != nil {
 		if a.User != "" {
 			return nil, eerr // as before there were logs to ask: a user is looked up in Entra
 		}
@@ -362,12 +362,23 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				}
 				who = append(who, x)
 			}
+			// SMAX is searched by full name: the typed account name is resolved to one first, by Entra (displayName) or, when
+			// Entra does not have the user, by Active Directory; the sign-in name and the address are the fallbacks
 			u, _ := out["user"].(map[string]any)
+			full := strings.TrimSpace(fmt.Sprint(u["displayName"]))
+			if full == "" || full == "<nil>" {
+				if ds, _ := out["directory"].([]map[string]any); len(ds) > 0 {
+					full = strings.TrimSpace(fmt.Sprint(ds[0]["Name"]))
+				}
+			}
+			add(full)
 			add(u["userPrincipalName"])
 			add(u["mail"])
 			add(a.User)
 			add(short)
-			add(u["displayName"])
+			if full == "" || full == "<nil>" {
+				note("SMAX is searched by full name and none was found for %s (no Entra or Active Directory record with a name): the tickets are looked up by the name as typed", a.User)
+			}
 			type got struct {
 				Who     string
 				Tickets []map[string]any

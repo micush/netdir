@@ -14,7 +14,7 @@ type UserDeviceLooker interface {
 
 // TicketLooker is a service desk (SMAX) that knows the tickets a person asked for.
 type TicketLooker interface {
-	// UserTickets finds the person by one of these names (a sign-in name, an e-mail address, a name; tried in this order) and
+	// UserTickets finds the person by one of these names (the full name first; each is tried as a name, an e-mail address and a sign-in name) and
 	// returns the n newest tickets they asked for (requests and incidents), newest first.  requester is the person found; a
 	// person nobody here matches is ErrNoRequester.
 	UserTickets(ctx context.Context, who []string, n int) (requester string, tickets []map[string]any, err error)
