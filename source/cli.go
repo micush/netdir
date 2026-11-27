@@ -38,7 +38,7 @@ type cliFlags struct {
 	syslogServer, syslogProto, syslogFacility, syslogFormat, syslogCA                                                                                                                              *string
 	ospf, ospfDisable, ospfEnable                                                                                                                                                                  *bool
 	ospfRouterID, ospfIfAdd, ospfIfDel, ospfIfDisable, ospfIfEnable, ospfArea, ospfNetwork, ospfKey, ospfHello, ospfDead, ospfMetric                                                               *string
-	asn, routerID, asPrepend, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                            *string
+	asn, routerID, asPrepend, bfd, nbrAdd, nbrDel, nbrDisable, nbrEnable, remoteAS, descr, passwd, multihop, keepalive, hold                                                                       *string
 	updateUpload, updatePush, updateCancel, updateAuto, updateRepo                                                                                                                                 *string
 	canvas, vmacTest, tshoot, tshootCapture                                                                                                                                                        *bool
 	canvasPause, canvasResume, canvasMove, canvasAdd, canvasDel, canvasSet, vip, vip6, ifname, label, anycast, address, scope, node, realMACs, device                                              *string
@@ -74,7 +74,7 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 		power: s("power"), powerAt: s("at"), powerIn: fs.Int("in", 0, ""),
 		nodePause: b("node-pause"), nodeResume: b("node-resume"), nodeStatus: b("node-status"),
 		logShow: b("log"), logMin: s("log-min"), logGrep: s("log-grep"), logSince: s("log-since"), logLines: s("log-lines"), scanAddr: s("scan"), scanPorts: s("scan-ports"), pingAddr: s("ping"), traceAddr: s("traceroute"), whoisName: s("whois"), nodeRename: s("node-rename"), hostLookup: s("host-lookup"), hostShow: b("host"), allNodes: b("all-nodes"), captureList: b("capture-interfaces"), captureIface: s("capture"), captureSecs: s("capture-seconds"), captureFilter: s("capture-filter"), captureFile: s("capture-file"), hostRange: s("host-range"),
-		bgp: b("bgp"), bgpDisable: b("bgp-disable"), bgpEnable: b("bgp-enable"), nbrDisable: s("bgp-neighbor-disable"), nbrEnable: s("bgp-neighbor-enable"), asn: s("asn"), routerID: s("router-id"), asPrepend: s("as-prepend"),
+		bgp: b("bgp"), bgpDisable: b("bgp-disable"), bgpEnable: b("bgp-enable"), nbrDisable: s("bgp-neighbor-disable"), nbrEnable: s("bgp-neighbor-enable"), asn: s("asn"), routerID: s("router-id"), asPrepend: s("as-prepend"), bfd: s("bfd"),
 		nbrAdd: s("bgp-neighbor-add"), nbrDel: s("bgp-neighbor-del"), remoteAS: s("remote-as"), descr: s("description"),
 		syslog: b("syslog"), syslogOff: b("syslog-disable"), syslogOn: b("syslog-enable"), syslogTest: b("syslog-test"), syslogInsecure: b("syslog-tls-insecure"),
 		lldp: b("lldp"), lldpOn: b("lldp-enable"), lldpOff: b("lldp-disable"),
@@ -364,7 +364,7 @@ func (f *cliFlags) run(sock string) bool {
 		printCluster(v)
 
 	// ── bgp ──
-	case *f.bgp || *f.asn != "" || *f.routerID != "" || *f.asPrepend != "" || *f.keepalive != "" || *f.hold != "" || *f.nbrAdd != "" || *f.nbrDel != "" ||
+	case *f.bgp || *f.asn != "" || *f.routerID != "" || *f.asPrepend != "" || *f.bfd != "" || *f.keepalive != "" || *f.hold != "" || *f.nbrAdd != "" || *f.nbrDel != "" ||
 		*f.bgpDisable || *f.bgpEnable || *f.nbrDisable != "" || *f.nbrEnable != "":
 		runBGP(sock, f)
 	// ── ospf ──

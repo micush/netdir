@@ -43,14 +43,29 @@ func runBGP(sock string, f *cliFlags) {
 		}
 		changed = true
 	}
-	if *f.asPrepend != "" {
-		switch strings.ToLower(*f.asPrepend) {
-		case "on", "yes", "true":
-			c.ASPrepend = true
-		case "off", "no", "false":
-			c.ASPrepend = false
+	if *f.bfd != "" {
+		switch strings.ToLower(*f.bfd) {
+		case "yes", "on", "true":
+			c.BFDOff = false
+		case "no", "off", "false":
+			c.BFDOff = true
 		default:
-			fatalf("--as-prepend takes on or off")
+			fatalf("--bfd takes yes or no")
+		}
+		changed = true
+	}
+	if *f.asPrepend != "" {
+		switch v := strings.ToLower(*f.asPrepend); v {
+		case "on", "yes", "true": // as before
+			c.ASPrepend = 3
+		case "off", "no", "false":
+			c.ASPrepend = 0
+		default:
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > bgpPrependMax {
+				fatalf("--as-prepend takes 0 (none) to %d: how many more times the local AS goes on every announcement", bgpPrependMax)
+			}
+			c.ASPrepend = n
 		}
 		changed = true
 	}
@@ -103,6 +118,7 @@ func runBGP(sock string, f *cliFlags) {
 		c.Neighbors, changed = kept, true
 	}
 	if changed {
+		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
 		decode(op(sock, "bgp.set", c), &st)
 	}
 	// switching things on and off (Operate ▸ Anycast) is separate from the settings
@@ -110,17 +126,21 @@ func runBGP(sock string, f *cliFlags) {
 	case *f.bgpDisable && *f.bgpEnable:
 		fatalf("--bgp-disable and --bgp-enable cannot be used together")
 	case *f.bgpDisable:
+		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
 		decode(op(sock, "bgp.operate", BGPOperateArgs{Enabled: false}), &st)
 	case *f.bgpEnable:
+		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
 		decode(op(sock, "bgp.operate", BGPOperateArgs{Enabled: true}), &st)
 	}
 	if *f.nbrDisable != "" && *f.nbrEnable != "" {
 		fatalf("--bgp-neighbor-disable and --bgp-neighbor-enable cannot be used together")
 	}
 	if *f.nbrDisable != "" {
+		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
 		decode(op(sock, "bgp.operate", BGPOperateArgs{Peer: *f.nbrDisable, Enabled: false}), &st)
 	}
 	if *f.nbrEnable != "" {
+		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
 		decode(op(sock, "bgp.operate", BGPOperateArgs{Peer: *f.nbrEnable, Enabled: true}), &st)
 	}
 	printBGP(st)
@@ -149,9 +169,9 @@ func printBGP(st BGPStatus) {
 		return
 	}
 	rid := orDefault(c.RouterID, "chosen by FRR")
-	fmt.Printf("BGP is on: AS %d, router id %s, BFD on every neighbor\n", c.ASN, rid)
-	if c.ASPrepend {
-		fmt.Printf("  AS path prepend: on (the local AS %d three more times on every announcement)\n", c.ASN)
+	fmt.Printf("BGP is on: AS %d, router id %s, %s\n", c.ASN, rid, map[bool]string{false: "BFD on every neighbor", true: "BFD off"}[c.BFDOff])
+	if c.ASPrepend > 0 {
+		fmt.Printf("  AS path prepend: %d (the local AS %d that many more times on every announcement)\n", c.ASPrepend, c.ASN)
 	}
 	fmt.Printf("  FRR: %s", map[bool]string{true: "installed", false: "NOT installed"}[st.Installed])
 	if st.Installed {

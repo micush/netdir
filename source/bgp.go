@@ -66,6 +66,9 @@ func (b *BGPConfig) timers() (int, int) {
 	return k, h
 }
 
+// bgpPrependMax is the most times the local AS may be prepended.
+const bgpPrependMax = 8
+
 // BGPConfig is the node's BGP settings.
 type BGPConfig struct {
 	ASN       uint32        `json:"asn"`                 // BGP runs on this node while an AS number is set
@@ -73,9 +76,16 @@ type BGPConfig struct {
 	Keepalive int           `json:"keepalive,omitempty"` // seconds; 0 = 3
 	Hold      int           `json:"hold,omitempty"`      // seconds; 0 = 9
 	Neighbors []BGPNeighbor `json:"neighbors"`
-	// ASPrepend adds the local AS three more times to the AS path of every anycast route this node announces, so that the
-	// routes of nodes that have it are the less preferred ones (a longer path) wherever the rest is equal.
-	ASPrepend bool `json:"as_prepend,omitempty"`
+	// ASPrepend is how many more times (0-8; 0 = none) the local AS is added to the AS path of every anycast route this node
+	// announces, so that the routes of nodes that have it are the less preferred ones (a longer path) wherever the rest is equal.
+	// A new key (the old one was a bool); written only when not 0, so a config that does not use it stays readable by older
+	// versions, which refuse keys they do not know.
+	ASPrepend int `json:"as_prepend_count,omitempty"`
+	// BFDOff turns BFD off for every neighbor (no `neighbor … bfd` in frr.conf); BFD is on unless it is set, and the key is
+	// written only then.
+	BFDOff bool `json:"bfd_off,omitempty"`
+	// LegacyASPrepend is the on/off of earlier versions (on: three times); read into ASPrepend and dropped on the next save.
+	LegacyASPrepend bool `json:"as_prepend,omitempty"`
 	// Disabled stops BGP on this node without forgetting the settings (Operate ▸ Anycast): the BGP section is
 	// removed from frr.conf as if the AS were cleared, and put back when it is enabled again.
 	Disabled bool `json:"disabled,omitempty"`
@@ -127,6 +137,13 @@ func (b *BGPConfig) Validate() error {
 		b.Neighbors = []BGPNeighbor{}
 	}
 	b.LegacyEnabled, b.LegacyBFD = false, false
+	if b.LegacyASPrepend && b.ASPrepend == 0 {
+		b.ASPrepend = 3 // what "on" did
+	}
+	b.LegacyASPrepend = false
+	if b.ASPrepend < 0 || b.ASPrepend > bgpPrependMax {
+		return fmt.Errorf("bgp: AS prepend %d must be 0 (none) to %d", b.ASPrepend, bgpPrependMax)
+	}
 	if b.ASN == 0 {
 		// Without an AS there is nothing to run, so nothing to disable and no router ID to keep.  (An older file may
 		// still hold a router ID next to a cleared AS; it is dropped here rather than refusing to load.)
@@ -250,8 +267,8 @@ func renderFRRAll(b *BGPConfig, osp *OSPFConfig, v4, v6 []string, hostname strin
 		return o.String()
 	}
 	prepend := ""
-	if b.ASPrepend {
-		prepend = fmt.Sprintf(" set as-path prepend %d %d %d\n", b.ASN, b.ASN, b.ASN)
+	if n := min(b.ASPrepend, bgpPrependMax); n > 0 {
+		prepend = " set as-path prepend" + strings.Repeat(fmt.Sprintf(" %d", b.ASN), n) + "\n"
 	}
 	o.WriteString("!\nroute-map NETDIR-OUT-V4 permit 10\n match ip address prefix-list NETDIR-ANYCAST-V4\n" + prepend)
 	o.WriteString("route-map NETDIR-OUT-V6 permit 10\n match ipv6 address prefix-list NETDIR-ANYCAST-V6\n" + prepend)
@@ -279,7 +296,9 @@ func renderFRRAll(b *BGPConfig, osp *OSPFConfig, v4, v6 []string, hostname strin
 		if n.Password != "" {
 			o.WriteString(fmt.Sprintf(" neighbor %s password %s\n", n.Peer, n.Password))
 		}
-		o.WriteString(fmt.Sprintf(" neighbor %s bfd\n", n.Peer)) // fast failure detection, always
+		if !b.BFDOff {
+			o.WriteString(fmt.Sprintf(" neighbor %s bfd\n", n.Peer)) // fast failure detection, unless turned off
+		}
 		if n.Disabled {
 			o.WriteString(fmt.Sprintf(" neighbor %s shutdown\n", n.Peer)) // administratively down: kept, not announced to
 		}

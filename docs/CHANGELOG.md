@@ -1,5 +1,25 @@
 # Changelog
 
+## [v246] - 2026-11-26 — BGP: AS Prepend from 0 to 8, and BFD on or off
+
+### Changed
+- **AS Prepend is a drop-down from 0 to 8** (Anycast ▸ BGP, was a tick box that prepended three times). **0 (off)** is the default; 1 to 8 add the local AS that many more times to every anycast announcement (`set as-path prepend ASN …` in both outbound route-maps), so several backup nodes can be given an order. Kept as `as_prepend_count` in the node's config, written only when not 0: a config that does not use it stays readable by v245 and before, but one that does is refused by them (they refuse keys they do not know), so update every node you set it on before going back. A config with the old `"as_prepend": true` reads as 3 (what on did) and is written back with the new key only. CLI: `--as-prepend 0-8` (`on` and `off` still work, as 3 and 0); `--bgp` prints the number.
+- `--bgp` and the other BGP commands print the daemon's answer fresh: a setting the answer leaves out (because it is the default) no longer shows the value from before the change.
+
+### Added
+- **BFD: Yes or No**, beside AS Prepend. **Yes** (the default, as before) runs BFD to every neighbor (`neighbor … bfd`); **No** leaves those lines out of `frr.conf`, for a router that does not run BFD. Kept as `bfd_off`, written only when No (the same rule for older versions as above); the earlier `bfd` key does not turn it off. CLI: `--bfd yes|no`; `--bgp` says *BFD on every neighbor* or *BFD off*.
+- Help ▸ Anycast: both fields, the backup steps and the command line.
+- Both apply when saved: `frr.conf` is rewritten and FRR reloaded, with the BGP sessions kept (no daemon is switched on or off). Without `frr-reload.py` (package `frr-pythontools`) FRR is restarted instead, as for any BGP change, and the sessions drop for a few seconds.
+
+### Verified
+- gofmt, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go test ./...`, builds for linux amd64, arm64, arm, 386 and riscv64; `node --check` of every file in webui/.
+- New tests: `TestRenderFRRASPrepend` (1, 3 and 8 times in both outbound route-maps, none by default, inbound unchanged); `TestBGPPrependCount` (0 to 8 accepted, -1, 9 and 100 refused, old `as_prepend: true` reads as 3 and is written back as `as_prepend_count`, the new key wins over the old); `TestRenderFRRBFD` (on by default for every neighbor, off leaves no `bfd` line, an old `bfd: false` does not turn it off, the default is not written).
+- The GUI and CLI code is the same as logdir v44's, which was checked live in Chromium (light and dark) and from the command line.
+
+### Not verified
+- Not run against FRR (not installed here): the route-maps and neighbor lines are checked in the generated `frr.conf` only. FRR's bfdd keeps running with BFD set to No (it serves OSPF too); it just has no BGP sessions.
+- Not opened in a browser for this product.
+
 ## [v245] - 2026-11-25 — confluence: API v2 as well as v1, whichever answers
 
 ### Added

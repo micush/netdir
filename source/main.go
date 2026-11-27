@@ -127,7 +127,8 @@ the web GUI):
                    --tls-revert  --tls-regenerate
   BGP (FRR)        --bgp   (this node's settings, announced addresses, neighbor and BFD state)
                    --asn N|off [--router-id A.B.C.D|-]     (BGP runs while an AS is set)
-                   [--keepalive S] [--hold S] [--as-prepend on|off]   (on: the local AS three more times on every announcement)
+                   [--keepalive S] [--hold S] [--as-prepend 0-8]   (the local AS that many more times on every announcement; 0: none)
+                   [--bfd yes|no]   (BFD to every neighbor; yes unless set)
                    --bgp-neighbor-add ADDR --remote-as N [--description T] [--password P] [--multihop N]
                    --bgp-neighbor-del ADDR
                    --bgp-disable | --bgp-enable   (stop / restart BGP on this node, settings kept)

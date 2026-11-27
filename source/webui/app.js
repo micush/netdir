@@ -5434,7 +5434,9 @@
       const rid = h("input", { type: "text", value: cfg.router_id || "", placeholder: "192.0.2.1 (optional)", spellcheck: "false" });
       const secs = (v, d, label) => h("input", { class: "narrow", type: "text", inputmode: "numeric", pattern: "[0-9]*", autocomplete: "off", value: String(v || d), "aria-label": label });
       const ka = secs(cfg.keepalive, 3, "Keepalive"), hold = secs(cfg.hold, 9, "Hold time");
-      const prep = h("input", { type: "checkbox", checked: !!cfg.as_prepend });
+      const prepNow = Number(cfg.as_prepend_count) || (cfg.as_prepend ? 3 : 0);   // an older config: on was 3
+      const prep = h("select", { "aria-label": "AS Prepend" }, Array.from({ length: 9 }, (_, n) => h("option", { value: String(n), selected: n === prepNow }, n ? String(n) : "0 (off)")));
+      const bfd = h("select", { "aria-label": "BFD" }, h("option", { value: "yes", selected: !cfg.bfd_off }, "Yes"), h("option", { value: "no", selected: !!cfg.bfd_off }, "No"));
       const needAS = () => { rid.disabled = !(Number(asn.value) > 0); };   // a router ID means nothing without an AS
       needAS();
       const commit = () => {
@@ -5443,18 +5445,21 @@
         const next = clone(cfg);
         next.asn = Number(asn.value) || 0; next.router_id = rid.value.trim();
         next.keepalive = Number(ka.value) || 0; next.hold = Number(hold.value) || 0;
-        if (prep.checked) next.as_prepend = true; else delete next.as_prepend;
+        delete next.as_prepend;
+        if (Number(prep.value) > 0) next.as_prepend_count = Number(prep.value); else delete next.as_prepend_count;
+        if (bfd.value === "no") next.bfd_off = true; else delete next.bfd_off;
         save(next);
       };
       asn.addEventListener("input", needAS);
-      for (const el of [asn, rid, ka, hold, prep]) el.addEventListener("change", commit);
+      for (const el of [asn, rid, ka, hold, prep, bfd]) el.addEventListener("change", commit);
       clear(settings).append(section("BGP",
         h("div", { class: "bgprow" },
           h("label", { class: "f" }, h("span", {}, "Local AS number"), asn),
           h("label", { class: "f" }, h("span", {}, "Router ID"), rid),
           h("label", { class: "f" }, h("span", {}, "Keepalive"), ka),
           h("label", { class: "f" }, h("span", {}, "Hold time"), hold),
-          h("label", { class: "f" }, h("span", {}, "\u00a0"), h("span", { class: "opt" }, prep, " AS Prepend")))));
+          h("label", { class: "f" }, h("span", {}, "AS Prepend"), prep),
+          h("label", { class: "f" }, h("span", {}, "BFD"), bfd))));
     }
 
     async function load() {

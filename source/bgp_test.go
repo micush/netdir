@@ -497,13 +497,74 @@ func TestRenderFRRASPrepend(t *testing.T) {
 	if conf := renderFRR(b, []string{"203.0.113.53"}, []string{"2001:db8:53::1"}, "h"); strings.Contains(conf, "as-path prepend") {
 		t.Fatalf("prepend without being asked:\n%s", conf)
 	}
-	b.ASPrepend = true
-	conf := renderFRR(b, []string{"203.0.113.53"}, []string{"2001:db8:53::1"}, "h")
-	want := " set as-path prepend 4215123199 4215123199 4215123199\n"
-	if strings.Count(conf, want) != 2 || !strings.Contains(conf, "match ip address prefix-list NETDIR-ANYCAST-V4\n"+want) || !strings.Contains(conf, "match ipv6 address prefix-list NETDIR-ANYCAST-V6\n"+want) {
-		t.Fatalf("both outbound route-maps must prepend three times:\n%s", conf)
+	for _, n := range []int{1, 3, 8} {
+		b.ASPrepend = n
+		conf := renderFRR(b, []string{"203.0.113.53"}, []string{"2001:db8:53::1"}, "h")
+		want := " set as-path prepend" + strings.Repeat(" 4215123199", n) + "\n"
+		if strings.Count(conf, want) != 2 || !strings.Contains(conf, "match ip address prefix-list NETDIR-ANYCAST-V4\n"+want) || !strings.Contains(conf, "match ipv6 address prefix-list NETDIR-ANYCAST-V6\n"+want) {
+			t.Fatalf("both outbound route-maps must prepend %d times:\n%s", n, conf)
+		}
 	}
+	conf := renderFRR(b, []string{"203.0.113.53"}, []string{"2001:db8:53::1"}, "h")
 	if strings.Contains(strings.SplitN(conf, "route-map NETDIR-IN", 2)[1], "prepend") {
 		t.Fatal("the inbound route-map must not change")
+	}
+}
+
+// TestBGPPrependCount: 0 to 8 are taken, others refused; a config from before v44 with "as_prepend": true reads as 3 and is
+// written back with the new key only.
+func TestBGPPrependCount(t *testing.T) {
+	for n := 0; n <= 8; n++ {
+		b := &BGPConfig{ASN: 64512, ASPrepend: n}
+		if err := b.Validate(); err != nil {
+			t.Fatalf("%d: %v", n, err)
+		}
+	}
+	for _, n := range []int{-1, 9, 100} {
+		if err := (&BGPConfig{ASN: 64512, ASPrepend: n}).Validate(); err == nil {
+			t.Fatalf("%d accepted", n)
+		}
+	}
+	var b BGPConfig
+	if err := json.Unmarshal([]byte(`{"asn":64512,"neighbors":[],"as_prepend":true}`), &b); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Validate(); err != nil || b.ASPrepend != 3 {
+		t.Fatalf("old on: %d %v", b.ASPrepend, err)
+	}
+	out, _ := json.Marshal(&b)
+	if !strings.Contains(string(out), `"as_prepend_count":3`) || strings.Contains(string(out), `"as_prepend":`) {
+		t.Fatalf("written back: %s", out)
+	}
+	b = BGPConfig{}
+	json.Unmarshal([]byte(`{"asn":64512,"neighbors":[],"as_prepend":true,"as_prepend_count":5}`), &b)
+	if b.Validate(); b.ASPrepend != 5 {
+		t.Fatalf("the new key wins: %d", b.ASPrepend)
+	}
+	b = BGPConfig{}
+	json.Unmarshal([]byte(`{"asn":64512,"neighbors":[]}`), &b)
+	if b.Validate(); b.ASPrepend != 0 || strings.Contains(renderFRR(&b, []string{"203.0.113.53"}, nil, "h"), "prepend") {
+		t.Fatal("the default is none")
+	}
+}
+
+// TestRenderFRRBFD: BFD to every neighbor unless it is turned off; a config without the key has it on.
+func TestRenderFRRBFD(t *testing.T) {
+	b := &BGPConfig{ASN: 64512, Neighbors: []BGPNeighbor{{Peer: "192.0.2.1", RemoteAS: 64500}, {Peer: "2001:db8::1", RemoteAS: 64500}}}
+	if conf := renderFRR(b, []string{"203.0.113.53"}, nil, "h"); strings.Count(conf, " bfd\n") != 2 || !strings.Contains(conf, " neighbor 192.0.2.1 bfd\n") {
+		t.Fatalf("BFD must be on by default:\n%s", conf)
+	}
+	b.BFDOff = true
+	if conf := renderFRR(b, []string{"203.0.113.53"}, nil, "h"); strings.Contains(conf, " bfd\n") || !strings.Contains(conf, " neighbor 192.0.2.1 remote-as 64500\n") {
+		t.Fatalf("BFD off:\n%s", conf)
+	}
+	var c BGPConfig
+	json.Unmarshal([]byte(`{"asn":64512,"neighbors":[],"bfd":false}`), &c) // v41's ignored key does not turn it off
+	if c.Validate(); c.BFDOff {
+		t.Fatal("an old bfd key turned BFD off")
+	}
+	out, _ := json.Marshal(&BGPConfig{ASN: 64512, Neighbors: []BGPNeighbor{}})
+	if strings.Contains(string(out), "bfd") {
+		t.Fatalf("the default is not written: %s", out)
 	}
 }
