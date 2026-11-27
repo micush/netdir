@@ -151,7 +151,7 @@ func TestConfluenceCloudAndDataCenterSignIn(t *testing.T) {
 	}
 	// an address that ends in .atlassian.net is Cloud without the option
 	d.Address, d.Options = "acme.atlassian.net", nil
-	if drv, err := Open(d, Credential{Username: "a@b.c", Password: "t"}); err != nil || !drv.(*confluence).cloud || drv.(*confluence).root != "/wiki/rest/api" {
+	if drv, err := Open(d, Credential{Username: "a@b.c", Password: "t"}); err != nil || !bareDriver(drv).(*confluence).cloud || bareDriver(drv).(*confluence).root != "/wiki/rest/api" {
 		t.Errorf("acme.atlassian.net is Cloud: %v", err)
 	}
 }

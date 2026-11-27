@@ -1452,7 +1452,7 @@
     const NO_WEB = ["ios", "linux", "windows", "ad", "tools"];
     const devURL = (d) => {
       const host = d.address.includes(":") && !d.address.startsWith("[") ? "[" + d.address + "]" : d.address;
-      return "https://" + host + (d.port ? ":" + d.port : "") + (d.platform === "observium" && d.options && d.options.prefix ? d.options.prefix.replace(/\/+$/, "") : "") + "/";
+      return (d.options && d.options.scheme === "http" ? "http://" : "https://") + host + (d.port ? ":" + d.port : "") + (d.platform === "observium" && d.options && d.options.prefix ? d.options.prefix.replace(/\/+$/, "") : "") + (d.options && d.options.url_base ? d.options.url_base.replace(/\/+$/, "") : "") + "/";
     };
     const devItems = (g, name) => {
       const d = devByName(name);
@@ -2295,7 +2295,7 @@
   })();
 
   // ── configuration  (CLI: --show-config, --configure) ──  // ── configuration  (CLI: --show-config, --configure) ──────────────────────
-  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161", mediaencoder: "8765" };   // the API port of a platform that is not 443
+  const PORT_DEF = { ad: "636", ios: "161", proxmox: "8006", pbs: "8007", pdm: "8443", junos: "3443", linux: "22", windows: "22", technitium: "53443", dnsdir: "53853", ntpdir: "12380", netdir: "22161", mediaencoder: "8765", sonarr: "8989", radarr: "7878", lidarr: "8686", prowlarr: "9696", bazarr: "6767", qbittorrent: "8080", tautulli: "8181", seerr: "5055", plex: "32400", jellyfin: "8096" };   // the API port of a platform that is not 443
   const portDef = (platform) => PORT_DEF[platform] || "443";
   const LB = ["roundrobin", "weighted", "hostpinned", "failover"];
   const GROUP_FIELDS = [
@@ -2894,6 +2894,7 @@
     proxmox: "Proxmox VE", pbs: "Proxmox Backup Server", pdm: "Proxmox Datacenter Manager", ipfabric: "IP Fabric", junos: "Juniper Junos", linux: "Linux (SSH)", windows: "Windows (SSH)",
     meraki: "Cisco Meraki", nios: "Infoblox NIOS", nsone: "NSOne", nxos: "Cisco NX-OS", observium: "Observium", panorama: "Palo Alto Panorama",
     netdir: "MCP Network Director", logdir: "LogDirector", filedir: "FileDirector", flowdir: "FlowDirector", mediaencoder: "multi-media[encoder]", panos: "Palo Alto PanOS", rcode0: "RcodeZero", technitium: "Technitium DNS Server", vcenter: "VMware vCenter Server",
+    sonarr: "Sonarr", radarr: "Radarr", lidarr: "Lidarr", prowlarr: "Prowlarr", bazarr: "Bazarr", qbittorrent: "qBittorrent", tautulli: "Tautulli", seerr: "Seerr (Overseerr, Jellyseerr)", plex: "Plex Media Server", jellyfin: "Jellyfin",
   };
   const platformName = (p) => PLATFORM_LABEL[p] || p;
   const PLATFORMS = Object.keys(PLATFORM_LABEL).sort((a, b) => PLATFORM_LABEL[a].localeCompare(PLATFORM_LABEL[b]));   // as the person reads them

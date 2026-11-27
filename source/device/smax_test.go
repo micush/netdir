@@ -380,7 +380,7 @@ func TestSMAXUserTickets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tl, isTL := drv.(TicketLooker)
+	tl, isTL := bareDriver(drv).(TicketLooker)
 	if !isTL {
 		t.Fatal("smax is not a TicketLooker")
 	}

@@ -29,7 +29,7 @@ func TestMCPPassthrough(t *testing.T) {
 		d, st := dirStub(t, passTools())
 		d.Platform = plat
 		drv := open(t, d, Credential{Token: "RWKEY"})
-		mp, ok := drv.(MCPPassthrough)
+		mp, ok := bareDriver(drv).(MCPPassthrough)
 		if !ok {
 			t.Fatalf("%s has no MCP passthrough", plat)
 		}

@@ -1,5 +1,52 @@
 # Changelog
 
+## [v247] - 2026-11-27 — Drivers for the media applications: Sonarr, Radarr, Lidarr, Prowlarr, Bazarr, qBittorrent, Tautulli, Seerr, Plex, Jellyfin
+
+### Added
+- **Ten new platforms**, one table-driven engine (`device/media.go`, tables in `device/media_apps.go`): `sonarr` (8989), `radarr` (7878), `lidarr` (8686), `prowlarr` (9696), `bazarr` (6767), `qbittorrent` (8080), `tautulli` (8181), `seerr` (5055, Overseerr and Jellyseerr), `plex` (32400), `jellyfin` (8096).
+  - **Credentials:** the API key as the token (*arr and Seerr `X-Api-Key`; Bazarr `X-API-KEY`; Plex `X-Plex-Token`; Jellyfin `Authorization: MediaBrowser Token="…"`; Tautulli `apikey=` in the query, the only way it takes one). qBittorrent takes the Web UI user name and password, through a form login with the `Referer` it checks. The SID cookie stays in the client's jar, and the driver logs in again on a 403 and out on close. With `auth=none` (a whitelisted address) there is no login.
+  - **Facts:** application, version and, where given, uptime (*arr `startTime`, Bazarr `start_time`). **Alerts:** the health warnings and errors of the *arr apps and Bazarr; a notice is not one.
+  - **Show:** `show NAME [id=] [name=] [lines=] [full=yes] [ARG=]`. Lists come back as `count` and rows trimmed to their useful fields. `name=` matches titles with spaces, and dots, dashes and underscores count as spaces. Titles are turned into ids where a read needs one (`show episodefiles series=Blue Bloods`), and an ambiguous title answers the candidates.
+  - **device_api_get:** any GET below each API root, with keys and passwords hidden. Refused:
+    - a key, token, password or SID in the query;
+    - GETs that change something or hand out a key: Plex refresh, terminate, transcode, `/:/` and `/security`; Tautulli non-`get_` commands and `get_apikey`; Jellyfin streams and `/Auth`;
+    - every qBittorrent path that is not one of its read endpoints.
+  - **device_change_raw:** method `CALL` with an action and a JSON body, or POST/PUT/PATCH/DELETE below the root.
+    - The *arr apps take any `/command` name; a `series`, `movie` or `artist` title in the body becomes `seriesId`, `movieIds` or `artistId`.
+    - qBittorrent `stop` and `start` become `pause` and `resume` below Web API 2.11.
+    - Dry runs read first and send nothing.
+    - With `NETDIR_DEVICE_GUARDS=1`, deletes and restarts are refused.
+  - **Options:** `scheme=http`, `url_base` and qBittorrent `auth=none`. The GUI's link to the device follows `scheme` and `url_base`.
+- Wired into: the GUI platform names and default ports, Help ▸ Devices, the `--help` platform list, the `device_show`, `device_api_get`, `device_api_catalog` and `device_change_raw` descriptions, README (a new section), CLAUDE.md, `netdir.conf.example` and `lab.json.example`.
+
+### Changed
+- **`scheme=http` is a deliberate exception to netdir's HTTPS-only rule**, for these ten platforms only: they serve plain HTTP unless set up otherwise. Without TLS, the key or password crosses the network in clear. Without the option, they are asked over HTTPS as before.
+- Plex answers carry each `key` (a library's id) also as `plex_key`, because netdir hides every field named `key`.
+- Tests only: `TestConfluenceCloudAndDataCenterSignIn`, `TestMCPPassthrough` and `TestSMAXUserTickets` look through the leak-capture wrapper (`bareDriver`). The first one panicked under `tools/leaktest.sh` in v246, which stopped the leak test before the other two failed.
+
+### Verified
+- gofmt, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && go test ./...`, builds for linux amd64, arm64, arm, 386 and riscv64, `node --check` of webui/*.js.
+- `sh tools/leaktest.sh` passes: 47 platforms recorded, the ten new ones included.
+- New tests (`device/media_test.go`):
+  - `TestSonarr`: facts and uptime, title-to-id, ambiguous and unknown titles, trimming and `full=yes`, alerts, a hidden `apiKey`, refused paths never sent, a command's dry run and real send, PUT read-first, DELETE guarded, a wrong key (401, not echoed).
+  - `TestArrPlainHTTPAndURLBase`, `TestRadarrLidarrProwlarr` (`movieIds` as a list), `TestBazarr` (envelope, alerts, form body).
+  - `TestQBittorrent`: one login and one logout, filters, release-name matching, `stop` by name, guarded `delete`, read-only paths, a wrong password. `TestQBittorrentLegacyAndRelogin` covers pause/resume, re-login on 403 and `auth=none`.
+  - `TestTautulli`: the key in the query only, never in an answer or an error, a transport error included.
+  - `TestSeerr`, `TestPlex`, `TestJellyfin`, `TestMediaRegistered`, `TestParseKV`.
+
+### Not verified
+- **None of the ten has been run against a real application.** All tests use stubs built from each application's API documentation.
+- Field names seen only in a stub:
+  - Servarr: `appName`, `instanceName`, `version`, `startTime`, `records`, `trackedDownloadState`, `statusMessages`, `outputPath`; `/health` `source`, `type` and `message`; `/command` `name`.
+  - Bazarr: `data.bazarr_version`, `start_time`, `sonarrSeriesId`, `radarrId`; `/system/health` `data[].object` and `issue`; the PATCH `/series` form `seriesid` and `action`.
+  - qBittorrent: `Ok.` from `/auth/login`, the `SID` cookie, 403 without a session, `/torrents/stop` and `start` from Web API 2.11.
+  - Tautulli: `response.result`, `message` and `data`; `tautulli_version`, `tautulli_platform_device_name`.
+  - Seerr: `version`, `applicationTitle`, `results`.
+  - Plex: `MediaContainer.friendlyName`, `version`, `Directory`, `Metadata`.
+  - Jellyfin: `ServerName`, `Version`, `Items`.
+- Endpoints taken from documentation but never sent in a test: Bazarr `/episodes?seriesid[]=`; Jellyfin `/Items?Ids=` and `/System/ActivityLog/Entries`; Seerr `/media/{id}/{status}`; Plex butler task names.
+- Not opened in a browser.
+
 ## [v246] - 2026-11-26 — BGP: AS Prepend from 0 to 8, and BFD on or off
 
 ### Changed
