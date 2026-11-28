@@ -1,5 +1,19 @@
 # Changelog
 
+## [v248] - 2026-11-28 — device_mcp works for read-only MCP callers
+
+### Fixed
+- **`device_mcp` was refused for every read-only MCP caller**, even for the tool list, with "This account is read-only: it can look at everything but cannot change anything." The tool is offered to read-only callers, but it runs as an in-process `POST /api/devices/mcp`, and the read-only gate (`authedCT`, `readOnlyDenied`) refuses every POST from a read-only session except the two look jobs in `readOnlyJob` (`/api/nettool`, `/api/scan`). The request never reached the device. It was seen against a FileDirector with a read-only key, where nothing on the filedir side was at fault.
+- `readOnlyJob` (`readonly.go`) now also lets through `POST /api/devices/mcp`, directly or through `/api/proxy`, when its body does not ask for a write. `deviceMCPWantsWrite` reads the body (at most 1 MB) and puts it back. A body that is not JSON, is too large, or has any `write` other than `false` or `null` counts as a write and is refused as before. Without `write`, the handler only lists a device's tools or runs one the device marks `readOnlyHint` (`device.MCPCall`), so a read-only caller can do nothing more than read. `device_mcp_write` stays an rw-only tool, and a read-only GUI user in a browser is still refused every POST (that branch of `authedCT` is unchanged).
+
+### Verified
+- gofmt, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && go test ./...`, builds for linux amd64, arm64, arm, 386 and riscv64.
+- New tests: `TestDeviceMCPReadOnlyCaller` (a read-only MCP caller gets `device_mcp` past the gate, `device_mcp_write` is neither offered nor run) and `TestDeviceMCPRouteReadOnlySession` (an in-process read-only session: a read passes, `write: true` gets 403). Both fail against the v247 gate with the error above. `TestReadOnlyJob` also covers `/api/devices/mcp` directly and through `/api/proxy`: a read, `write: false`, `write: true`, `write: 1`, a body that is not JSON, and the body being put back.
+
+### Not verified
+- No live daemon run or real PAM check: the change is in the in-process gate only, and the login, CSRF and session code is untouched. The leak test was not run, because no driver or masking code changed.
+- Not tried against the real FileDirector (depot) with a read-only key after the change. That needs the new build deployed.
+
 ## [v247] - 2026-11-27 — Drivers for the media applications: Sonarr, Radarr, Lidarr, Prowlarr, Bazarr, qBittorrent, Tautulli, Seerr, Plex, Jellyfin
 
 ### Added

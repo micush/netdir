@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -212,6 +213,21 @@ func TestReadOnlyJob(t *testing.T) {
 	} {
 		if got := readOnlyJob(req("POST", target)); got != want {
 			t.Errorf("POST %s: %v, want %v", target, got, want)
+		}
+	}
+	body := func(target, b string) *http.Request { return httptest.NewRequest("POST", target, strings.NewReader(b)) }
+	for b, want := range map[string]bool{
+		`{"target":"depot","tool":""}`: true, `{"target":"depot","tool":"files_list","args":{"folder":"/"},"write":false}`: true,
+		`{"target":"depot","tool":"files_delete","write":true}`: false, `{"target":"depot","write":1}`: false, `not json`: false,
+	} {
+		for _, target := range []string{"/api/devices/mcp", "/api/proxy?node=10.0.0.2&path=%2Fapi%2Fdevices%2Fmcp"} {
+			r := body(target, b)
+			if got := readOnlyJob(r); got != want {
+				t.Errorf("POST %s %s: %v, want %v", target, b, got, want)
+			}
+			if rest, _ := io.ReadAll(r.Body); string(rest) != b {
+				t.Errorf("the body was not put back: %q", rest)
+			}
 		}
 	}
 	if readOnlyJob(req("PUT", "/api/nettool")) {

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -63,7 +65,33 @@ func readOnlyJob(r *http.Request) bool {
 	if p == "/api/proxy" { // the same job asked of another node: the path it carries is the one that counts
 		p, _, _ = strings.Cut(r.URL.Query().Get("path"), "?")
 	}
+	if p == "/api/devices/mcp" { // device_mcp: a device's own tool list, or one of its tools that says it only reads
+		return !deviceMCPWantsWrite(r)
+	}
 	return p == "/api/nettool" || p == "/api/scan"
+}
+
+// deviceMCPWantsWrite peeks at the body of a POST /api/devices/mcp (and puts it back) and says whether it asks
+// for a write (device_mcp_write).  Anything it cannot read counts as a write.  Without write the handler runs only
+// the tool list and the tools the device marks readOnlyHint (device.MCPCall), so a read-only caller can do no more.
+func deviceMCPWantsWrite(r *http.Request) bool {
+	if r.Body == nil {
+		return false
+	}
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	if err != nil || len(b) > 1<<20 {
+		return true
+	}
+	var a struct {
+		Write json.RawMessage `json:"write"`
+	}
+	if json.Unmarshal(b, &a) != nil {
+		return true
+	}
+	w := strings.TrimSpace(string(a.Write))
+	return w != "" && w != "false" && w != "null"
 }
 
 // secretKeys are the configuration keys whose values a read-only account is not shown.
