@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"netdir/internal/core"
 )
 
 // A relayed request is attributed "user via node", needs no cookie or CSRF
@@ -16,23 +18,22 @@ import (
 func TestProxyHandlerRunsAsViaUser(t *testing.T) {
 	e := newWebEnv(t)
 	e.mg.webH = e.ws.Handler()
-	c := &Cluster{mg: e.mg}
-	call := func(req proxyReq) (int, proxyResp) {
+	call := func(req core.ProxyReq) (int, core.ProxyResp) {
 		b, _ := json.Marshal(req)
 		rw := httptest.NewRecorder()
-		c.handleProxy(rw, httptest.NewRequest("POST", "/cluster/proxy", bytes.NewReader(b)).WithContext(context.Background()),
-			ClusterPeer{Addr: "10.0.0.7:53852"}, b)
-		var pr proxyResp
+		e.mg.peerProxy(rw, httptest.NewRequest("POST", "/cluster/proxy", bytes.NewReader(b)).WithContext(context.Background()),
+			core.ClusterPeer{Addr: "10.0.0.7:53852"}, b)
+		var pr core.ProxyResp
 		json.Unmarshal(rw.Body.Bytes(), &pr)
 		return rw.Code, pr
 	}
-	code, pr := call(proxyReq{User: "alice", Method: "GET", Path: "/api/canvas"})
+	code, pr := call(core.ProxyReq{User: "alice", Method: "GET", Path: "/api/canvas"})
 	if code != 200 || pr.Status != 200 {
 		t.Fatalf("canvas: %d / %d %s", code, pr.Status, pr.Body)
 	}
 	// login, session and logout are refused at the envelope level
 	for _, p := range []string{"/api/login", "/api/login/state", "/api/session", "/api/logout"} {
-		if code, _ := call(proxyReq{User: "alice", Method: "GET", Path: p}); code != http.StatusForbidden {
+		if code, _ := call(core.ProxyReq{User: "alice", Method: "GET", Path: p}); code != http.StatusForbidden {
 			t.Errorf("%s relayed (%d)", p, code)
 		}
 	}
@@ -42,7 +43,7 @@ func TestProxyHandlerRunsAsViaUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(map[string]any{"config": dc, "note": "relayed", "base": "force"})
-	_, pr = call(proxyReq{User: "alice", Method: "PUT", Path: "/api/config", CT: "application/json", Body: b})
+	_, pr = call(core.ProxyReq{User: "alice", Method: "PUT", Path: "/api/config", CT: "application/json", Body: b})
 	if pr.Status != 200 {
 		t.Fatalf("put config: %d %s", pr.Status, pr.Body)
 	}
@@ -54,7 +55,7 @@ func TestProxyHandlerRunsAsViaUser(t *testing.T) {
 		t.Errorf("actor = %q", got)
 	}
 	// a hostile user name is not trusted
-	_, pr = call(proxyReq{User: "a b\nc", Method: "GET", Path: "/api/canvas"})
+	_, pr = call(core.ProxyReq{User: "a b\nc", Method: "GET", Path: "/api/canvas"})
 	if pr.Status != 200 {
 		t.Errorf("sanitised user: %d", pr.Status)
 	}

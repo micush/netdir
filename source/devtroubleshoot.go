@@ -6,114 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
-	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"netdir/device"
-)
-
-// Troubleshoot a user: Entra says which devices the user has and which was used last, Meraki says where a device of that name was seen
-// on the network in the last hours and how it did (device/meraki_clients.go lists what is read).
-//
-//	GET /api/devices/troubleshoot?user=joe.smith@contoso.com[&hours=6][&devices=1][&network=L_123][&entra=NAME][&meraki=NAME]
-//	netdir --troubleshoot-user joe.smith@contoso.com [--troubleshoot-hours 6]
-//	MCP device_troubleshoot_user
-//
-// It only reads, so a read-only account and an ro MCP key may use it.  The Entra device is the one of platform entra and the Meraki
-// device the organization one (platform meraki without a serial); with several of either, entra= or meraki= names the one.  The two are
-// matched by name: the device's name in Entra against the host name the client gave on the network (case and domain ignored).
-
-func pickDevice(devs []device.Device, name, platform string, ok func(device.Device) bool) (device.Device, error) {
-	var found []device.Device
-	for _, d := range devs {
-		if d.Platform != platform || d.Disabled || (ok != nil && !ok(d)) {
-			continue
-		}
-		if name != "" && d.Name != name {
-			continue
-		}
-		found = append(found, d)
-	}
-	switch len(found) {
-	case 1:
-		return found[0], nil
-	case 0:
-		if name != "" {
-			return device.Device{}, fmt.Errorf("device %q: not an enabled %s device in the inventory", name, platform)
-		}
-		return device.Device{}, fmt.Errorf("no enabled %s device is configured", platform)
-	}
-	var n []string
-	for _, d := range found {
-		n = append(n, d.Name)
-	}
-	return device.Device{}, fmt.Errorf("several %s devices (%s): name one", platform, strings.Join(n, ", "))
-}
-
-// tsName is a name that may go into a log filter between quotes: an account name, a sign-in name, a host name.
-var tsNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-
-// tsShortUser is the account name of what was typed or found: "joe.smith" of joe.smith@contoso.com or of CORP\joe.smith.  Empty
-// when it is not a name a filter can take (a name with spaces, an object ID).
-func tsShortUser(names ...string) string {
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if i := strings.LastIndexByte(n, '\\'); i >= 0 {
-			n = n[i+1:]
-		}
-		if i := strings.IndexByte(n, '@'); i > 0 {
-			n = n[:i]
-		}
-		if tsNameRE.MatchString(n) && !entraIDLike(n) {
-			return n
-		}
-	}
-	return ""
-}
-
-func entraIDLike(s string) bool {
-	return len(s) == 36 && strings.Count(s, "-") == 4
-}
-
-// tsHostKey is a host name as two systems agree on it: lower case, without a domain.
-func tsHostKey(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	if i := strings.IndexByte(s, '.'); i > 0 {
-		s = s[:i]
-	}
-	return s
-}
-
-// pickLogDevice is the device whose logs are searched: the Panorama if there is one, else the firewall; name picks one.
-func pickLogDevice(devs []device.Device, name string) (device.Device, error) {
-	if name != "" {
-		for _, plat := range []string{"panorama", "panos"} {
-			if d, err := pickDevice(devs, name, plat, nil); err == nil {
-				return d, nil
-			}
-		}
-		return device.Device{}, fmt.Errorf("device %q: not an enabled panorama or panos device in the inventory", name)
-	}
-	d, err := pickDevice(devs, "", "panorama", nil)
-	if err == nil || !strings.HasPrefix(err.Error(), "no enabled") {
-		return d, err
-	}
-	if d, err = pickDevice(devs, "", "panos", nil); err != nil && strings.HasPrefix(err.Error(), "no enabled") {
-		return d, errors.New("no enabled panorama or panos device is configured")
-	}
-	return d, err
-}
-
-const (
-	tsVPNLogs     = 20 // GlobalProtect events read
-	tsTrafficLogs = 50
-	tsThreatLogs  = 20
-	tsMaxAddrs    = 4
-	tsMaxHosts    = 3
-	tsTickets     = 3 // the newest tickets of the user read from a SMAX device
+	"netdir/internal/core"
+	"netdir/internal/devices"
 )
 
 func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error) {
@@ -139,10 +38,10 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		return nil, errors.New("user: a sign-in name, an object ID or a name (or host: a machine's name)")
 	case a.User != "" && a.Host != "":
 		return nil, errors.New("give a user or a host, not both")
-	case a.Host != "" && !tsNameRE.MatchString(a.Host):
+	case a.Host != "" && !devices.TsNameRE.MatchString(a.Host):
 		return nil, errors.New("host: a machine's name; letters, digits and . _ - only")
 	}
-	hours, devices := 6, 1
+	hours, follow := 6, 1
 	if a.Hours != "" {
 		n, err := strconv.Atoi(a.Hours)
 		if err != nil || n < 1 || n > 168 {
@@ -155,13 +54,13 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		if err != nil || n < 1 || n > 3 {
 			return nil, errors.New("devices: 1 to 3, how many of the user's most recently used devices (default 1)")
 		}
-		devices = n
+		follow = n
 	}
 	dc, _, err := m.LiveConfig()
 	if err != nil {
 		return nil, err
 	}
-	devs, creds := dc.effectiveDevices(), dc.Settings.DeviceCredentials
+	devs, creds := dc.EffectiveDevices(), dc.Settings.DeviceCredentials
 	ask := func(d device.Device, to time.Duration, fn func(context.Context, device.Driver) (any, error)) (any, error) {
 		r := device.FanoutReuse(context.Background(), []device.Device{d}, creds, 1, to, fn)[0]
 		if !r.OK {
@@ -173,17 +72,17 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	// cannot be used is an error, one that is merely missing is a note.
 	var notes []string
 	note := func(f string, x ...any) { notes = append(notes, fmt.Sprintf(f, x...)) }
-	ed, eerr := pickDevice(devs, a.Entra, "entra", nil)
-	ld, lerr := pickLogDevice(devs, a.Panorama)
-	adv, aerr := pickDevice(devs, a.AD, "ad", nil)
+	ed, eerr := devices.PickDevice(devs, a.Entra, "entra", nil)
+	ld, lerr := devices.PickLogDevice(devs, a.Panorama)
+	adv, aerr := devices.PickDevice(devs, a.AD, "ad", nil)
 	if a.AD != "" && aerr != nil {
 		return nil, aerr
 	}
-	sd, serr := pickDevice(devs, a.SMAX, "smax", nil)
+	sd, serr := devices.PickDevice(devs, a.SMAX, "smax", nil)
 	if a.SMAX != "" && serr != nil {
 		return nil, serr
 	}
-	md, merr := pickDevice(devs, a.Meraki, "meraki", func(d device.Device) bool { return d.Options["serial"] == "" })
+	md, merr := devices.PickDevice(devs, a.Meraki, "meraki", func(d device.Device) bool { return d.Options["serial"] == "" })
 	if a.Entra != "" && eerr != nil {
 		return nil, eerr
 	}
@@ -200,7 +99,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	if a.Host != "" {
 		what, who = "host", a.Host
 	}
-	warnf("devices: audit: %q troubleshoots %s %q (%d h)", actor, what, who, hours)
+	core.Warnf("devices: audit: %q troubleshoots %s %q (%d h)", actor, what, who, hours)
 	out := map[string]any{"window_hours": hours}
 	logs := func(logType, query string, n int) ([]map[string]any, error) {
 		v, err := ask(ld, 150*time.Second, func(ctx context.Context, d device.Driver) (any, error) {
@@ -221,11 +120,11 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	}
 	var machines []machine
 	addMachine := func(name string, e map[string]any) {
-		if tsHostKey(name) == "" {
+		if devices.TsHostKey(name) == "" {
 			return
 		}
 		for i := range machines {
-			if tsHostKey(machines[i].name) == tsHostKey(name) {
+			if devices.TsHostKey(machines[i].name) == devices.TsHostKey(name) {
 				if machines[i].entra == nil {
 					machines[i].entra = e
 				}
@@ -236,7 +135,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	}
 	short := ""
 	if a.User != "" {
-		short = tsShortUser(a.User)
+		short = devices.TsShortUser(a.User)
 		if eerr != nil {
 			note("no directory lookup: %v", eerr)
 		} else {
@@ -244,7 +143,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				User    map[string]any
 				Devices []map[string]any
 			}
-			ev, err := ask(ed, deviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
+			ev, err := ask(ed, devices.DeviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
 				l, ok := d.(device.UserDeviceLooker)
 				if !ok {
 					return nil, errors.New("this device cannot look up a user's devices")
@@ -260,15 +159,15 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 			default:
 				fd := ev.(found)
 				out["user"], out["entra_device"], out["device_count"] = fd.User, ed.Name, len(fd.Devices)
-				if s := tsShortUser(fmt.Sprint(fd.User["userPrincipalName"])); s != "" {
+				if s := devices.TsShortUser(fmt.Sprint(fd.User["userPrincipalName"])); s != "" {
 					short = s
 				}
 				if len(fd.Devices) == 0 {
 					note("the user has no registered or owned devices in Entra")
 				}
-				if len(fd.Devices) > devices {
-					note("%d devices; the %d signed in most recently are followed", len(fd.Devices), devices)
-					fd.Devices = fd.Devices[:devices]
+				if len(fd.Devices) > follow {
+					note("%d devices; the %d signed in most recently are followed", len(fd.Devices), follow)
+					fd.Devices = fd.Devices[:follow]
 				}
 				for _, d := range fd.Devices {
 					addMachine(fmt.Sprint(d["displayName"]), d)
@@ -281,7 +180,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		if eerr != nil {
 			note("no directory lookup: %v", eerr)
 		} else {
-			ev, err := ask(ed, deviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
+			ev, err := ask(ed, devices.DeviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
 				l, ok := d.(device.DeviceUserLooker)
 				if !ok {
 					return nil, errors.New("this device cannot look up a device's users")
@@ -317,7 +216,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		var err error
 		for _, n := range names {
 			var v any
-			v, err = ask(adv, deviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
+			v, err = ask(adv, devices.DeviceTimeout, func(ctx context.Context, d device.Driver) (any, error) {
 				l, ok := d.(device.DirectoryLooker)
 				if !ok {
 					return nil, errors.New("this device cannot look up accounts")
@@ -389,7 +288,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 				if !ok {
 					return nil, errors.New("this device cannot look up tickets")
 				}
-				w, ts, err := l.UserTickets(ctx, who, tsTickets)
+				w, ts, err := l.UserTickets(ctx, who, devices.TsTickets)
 				if err != nil && len(ts) > 0 {
 					partial, err = err, nil
 				}
@@ -424,7 +323,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 	var addrs []string
 	addAddr := func(v any) {
 		ip, err := netip.ParseAddr(strings.TrimSpace(fmt.Sprint(v)))
-		if err != nil || ip.IsUnspecified() || len(addrs) >= tsMaxAddrs {
+		if err != nil || ip.IsUnspecified() || len(addrs) >= devices.TsMaxAddrs {
 			return
 		}
 		for _, x := range addrs {
@@ -448,7 +347,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 			note("no VPN log search: %q is not an account name the log filter takes", a.User)
 		}
 		if q != "" {
-			es, err := logs("globalprotect", q, tsVPNLogs)
+			es, err := logs("globalprotect", q, devices.TsVPNLogs)
 			vpn := map[string]any{"query": q, "events": es}
 			if err != nil {
 				vpn = map[string]any{"query": q, "error": err.Error()}
@@ -487,9 +386,9 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 			}
 		}
 	}
-	if len(machines) > tsMaxHosts {
-		note("%d machines; the first %d are followed", len(machines), tsMaxHosts)
-		machines = machines[:tsMaxHosts]
+	if len(machines) > devices.TsMaxHosts {
+		note("%d machines; the first %d are followed", len(machines), devices.TsMaxHosts)
+		machines = machines[:devices.TsMaxHosts]
 	}
 
 	// ---- where each machine is on the network ----
@@ -573,7 +472,7 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 			for _, l := range []struct {
 				typ string
 				n   int
-			}{{"traffic", tsTrafficLogs}, {"threat", tsThreatLogs}} {
+			}{{"traffic", devices.TsTrafficLogs}, {"threat", devices.TsThreatLogs}} {
 				es, err := logs(l.typ, q, l.n)
 				switch {
 				case err != nil:
@@ -591,86 +490,4 @@ func (m *Mgmt) deviceTroubleshoot(raw json.RawMessage, actor string) (any, error
 		out["notes"] = notes
 	}
 	return out, nil
-}
-
-func urlQ(s string) string { return url.QueryEscape(s) }
-
-func mcpDeviceTroubleshootTool() mcpTool {
-	return mcpTool{name: "device_troubleshoot_user", title: "Troubleshoot a user or a host (tshoot user NAME, tshoot host NAME)", noNode: true,
-		desc: "Troubleshoot a user (\"tshoot user msmith\") or a machine (\"tshoot host PC-123\"): give user or host, not both. " +
-			"For a user: look the user up in Microsoft Entra by sign-in name, account name, object ID or name and take the device they signed in with most recently; search the firewall's VPN (GlobalProtect) log for the account, which names the machine they connected with and its addresses. " +
-			"For a host: the VPN log says which user last connected with that machine and from where, and Entra which users are registered on a device of that name (last_user). " +
-			"Then, for each machine found: find it on the Meraki network by its name (and, for a user, also every client that signed in to the network with the account, such as a phone on the Wi-Fi) and return what helps when someone cannot get online or is slow, for the last few hours (not only now): the Meraki client (IP, MAC, VLAN, SSID, the AP or switch and port it was on, first and last seen, usage), its usage history and device policy; " +
-			"for a wireless client its Wi-Fi now (SSID, AP, RSSI and SNR), its signal quality, data rate and latency over the window, its connection statistics, connectivity events and failed connections; for a wired one its switch port's status (speed, duplex, errors, warnings, traffic); and whether the AP or switch it was on is online. " +
-			"Last, the firewall's newest traffic and threat log entries for the addresses found (the VPN address, the address on the network). " +
-			"When there is an Active Directory device the account (or the computer's account) is added as directory: enabled, locked out, when the password last changed, last sign-in, groups. " +
-			"For a user, when there is a SMAX service desk device, the user's three newest tickets (requests and incidents they asked for, newest first, with number, title, phase, status and creation time) are added as tickets. " +
-			"The answer has: user or host and last_user, devices (each with entra and network), directory, tickets (the user's newest SMAX tickets), vpn (the query, the newest event as last, the events), firewall (addresses, traffic, threat) and notes, which say what could not be looked up and why. " +
-			"The firewall logs are those of the Panorama in the inventory (or of the one PAN-OS firewall); a system that is not configured is left out with a note. The systems are matched by name (case and domain ignored); a phone often has a different host name, so a device may be reported as not seen. Read only.",
-		props: []mcpProp{
-			{name: "user", typ: "string", desc: "The user: a sign-in name (joe.smith@contoso.com), an account name (msmith), an object ID or a name. A name that matches several users is refused with the candidates listed. Give this or host."},
-			{name: "host", typ: "string", desc: "The machine's name (PC-123), instead of user: the last user of the machine is looked up, then the machine as above."},
-			{name: "hours", typ: "integer", desc: "How far back on the network, 1 to 168 (default 6). The log entries are the newest ones, whatever their age."},
-			{name: "devices", typ: "integer", desc: "How many of the user's most recently used devices to follow, 1 to 3 (default 1)."},
-			{name: "network", typ: "string", desc: "Search one Meraki network (L_… or N_…) instead of all of them (faster on a big organization)."},
-			{name: "entra", typ: "string", desc: "The Entra device's name in list_devices, when there are several."},
-			{name: "meraki", typ: "string", desc: "The Meraki organization device's name in list_devices, when there are several."},
-			{name: "panorama", typ: "string", desc: "The Panorama's or firewall's name in list_devices, when there are several."},
-			{name: "ad", typ: "string", desc: "The Active Directory device's name in list_devices, when there are several."},
-			{name: "smax", typ: "string", desc: "The SMAX device's name in list_devices, when there are several."},
-		},
-		run: func(c *mcpCtx) (any, error) {
-			q := "/api/devices/troubleshoot?"
-			sep := ""
-			for _, k := range []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad", "smax"} {
-				if v := c.str(k); v != "" {
-					q += sep + k + "=" + urlQ(v)
-					sep = "&"
-				}
-			}
-			b, err := c.call("GET", q, nil, "")
-			return asAny(b), err
-		}}
-}
-
-// ---- the CLI ----
-
-func runTroubleshootUser(sock, user, host, hours string) {
-	args := map[string]any{}
-	if user != "" {
-		args["user"] = user
-	}
-	if host != "" {
-		args["host"] = host
-	}
-	if hours != "" {
-		args["hours"] = hours
-	}
-	var v any
-	decode(op(sock, "device.troubleshoot", args), &v)
-	b, _ := json.MarshalIndent(v, "", "  ")
-	fmt.Println(string(b))
-}
-
-// shortCommand turns "netdir tshoot user NAME [HOURS]", "netdir tshoot host NAME [HOURS]" and the older "netdir tshoot NAME [HOURS]"
-// (a user) into the flags they stand for; "troubleshoot" is the same word written out.  --tshoot alone, the node's troubleshooting
-// bundle, is unchanged.  Anything else is returned as it was.
-func shortCommand(args []string) []string {
-	if len(args) < 2 || args[0] != "tshoot" && args[0] != "troubleshoot" || strings.HasPrefix(args[1], "-") {
-		return args
-	}
-	flag, rest := "--troubleshoot-user", args[1:]
-	if (rest[0] == "user" || rest[0] == "host") && len(rest) >= 2 && !strings.HasPrefix(rest[1], "-") {
-		if rest[0] == "host" {
-			flag = "--troubleshoot-host"
-		}
-		rest = rest[1:]
-	}
-	out := []string{flag, rest[0]}
-	rest = rest[1:]
-	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
-		out = append(out, "--troubleshoot-hours", rest[0])
-		rest = rest[1:]
-	}
-	return append(out, rest...)
 }

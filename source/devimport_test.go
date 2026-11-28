@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"netdir/internal/mcp"
 )
 
 func TestDeviceImportRefusals(t *testing.T) {
@@ -18,7 +20,7 @@ func TestDeviceImportRefusals(t *testing.T) {
 		}
 	}
 	// MCP cannot reach it: it is a POST to a route that is not a device change
-	if err := mcpWriteGuard("POST", "/api/devices/import"); err == nil {
+	if err := mcp.McpWriteGuard("POST", "/api/devices/import"); err == nil {
 		t.Error("the import is open to MCP")
 	}
 }

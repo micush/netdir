@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"netdir/internal/cluster"
 )
 
 // A node hands out at most maxPendingToks join codes that nobody used; clearing them withdraws every one (a code made
@@ -11,7 +13,7 @@ import (
 func TestClearJoinCodes(t *testing.T) {
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	var first string
-	for i := 0; i < maxPendingToks; i++ {
+	for i := 0; i < cluster.MaxPendingToks; i++ {
 		code, _, err := a.mg.cl.MintJoinCode("t")
 		if err != nil {
 			t.Fatalf("code %d: %v", i+1, err)
@@ -23,16 +25,16 @@ func TestClearJoinCodes(t *testing.T) {
 	if _, _, err := a.mg.cl.MintJoinCode("t"); err == nil || !strings.Contains(err.Error(), "--cluster-token-clear") {
 		t.Fatalf("one too many must be refused and say how to clear them: %v", err)
 	}
-	if n := a.mg.cl.View().JoinCodes; n != maxPendingToks {
-		t.Fatalf("the view counts %d unused codes, want %d", n, maxPendingToks)
+	if n := a.mg.cl.View().JoinCodes; n != cluster.MaxPendingToks {
+		t.Fatalf("the view counts %d unused codes, want %d", n, cluster.MaxPendingToks)
 	}
 	// through the op the CLI and the GUI use
 	res, err := a.mg.Op("cluster.token.clear", nil, "t")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.(map[string]any)["cleared"]; got != maxPendingToks {
-		t.Fatalf("cleared %v, want %d", got, maxPendingToks)
+	if got := res.(map[string]any)["cleared"]; got != cluster.MaxPendingToks {
+		t.Fatalf("cleared %v, want %d", got, cluster.MaxPendingToks)
 	}
 	if n := a.mg.cl.View().JoinCodes; n != 0 {
 		t.Fatalf("%d codes left after clearing", n)

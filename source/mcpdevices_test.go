@@ -10,52 +10,16 @@ import (
 	"testing"
 
 	"netdir/device"
+	"netdir/internal/core"
+	"netdir/internal/devices"
 )
-
-func TestNormDevices(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                       "",
-		"all":                    "",
-		"sw1,sw2":                "sw1,sw2",
-		"SW1, sw1 ,tag:site=dc1": "SW1,tag:site=dc1",
-		"sw1,none":               "none",
-		"sw1,all":                "",
-		"none":                   "none",
-	} {
-		got, err := normDevices(strings.Split(in, ","))
-		if err != nil || strings.Join(got, ",") != want {
-			t.Errorf("%q: %v %v, want %q", in, got, err, want)
-		}
-	}
-	for _, bad := range []string{"sw 1", "tag:", "a/b", "tag:a b", `x"y`} {
-		if _, err := normDevices([]string{bad}); err == nil {
-			t.Errorf("%q was accepted", bad)
-		}
-	}
-}
-
-func TestMCPACLDevices(t *testing.T) {
-	got, err := normMCPACL([]string{"10.1.1.50 rw strict devices=sw1,tag:site=dc1", "10.1.0.0/24", "10.2.0.0/24 devices=none", "10.3.0.1 devices=a", "10.3.0.1 devices=b", "10.4.0.1 rw devices=x disabled"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "10.1.1.50 rw strict devices=sw1,tag:site=dc1|10.1.0.0/24|10.2.0.0/24 devices=none|10.3.0.1 devices=a,b|10.4.0.1 rw devices=x disabled"
-	if strings.Join(got, "|") != want {
-		t.Fatalf("%q\nwant %q", strings.Join(got, "|"), want)
-	}
-	for _, bad := range []string{"10.1.1.50 devices=a b!", "10.1.1.50 devices=tag:", "10.1.1.50 rw strict devices=a extra"} {
-		if _, err := normMCPACL([]string{bad}); err == nil {
-			t.Errorf("%q was accepted", bad)
-		}
-	}
-}
 
 func TestSourceDevicesAndScope(t *testing.T) {
 	e := newWebEnv(t)
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPACL = []string{"10.1.0.50 rw devices=sw1", "10.1.0.0/24 devices=sw2,tag:site=lab", "10.2.0.0/24", "10.3.0.0/24 devices=none"}
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPACL = []string{"10.1.0.50 rw devices=sw1", "10.1.0.0/24 devices=sw2,tag:site=lab", "10.2.0.0/24", "10.3.0.0/24 devices=none"}
+	sup.Mu.Unlock()
 	for from, want := range map[string]string{
 		"10.1.0.50": "sw1,sw2,tag:site=lab", // two entries match: added up
 		"10.1.0.7":  "sw2,tag:site=lab",
@@ -63,24 +27,24 @@ func TestSourceDevicesAndScope(t *testing.T) {
 		"10.3.0.4":  "none",
 		"192.0.2.1": "", // no entry: the address limits nothing
 	} {
-		if got := strings.Join(sup.mcpSourceDevices(netip.MustParseAddr(from)), ","); got != want {
+		if got := strings.Join(sup.McpSourceDevices(netip.MustParseAddr(from)), ","); got != want {
 			t.Errorf("%s: %q, want %q", from, got, want)
 		}
 	}
-	sc := newDevScope([]string{"sw1", "tag:site=lab"}, []string{"sw1", "sw3"})
+	sc := devices.NewDevScope([]string{"sw1", "tag:site=lab"}, []string{"sw1", "sw3"})
 	for name, want := range map[string]bool{"sw1": true, "SW1": true, "sw3": false, "sw2": false} {
-		if sc.allows(name, nil) != want {
+		if sc.Allows(name, nil) != want {
 			t.Errorf("%s: %v, want %v", name, !want, want)
 		}
 	}
-	if !newDevScope([]string{"tag:site=lab"}).allows("x", []string{"site=lab"}) || newDevScope([]string{"tag:site=lab"}).allows("x", []string{"site=dc1"}) {
+	if !devices.NewDevScope([]string{"tag:site=lab"}).Allows("x", []string{"site=lab"}) || devices.NewDevScope([]string{"tag:site=lab"}).Allows("x", []string{"site=dc1"}) {
 		t.Error("tags")
 	}
-	if newDevScope(nil, nil) != nil || newDevScope([]string{"none"}).allows("sw1", nil) {
+	if devices.NewDevScope(nil, nil) != nil || devices.NewDevScope([]string{"none"}).Allows("sw1", nil) {
 		t.Error("all and none")
 	}
 	// both lists must allow: a narrow key is not widened by its address
-	if newDevScope([]string{"sw1"}, []string{"sw2"}).allows("sw1", nil) {
+	if devices.NewDevScope([]string{"sw1"}, []string{"sw2"}).Allows("sw1", nil) {
 		t.Error("the stricter list did not win")
 	}
 }
@@ -99,7 +63,7 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	p, _ := strconv.Atoi(port)
 	e, post := mcpEnv(t, "127.0.0.1")
 	k1, k2, k3, k4 := testMCPKey(), testMCPKey(), testMCPKey(), testMCPKey()
-	keys, err := normMCPKeys([]MCPKey{
+	keys, err := core.NormMCPKeys([]core.MCPKey{
 		{Name: "one", Access: "rw", Key: k1, Devices: []string{"sw1"}},
 		{Name: "lab", Access: "ro", Key: k2, Devices: []string{"tag:site=lab"}},
 		{Name: "nothing", Access: "ro", Key: k3, Devices: []string{"none"}},
@@ -108,16 +72,16 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPKeys = keys
-	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "pw"}}
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPKeys = keys
+	sup.Dc.Settings.DeviceCredentials = []device.Credential{{Name: "lab", Username: "admin", Password: "pw"}}
 	mk := func(n string, tag string) device.Device {
 		return device.Device{Name: n, Platform: "iosxe", Address: host, Port: p, Credential: "lab", Insecure: true, Tags: []string{tag}}
 	}
-	sup.dc.Settings.Devices = []device.Device{mk("sw1", "site=home"), mk("sw2", "site=lab"), mk("sw3", "site=lab")}
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
+	sup.Dc.Settings.Devices = []device.Device{mk("sw1", "site=home"), mk("sw2", "site=lab"), mk("sw3", "site=lab")}
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
 	auth := func(k string) []string { return []string{"Authorization", "Bearer " + k} }
 	call := func(k, tool, args string) (string, bool) {
 		_, m := post(mcpCall(tool, args), auth(k)...)
@@ -178,9 +142,9 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 		t.Errorf("an unlimited key lost tools: %s", have)
 	}
 	// a source with its own limit narrows a key that has none: the stricter wins
-	sup.mu.Lock()
-	sup.dc.Settings.MCPACL = []string{"127.0.0.1 devices=sw3"}
-	sup.mu.Unlock()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPACL = []string{"127.0.0.1 devices=sw3"}
+	sup.Mu.Unlock()
 	if txt, isErr := call(k4, "list_devices", `{}`); isErr || names(txt) != "sw3" {
 		t.Errorf("source limit: %q %v", names(txt), isErr)
 	}
@@ -189,60 +153,18 @@ func TestMCPKeyLimitedToDevices(t *testing.T) {
 	}
 }
 
-// A gateway entry gives the gateway and every device on it, now and later; a device-only caller sees no gateway.
-func TestGatewayScope(t *testing.T) {
-	for _, bad := range []string{"gateway:", "gateway:x", "gateway:0", "gateway:01", "gateway:-1"} {
-		if _, err := normDevices([]string{bad}); err == nil {
-			t.Errorf("%q accepted", bad)
-		}
-	}
-	if got, err := normDevices([]string{"gateway:3", "sw9"}); err != nil || strings.Join(got, ",") != "gateway:3,sw9" {
-		t.Fatalf("%v %v", got, err)
-	}
-	dc := &DaemonConfig{Groups: []GroupConfig{{GroupID: 3, Devices: []string{"sw1", "sw2"}}, {GroupID: 4, Devices: []string{"sw5"}}}}
-	sc := newDevScope([]string{"gateway:3"})
-	sc.bind(func() *DaemonConfig { return dc })
-	if !sc.allows("sw1", nil) || !sc.allows("SW2", nil) || sc.allows("sw5", nil) || sc.allows("sw9", nil) {
-		t.Error("devices of gateway 3")
-	}
-	if !sc.allowsGateway(3) || sc.allowsGateway(4) {
-		t.Error("which gateways")
-	}
-	dc.Groups[0].Devices = append(dc.Groups[0].Devices, "sw7") // added later
-	if !sc.allows("sw7", nil) {
-		t.Error("a device added to the gateway later")
-	}
-	dev := newDevScope([]string{"sw1"})
-	dev.bind(func() *DaemonConfig { return dc })
-	if dev.allowsGateway(3) || !dev.allows("sw1", nil) {
-		t.Error("a device-only caller")
-	}
-	// the key and the source both have to name the gateway
-	both := newDevScope([]string{"gateway:3"}, []string{"gateway:4"})
-	both.bind(func() *DaemonConfig { return dc })
-	if both.allowsGateway(3) || both.allowsGateway(4) || both.allows("sw1", nil) {
-		t.Error("the stricter list wins")
-	}
-	if !((*devScope)(nil)).allowsGateway(9) {
-		t.Error("no limit")
-	}
-	if n, ok := alertSubjectGateway("group 12 v4"); !ok || n != 12 {
-		t.Errorf("subject %d %v", n, ok)
-	}
-}
-
 func TestMCPGatewaysFollowTheScope(t *testing.T) {
 	e, post := mcpEnv(t, "127.0.0.1")
 	k1, k2 := testMCPKey(), testMCPKey()
-	keys, err := normMCPKeys([]MCPKey{{Name: "gw", Access: "ro", Key: k1, Devices: []string{"gateway:7"}}, {Name: "dev", Access: "ro", Key: k2, Devices: []string{"sw1"}}})
+	keys, err := core.NormMCPKeys([]core.MCPKey{{Name: "gw", Access: "ro", Key: k1, Devices: []string{"gateway:7"}}, {Name: "dev", Access: "ro", Key: k2, Devices: []string{"sw1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPKeys = keys
-	sup.dc.Groups = []GroupConfig{{GroupID: 7, Name: "seven", Interface: "lo", VIP4: "127.0.0.7/8", Devices: []string{"sw1"}}, {GroupID: 8, Name: "eight", Interface: "lo", VIP4: "127.0.0.8/8"}}
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPKeys = keys
+	sup.Dc.Groups = []core.GroupConfig{{GroupID: 7, Name: "seven", Interface: "lo", VIP4: "127.0.0.7/8", Devices: []string{"sw1"}}, {GroupID: 8, Name: "eight", Interface: "lo", VIP4: "127.0.0.8/8"}}
+	sup.Mu.Unlock()
 	for _, tc := range []struct {
 		key  string
 		tool string

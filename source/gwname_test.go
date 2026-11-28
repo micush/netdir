@@ -1,28 +1,13 @@
 package main
 
 import (
-	"strings"
 	"testing"
+
+	"netdir/internal/core"
 )
 
-func TestGatewayNameValidation(t *testing.T) {
-	g := defaultGroup()
-	for _, ok := range []string{"", "Office DNS", strings.Repeat("é", maxGatewayName)} {
-		g.Name = ok
-		if err := g.Validate(); err != nil {
-			t.Errorf("%q rejected: %v", ok, err)
-		}
-	}
-	for _, bad := range []string{strings.Repeat("x", maxGatewayName+1), "a\nb", "tab\there"} {
-		g.Name = bad
-		if g.Validate() == nil {
-			t.Errorf("%q accepted", bad)
-		}
-	}
-}
-
 func TestCanvasSetAndClearName(t *testing.T) {
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	id := dc.Groups[0].GroupID
 	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: id, Label: "Office DNS"}); err != nil {
 		t.Fatal(err)
@@ -33,8 +18,8 @@ func TestCanvasSetAndClearName(t *testing.T) {
 	if cg := buildCanvas(dc, nil); cg[0].Name != "Office DNS" {
 		t.Fatalf("canvas name = %q", cg[0].Name)
 	}
-	gs := []GatewayGroup{{GroupID: id}, {GroupID: 99}}
-	nameGateways(gs, dc)
+	gs := []core.GatewayGroup{{GroupID: id}, {GroupID: 99}}
+	core.NameGateways(gs, dc)
 	if gs[0].Name != "Office DNS" || gs[1].Name != "" {
 		t.Fatalf("nameGateways: %+v", gs)
 	}
@@ -46,25 +31,5 @@ func TestCanvasSetAndClearName(t *testing.T) {
 	}
 	if dc.Groups[len(dc.Groups)-1].Name != "Lab" {
 		t.Fatal("add did not set the name")
-	}
-}
-
-// A name is shared across the cluster; an unnamed cluster hashes exactly as before.
-func TestGatewayNameIsSharedAndHashStable(t *testing.T) {
-	a := newDaemonConfig()
-	before := sharedOf(a).hash()
-	if strings.Contains(string(mustJSON(t, sharedOf(a))), `"name"`) {
-		t.Fatal("empty name must be omitted from the shared document")
-	}
-	a.Groups[0].Name = "Office DNS"
-	if sharedOf(a).hash() == before {
-		t.Fatal("renaming did not change the shared hash")
-	}
-	b := newDaemonConfig()
-	if _, err := mergeShared(b, sharedOf(a), seedsOf(b)); err != nil {
-		t.Fatal(err)
-	}
-	if b.Groups[0].Name != "Office DNS" {
-		t.Fatalf("replica did not get the name: %q", b.Groups[0].Name)
 	}
 }

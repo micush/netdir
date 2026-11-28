@@ -1,12 +1,13 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
 )
 
 type powerCalls struct {
@@ -28,16 +29,16 @@ func (p *powerCalls) get() []string {
 
 func fakePower(t *testing.T) *powerCalls {
 	pc := &powerCalls{}
-	or, os_, od := powerRun, powerStart, powerDelay
-	powerRun = func(n string, a ...string) error { return pc.add(n, a...) }
-	powerStart = func(n string, a ...string) error { return pc.add(n, a...) }
-	powerDelay = time.Millisecond
-	t.Cleanup(func() { powerRun, powerStart, powerDelay = or, os_, od })
+	or, os_, od := core.PowerRun, core.PowerStart, core.PowerDelay
+	core.PowerRun = func(n string, a ...string) error { return pc.add(n, a...) }
+	core.PowerStart = func(n string, a ...string) error { return pc.add(n, a...) }
+	core.PowerDelay = time.Millisecond
+	t.Cleanup(func() { core.PowerRun, core.PowerStart, core.PowerDelay = or, os_, od })
 	return pc
 }
 
 func newPowerMgmt(t *testing.T) *Mgmt {
-	mg, err := NewMgmt(filepath.Join(t.TempDir(), "netdir.conf"), filepath.Join(t.TempDir(), "state"), newDaemonConfig())
+	mg, err := NewMgmt(filepath.Join(t.TempDir(), "netdir.conf"), filepath.Join(t.TempDir(), "state"), core.NewDaemonConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,30 +53,17 @@ func waitCalls(t *testing.T, pc *powerCalls, n int) []string {
 	return pc.get()
 }
 
-func TestValidHHMM(t *testing.T) {
-	for _, s := range []string{"00:00", "02:30", "23:59"} {
-		if !validHHMM(s) {
-			t.Errorf("%q rejected", s)
-		}
-	}
-	for _, s := range []string{"", "2:30", "24:00", "12:60", "ab:cd", "12-30", "12:300"} {
-		if validHHMM(s) {
-			t.Errorf("%q accepted", s)
-		}
-	}
-}
-
 func TestPowerRequests(t *testing.T) {
 	pc := fakePower(t)
 	m := newPowerMgmt(t)
 	cases := []struct {
-		r    PowerReq
+		r    core.PowerReq
 		want string
 	}{
-		{PowerReq{Action: "restart"}, "systemctl reboot"},
-		{PowerReq{Action: "shutdown", When: "now"}, "systemctl poweroff"},
-		{PowerReq{Action: "restart", When: "in", Minutes: 5}, "shutdown -r +5"},
-		{PowerReq{Action: "shutdown", When: "at", Time: "02:30"}, "shutdown -h 02:30"},
+		{core.PowerReq{Action: "restart"}, "systemctl reboot"},
+		{core.PowerReq{Action: "shutdown", When: "now"}, "systemctl poweroff"},
+		{core.PowerReq{Action: "restart", When: "in", Minutes: 5}, "shutdown -r +5"},
+		{core.PowerReq{Action: "shutdown", When: "at", Time: "02:30"}, "shutdown -h 02:30"},
 	}
 	for _, c := range cases {
 		before := len(pc.get())
@@ -87,8 +75,8 @@ func TestPowerRequests(t *testing.T) {
 			t.Errorf("%+v ran %v, want %q", c.r, got[before:], c.want)
 		}
 	}
-	for _, bad := range []PowerReq{
-		{Action: "explode"}, {Action: "restart", When: "in"}, {Action: "restart", When: "in", Minutes: maxPowerMinutes + 1},
+	for _, bad := range []core.PowerReq{
+		{Action: "explode"}, {Action: "restart", When: "in"}, {Action: "restart", When: "in", Minutes: core.MaxPowerMinutes + 1},
 		{Action: "restart", When: "at", Time: "25:00"}, {Action: "restart", When: "tomorrow"},
 	} {
 		if _, err := m.Power(bad, "tester"); err == nil {
@@ -96,7 +84,7 @@ func TestPowerRequests(t *testing.T) {
 		}
 	}
 	n := len(pc.get())
-	if _, err := m.Power(PowerReq{Action: "cancel"}, "tester"); err != nil {
+	if _, err := m.Power(core.PowerReq{Action: "cancel"}, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	if got := pc.get(); len(got) != n+1 || got[n] != "shutdown -c" {
@@ -108,8 +96,8 @@ func TestPowerRequests(t *testing.T) {
 func TestPowerRefusesLastServingMember(t *testing.T) {
 	pc := fakePower(t)
 	m := newPowerMgmt(t)
-	m.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
-	if _, err := m.Power(PowerReq{Action: "restart"}, "tester"); err == nil || !strings.HasPrefix(err.Error(), "not safe to restart") {
+	m.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
+	if _, err := m.Power(core.PowerReq{Action: "restart"}, "tester"); err == nil || !strings.HasPrefix(err.Error(), "not safe to restart") {
 		t.Fatalf("expected the safety refusal, got %v", err)
 	}
 	time.Sleep(30 * time.Millisecond)
@@ -117,30 +105,13 @@ func TestPowerRefusesLastServingMember(t *testing.T) {
 		t.Fatalf("ran %v although refused", pc.get())
 	}
 	// a scheduled action is not gated; forcing goes ahead
-	if _, err := m.Power(PowerReq{Action: "restart", When: "in", Minutes: 5}, "tester"); err != nil {
+	if _, err := m.Power(core.PowerReq{Action: "restart", When: "in", Minutes: 5}, "tester"); err != nil {
 		t.Fatalf("scheduled: %v", err)
 	}
-	if _, err := m.Power(PowerReq{Action: "restart", Force: true}, "tester"); err != nil {
+	if _, err := m.Power(core.PowerReq{Action: "restart", Force: true}, "tester"); err != nil {
 		t.Fatalf("forced: %v", err)
 	}
 	if got := waitCalls(t, pc, 2); len(got) != 2 {
 		t.Fatalf("calls: %v", got)
-	}
-}
-
-func TestReadPowerPending(t *testing.T) {
-	d := t.TempDir()
-	if p := readPowerPending(filepath.Join(d, "none")); p.Scheduled {
-		t.Fatal("nothing scheduled must read as not scheduled")
-	}
-	f := filepath.Join(d, "scheduled")
-	os.WriteFile(f, []byte("USEC=1790873818000000\nWARN_WALL=1\nMODE=reboot\nWALL_MESSAGE=\n"), 0o644)
-	p := readPowerPending(f)
-	if !p.Scheduled || p.Action != "restart" || p.At != "2026-10-01T16:56:58Z" {
-		t.Fatalf("%+v", p)
-	}
-	os.WriteFile(f, []byte("USEC=1790873818000000\nMODE=poweroff\n"), 0o644)
-	if p := readPowerPending(f); p.Action != "shutdown" {
-		t.Fatalf("%+v", p)
 	}
 }

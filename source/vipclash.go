@@ -5,6 +5,9 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
 )
 
 // A gateway's shared address (and an anycast address) must not be an address a node already has: the cluster reaches
@@ -15,7 +18,7 @@ import (
 
 // nodeAddrOwners maps each address a node is known by to the node's name: this host's own interface addresses (not
 // loopback or link-local) and every address the cluster members are reached on.  Nil cluster: this host only.
-func nodeAddrOwners(cl *Cluster) map[netip.Addr]string {
+func nodeAddrOwners(cl *cluster.Cluster) map[netip.Addr]string {
 	out := map[netip.Addr]string{}
 	add := func(s, who string) {
 		if h, _, err := net.SplitHostPort(s); err == nil {
@@ -39,7 +42,7 @@ func nodeAddrOwners(cl *Cluster) map[netip.Addr]string {
 	}
 	if cl != nil && cl.Enabled() {
 		snap := cl.Snapshot()
-		self := cl.node.Self()
+		self := cl.Node.Self()
 		add(self.Addr, "this node")
 		for _, a := range self.Alts {
 			add(a, "this node")
@@ -59,9 +62,9 @@ func nodeAddrOwners(cl *Cluster) map[netip.Addr]string {
 }
 
 // checkVIPsNotNodes refuses a shared or anycast address that is new in next and is an address of a node.
-func checkVIPsNotNodes(cur, next *DaemonConfig, cl *Cluster) error {
+func checkVIPsNotNodes(cur, next *core.DaemonConfig, cl *cluster.Cluster) error {
 	had := map[netip.Addr]bool{}
-	list := func(g GroupConfig) []string {
+	list := func(g core.GroupConfig) []string {
 		l := append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...)
 		l = append(l, g.MoreVIP6...)
 		return append(l, g.ExtraVIPs...)

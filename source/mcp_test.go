@@ -10,32 +10,18 @@ import (
 	"time"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
-
-func TestMCPACLNormalised(t *testing.T) {
-	got, err := normMCPACL([]string{" 10.1.1.50  RW", "10.1.0.0/24", "10.1.1.50", "Mon.Example.com.", "2001:db8::5 ro", "192.0.2.9 read-write"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(got, "|") != "10.1.1.50 rw|10.1.0.0/24|mon.example.com|2001:db8::5|192.0.2.9 rw" {
-		t.Fatalf("%q", got)
-	}
-	for _, bad := range []string{"10.1.0.0/24 rw", "mon.example.com rw", "10.1.1.50 admin", "10.1.1.50 rw extra", "not an address"} {
-		if _, err := normMCPACL([]string{bad}); err == nil {
-			t.Errorf("%q was accepted", bad)
-		}
-	}
-}
 
 // mcpEnv is a web server whose MCP access list is acl; post sends one JSON-RPC message and returns the HTTP status and body.
 func mcpEnv(t *testing.T, acl ...string) (*webEnv, func(msg string, hdr ...string) (int, map[string]any)) {
 	t.Helper()
 	e := newWebEnv(t)
 	e.mg.webH = e.ws.Handler()
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPACL = acl
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPACL = acl
+	sup.Mu.Unlock()
 	return e, func(msg string, hdr ...string) (int, map[string]any) {
 		req, _ := http.NewRequest("POST", e.ts.URL+"/mcp", strings.NewReader(msg))
 		req.Header.Set("Content-Type", "application/json")
@@ -144,24 +130,24 @@ func TestMCPRefusesBrowsersAndGET(t *testing.T) {
 
 func TestMCPResultLimitSetting(t *testing.T) {
 	e, _ := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	if sup.mcpResultLimit() != 1<<20 {
-		t.Fatalf("default %d", sup.mcpResultLimit())
+	sup := e.ws.Status.Sup()
+	if sup.McpResultLimit() != 1<<20 {
+		t.Fatalf("default %d", sup.McpResultLimit())
 	}
-	sup.mu.Lock()
-	sup.dc.Settings.MCPMaxResultMB = 4
-	sup.mu.Unlock()
-	if sup.mcpResultLimit() != 4<<20 {
-		t.Fatalf("4 MB: %d", sup.mcpResultLimit())
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPMaxResultMB = 4
+	sup.Mu.Unlock()
+	if sup.McpResultLimit() != 4<<20 {
+		t.Fatalf("4 MB: %d", sup.McpResultLimit())
 	}
 	for _, n := range []int{-1, 9} {
-		dc := newDaemonConfig()
+		dc := core.NewDaemonConfig()
 		dc.Settings.MCPMaxResultMB = n
 		if err := dc.Validate(); err == nil {
 			t.Errorf("accepted %d MB", n)
 		}
 	}
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Settings.MCPMaxResultMB = 1
 	if err := dc.Validate(); err != nil || dc.Settings.MCPMaxResultMB != 0 {
 		t.Errorf("1 MB is the default and is not written: %v %d", err, dc.Settings.MCPMaxResultMB)
@@ -170,47 +156,29 @@ func TestMCPResultLimitSetting(t *testing.T) {
 
 func TestDeviceCheckSettings(t *testing.T) {
 	e, _ := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	if tu := sup.deviceTuning(); tu != (device.Tuning{}) {
+	sup := e.ws.Status.Sup()
+	if tu := sup.DeviceTuning(); tu != (device.Tuning{}) {
 		t.Fatalf("default tuning %+v", tu)
 	}
-	sup.mu.Lock()
-	st := &sup.dc.Settings
+	sup.Mu.Lock()
+	st := &sup.Dc.Settings
 	st.DeviceCheckSec, st.DeviceFactsMin, st.DeviceLiveCheckSec, st.DeviceLiveFactsMin = 600, 120, 20, 2
-	sup.mu.Unlock()
-	if tu := sup.deviceTuning(); tu != (device.Tuning{Reach: 10 * time.Minute, Facts: 2 * time.Hour, LiveReach: 20 * time.Second, LiveFacts: 2 * time.Minute}) {
+	sup.Mu.Unlock()
+	if tu := sup.DeviceTuning(); tu != (device.Tuning{Reach: 10 * time.Minute, Facts: 2 * time.Hour, LiveReach: 20 * time.Second, LiveFacts: 2 * time.Minute}) {
 		t.Errorf("tuning %+v", tu)
 	}
 	for _, c := range []struct{ sec, min, lsec, lmin int }{{29, 0, 0, 0}, {3601, 0, 0, 0}, {-1, 0, 0, 0}, {0, 4, 0, 0}, {0, 1441, 0, 0}, {0, -5, 0, 0},
 		{0, 0, 9, 0}, {0, 0, 601, 0}, {0, 0, 0, 61}, {0, 0, 0, -1}} {
-		dc := newDaemonConfig()
+		dc := core.NewDaemonConfig()
 		dc.Settings.DeviceCheckSec, dc.Settings.DeviceFactsMin, dc.Settings.DeviceLiveCheckSec, dc.Settings.DeviceLiveFactsMin = c.sec, c.min, c.lsec, c.lmin
 		if err := dc.Validate(); err == nil {
 			t.Errorf("accepted %+v", c)
 		}
 	}
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Settings.DeviceCheckSec, dc.Settings.DeviceFactsMin, dc.Settings.DeviceLiveCheckSec, dc.Settings.DeviceLiveFactsMin = 30, 1440, 10, 60
 	if err := dc.Validate(); err != nil {
 		t.Errorf("the limits themselves: %v", err)
-	}
-}
-
-// The Topology drawing's small-squares threshold: empty (the default, 36) or 1 to 5000.
-func TestTopologySquaresAboveSetting(t *testing.T) {
-	for _, n := range []int{-1, 5001} {
-		dc := newDaemonConfig()
-		dc.Settings.TopologySquaresAbove = n
-		if err := dc.Validate(); err == nil {
-			t.Errorf("accepted %d", n)
-		}
-	}
-	for _, n := range []int{0, 1, 36, 5000} {
-		dc := newDaemonConfig()
-		dc.Settings.TopologySquaresAbove = n
-		if err := dc.Validate(); err != nil {
-			t.Errorf("%d: %v", n, err)
-		}
 	}
 }
 
@@ -226,12 +194,12 @@ func requireGateTools(t *testing.T, post func(string, ...string) (int, map[strin
 	_, m := post(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, hdr...)
 	have := toolNames(t, m)
 	for _, want := range []string{"list_nodes", "get_topology", "list_devices", "device_facts", "device_show"} {
-		if !containsStr(have, want) {
+		if !core.ContainsStr(have, want) {
 			t.Errorf("%s is not offered: %v", want, have)
 		}
 	}
 	for _, gone := range mcpClusterGone {
-		if containsStr(have, gone) {
+		if core.ContainsStr(have, gone) {
 			t.Errorf("%s is offered", gone)
 		}
 		if _, m := post(mcpCall(gone, `{}`), hdr...); m["error"] == nil {

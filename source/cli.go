@@ -11,6 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
+	"netdir/internal/devices"
 )
 
 // Command-line front end for the management layer.  Every command is a thin
@@ -92,25 +96,6 @@ func registerCLIFlags(fs *flag.FlagSet) *cliFlags {
 	}
 }
 
-// op runs a management command over the socket and returns the decoded data.
-func op(sock, cmd string, args any) json.RawMessage {
-	res, err := statusRequestTimeout(sock, map[string]any{"cmd": cmd, "args": args}, 140*time.Second)
-	if err != nil {
-		fatal(err)
-	}
-	if ok, _ := res["ok"].(bool); !ok {
-		fatalf("%v", res["error"])
-	}
-	b, _ := json.Marshal(res["data"])
-	return b
-}
-
-func decode(b json.RawMessage, v any) {
-	if err := json.Unmarshal(b, v); err != nil {
-		fatalf("unexpected reply from the daemon: %v", err)
-	}
-}
-
 func askYes(prompt string, assumeYes bool) {
 	if assumeYes {
 		return
@@ -141,7 +126,7 @@ func lt(t time.Time) string {
 func readFileArg(path, what string) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		fatalf("cannot read %s: %v", what, err)
+		core.Fatalf("cannot read %s: %v", what, err)
 	}
 	return string(b)
 }
@@ -151,7 +136,7 @@ func splitCSV(s string) []string { return splitList(s) }
 // run executes the management command named by the flags, if any.
 func (f *cliFlags) run(sock string) bool {
 	if *f.allNodes && !*f.hostShow && *f.captureIface == "" && !*f.tshoot {
-		fatalf("--all-nodes goes with --host, --capture or --tshoot (the cluster's numbers added together, or every node)")
+		core.Fatalf("--all-nodes goes with --host, --capture or --tshoot (the cluster's numbers added together, or every node)")
 	}
 	switch {
 	// ── canvas ──
@@ -167,7 +152,7 @@ func (f *cliFlags) run(sock string) bool {
 		if *f.canvasMove != "" {
 			e.Action, e.Kind = "move", *f.canvasMove
 			if e.Kind != "anycast" && e.Kind != "device" {
-				fatalf("only an anycast address or a device can be moved: --canvas-move anycast --group N --address ADDR --to N, or --canvas-move device --group N --device NAME --to N")
+				core.Fatalf("only an anycast address or a device can be moved: --canvas-move anycast --group N --address ADDR --to N, or --canvas-move device --group N --device NAME --to N")
 			}
 		}
 		if *f.canvasDel != "" {
@@ -183,7 +168,7 @@ func (f *cliFlags) run(sock string) bool {
 			e.Action, e.Kind = "resume", *f.canvasResume
 		}
 		if (e.Action == "pause" || e.Action == "resume") && e.Kind != "gateway" && e.Kind != "anycast" && e.Kind != "device" {
-			fatalf("only a gateway, an anycast address or a device can be paused: --canvas-%s gateway|anycast --group N [--address ADDR] --scope node|all, or --canvas-%s device --device NAME [--scope node|all]", e.Action, e.Action)
+			core.Fatalf("only a gateway, an anycast address or a device can be paused: --canvas-%s gateway|anycast --group N [--address ADDR] --scope node|all, or --canvas-%s device --device NAME [--scope node|all]", e.Action, e.Action)
 		}
 		if e.Action == "del" && e.Kind == "gateway" {
 			askYes(fmt.Sprintf("Delete gateway %d?", e.Group), *f.yes)
@@ -191,12 +176,12 @@ func (f *cliFlags) run(sock string) bool {
 		var r struct {
 			Message string `json:"message"`
 		}
-		decode(op(sock, "canvas.edit", e), &r)
+		core.Decode(core.Op(sock, "canvas.edit", e), &r)
 		fmt.Println(r.Message)
 	// ── configuration history ──
 	case *f.versions:
-		var l []VersionMeta
-		decode(op(sock, "versions.list", nil), &l)
+		var l []cluster.VersionMeta
+		core.Decode(core.Op(sock, "versions.list", nil), &l)
 		if len(l) == 0 {
 			fmt.Println("No versions recorded yet.")
 			return true
@@ -212,16 +197,16 @@ func (f *cliFlags) run(sock string) bool {
 		}
 	case *f.versionShow != "":
 		var r struct {
-			Meta   VersionMeta     `json:"meta"`
-			Config json.RawMessage `json:"config"`
+			Meta   cluster.VersionMeta `json:"meta"`
+			Config json.RawMessage     `json:"config"`
 		}
-		decode(op(sock, "versions.get", map[string]any{"id": *f.versionShow}), &r)
+		core.Decode(core.Op(sock, "versions.get", map[string]any{"id": *f.versionShow}), &r)
 		fmt.Printf("Version %s — %s by %s\n%s\n\n", r.Meta.ID, lt(r.Meta.At), r.Meta.Actor, r.Meta.Summary)
 		fmt.Println(string(r.Config))
 	case *f.versionDiff != "":
 		a, b, _ := strings.Cut(*f.versionDiff, "..")
-		var d VersionDiff
-		decode(op(sock, "versions.diff", map[string]any{"a": a, "b": b}), &d)
+		var d cluster.VersionDiff
+		core.Decode(core.Op(sock, "versions.diff", map[string]any{"a": a, "b": b}), &d)
 		fmt.Printf("--- %s  %s\n+++ %s  %s\n", d.A.ID, d.A.Summary, d.B.ID, d.B.Summary)
 		if d.Same {
 			fmt.Println("(identical)")
@@ -239,43 +224,43 @@ func (f *cliFlags) run(sock string) bool {
 			}
 		}
 	case *f.versionSnapshot:
-		var m VersionMeta
-		decode(op(sock, "versions.snapshot", map[string]any{"note": *f.note}), &m)
+		var m cluster.VersionMeta
+		core.Decode(core.Op(sock, "versions.snapshot", map[string]any{"note": *f.note}), &m)
 		fmt.Printf("Snapshot %s saved.\n", m.ID)
 	case *f.versionRestore != "":
 		askYes("Restore configuration version "+*f.versionRestore+" and apply it now?", *f.yes)
-		op(sock, "versions.restore", map[string]any{"id": *f.versionRestore})
+		core.Op(sock, "versions.restore", map[string]any{"id": *f.versionRestore})
 		fmt.Printf("Version %s restored and applied (the previous state was snapshotted first).\n", *f.versionRestore)
 	case *f.versionExport != "":
 		var r struct {
 			Config json.RawMessage `json:"config"`
 		}
-		decode(op(sock, "versions.export", map[string]any{"id": *f.versionExport}), &r)
+		core.Decode(core.Op(sock, "versions.export", map[string]any{"id": *f.versionExport}), &r)
 		fmt.Println(string(r.Config))
 	case *f.configImport != "":
 		raw := readFileArg(*f.configImport, "the config file")
 		askYes("Replace the whole configuration with "+*f.configImport+" and apply it now?", *f.yes)
-		op(sock, "config.import", map[string]any{"config": raw, "note": "imported from " + *f.configImport})
+		core.Op(sock, "config.import", map[string]any{"config": raw, "note": "imported from " + *f.configImport})
 		fmt.Println("Configuration imported and applied.")
 
 	// ── certificate ──
 	case *f.tlsStatus:
-		var i CertInfo
-		decode(op(sock, "tls.status", nil), &i)
+		var i core.CertInfo
+		core.Decode(core.Op(sock, "tls.status", nil), &i)
 		printCert(i)
 	case *f.tlsInstall:
 		if *f.certFile == "" {
-			fatalf("--tls-install needs --cert-file (and --key-file, unless a CSR from --tls-csr is pending)")
+			core.Fatalf("--tls-install needs --cert-file (and --key-file, unless a CSR from --tls-csr is pending)")
 		}
 		args := map[string]any{"cert_pem": readFileArg(*f.certFile, "the certificate file")}
 		if *f.keyFile != "" {
 			args["key_pem"] = readFileArg(*f.keyFile, "the key file")
 		}
 		var r struct {
-			Info     CertInfo `json:"info"`
-			Warnings []string `json:"warnings"`
+			Info     core.CertInfo `json:"info"`
+			Warnings []string      `json:"warnings"`
 		}
-		decode(op(sock, "tls.install", args), &r)
+		core.Decode(core.Op(sock, "tls.install", args), &r)
 		fmt.Println("Certificate installed; the GUI serves it from the next connection on (no restart).")
 		for _, w := range r.Warnings {
 			fmt.Println("warning:", w)
@@ -294,44 +279,44 @@ func (f *cliFlags) run(sock string) bool {
 				names = append(names, n)
 			}
 		}
-		decode(op(sock, "tls.csr", map[string]any{"cn": *f.cn, "dns": names, "ips": ips}), &r)
+		core.Decode(core.Op(sock, "tls.csr", map[string]any{"cn": *f.cn, "dns": names, "ips": ips}), &r)
 		fmt.Print(r.CSR)
 		fmt.Fprintln(os.Stderr, "\nThe matching private key stays on this node. When your CA returns the certificate:\n  netdir --tls-install --cert-file CERT.pem")
 	case *f.tlsRevert:
 		askYes("Remove the installed certificate and go back to the self-signed one?", *f.yes)
-		var i CertInfo
-		decode(op(sock, "tls.revert", nil), &i)
+		var i core.CertInfo
+		core.Decode(core.Op(sock, "tls.revert", nil), &i)
 		fmt.Println("Installed certificate removed.")
 		printCert(i)
 	case *f.tlsRegenerate:
-		var i CertInfo
-		decode(op(sock, "tls.regenerate", nil), &i)
+		var i core.CertInfo
+		core.Decode(core.Op(sock, "tls.regenerate", nil), &i)
 		fmt.Println("Self-signed certificate regenerated.")
 		printCert(i)
 
 	// ── cluster ──
 	case *f.clusterStatus:
-		var v ClusterView
-		decode(op(sock, "cluster.status", nil), &v)
+		var v cluster.ClusterView
+		core.Decode(core.Op(sock, "cluster.status", nil), &v)
 		printCluster(v)
 	case *f.clusterToken:
 		var r struct {
 			Code    string    `json:"code"`
 			Expires time.Time `json:"expires"`
 		}
-		decode(op(sock, "cluster.token", nil), &r)
+		core.Decode(core.Op(sock, "cluster.token", nil), &r)
 		fmt.Printf("Join code (single use, valid until %s):\n\n%s\n\nOn the new node:  netdir --cluster-join '%s'\n", lt(r.Expires), r.Code, r.Code)
 		fmt.Println("\nThe new node's shared settings (settings block, VIPs, keys) will be replaced by this cluster's; its interface, priority and weight stay its own.")
 	case *f.clusterTokenClear:
 		var r struct {
 			Cleared int `json:"cleared"`
 		}
-		decode(op(sock, "cluster.token.clear", nil), &r)
+		core.Decode(core.Op(sock, "cluster.token.clear", nil), &r)
 		fmt.Printf("Cleared %d unused join code(s) on this node. They no longer work.\n", r.Cleared)
 	case *f.clusterJoin != "":
 		askYes("Join this node to the cluster? Its shared settings (settings block, VIPs, keys, timers) will be replaced by the cluster's; a snapshot of the current config is saved first.", *f.yes)
-		var v ClusterView
-		decode(op(sock, "cluster.join", map[string]any{"code": *f.clusterJoin}), &v)
+		var v cluster.ClusterView
+		core.Decode(core.Op(sock, "cluster.join", map[string]any{"code": *f.clusterJoin}), &v)
 		fmt.Println("Joined.")
 		printCluster(v)
 	case *f.clusterPromote:
@@ -340,26 +325,26 @@ func (f *cliFlags) run(sock string) bool {
 			Epoch   uint64 `json:"epoch"`
 			Primary string `json:"primary"`
 		}
-		decode(op(sock, "cluster.promote", nil), &r)
+		core.Decode(core.Op(sock, "cluster.promote", nil), &r)
 		fmt.Printf("This node is now primary (epoch %d).\n", r.Epoch)
 	case *f.clusterRemove != "":
 		askYes("Remove "+*f.clusterRemove+" from the cluster?", *f.yes)
-		op(sock, "cluster.remove", map[string]any{"addr": *f.clusterRemove})
+		core.Op(sock, "cluster.remove", map[string]any{"addr": *f.clusterRemove})
 		fmt.Println("Removed.")
 	case *f.clusterDelete != "":
 		askYes("Delete "+*f.clusterDelete+" from the cluster for good? Nothing is kept about it, not even a block on its address.", *f.yes)
-		op(sock, "cluster.delete", map[string]any{"addr": *f.clusterDelete})
+		core.Op(sock, "cluster.delete", map[string]any{"addr": *f.clusterDelete})
 		fmt.Println("Deleted.")
 	case *f.clusterUnremove != "":
-		op(sock, "cluster.unremove", map[string]any{"addr": *f.clusterUnremove})
+		core.Op(sock, "cluster.unremove", map[string]any{"addr": *f.clusterUnremove})
 		fmt.Println("Removal lifted; the node can join again with a new join code.")
 	case *f.clusterLeave:
 		askYes("Leave the cluster? This node keeps its current settings and becomes its own single-node cluster.", *f.yes)
-		op(sock, "cluster.leave", nil)
+		core.Op(sock, "cluster.leave", nil)
 		fmt.Println("Left the cluster.")
 	case *f.clusterSync:
-		var v ClusterView
-		decode(op(sock, "cluster.sync", nil), &v)
+		var v cluster.ClusterView
+		core.Decode(core.Op(sock, "cluster.sync", nil), &v)
 		fmt.Println("Synced.")
 		printCluster(v)
 
@@ -385,11 +370,11 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.hostShow:
 		runHost(sock, f)
 	case *f.hostLookup != "":
-		var r LookupResult
-		decode(op(sock, "host.lookup", map[string]string{"lookup": *f.hostLookup}), &r)
+		var r core.LookupResult
+		core.Decode(core.Op(sock, "host.lookup", map[string]string{"lookup": *f.hostLookup}), &r)
 		switch {
 		case !r.Found:
-			fatalf("%s", r.Error)
+			core.Fatalf("%s", r.Error)
 		case r.Kind == "name":
 			fmt.Printf("%s  ->  %s\n", r.Query, r.Name)
 		default:
@@ -397,7 +382,7 @@ func (f *cliFlags) run(sock string) bool {
 		}
 	case *f.captureList:
 		var r CaptureInterfaces
-		decode(op(sock, "capture.interfaces", nil), &r)
+		core.Decode(core.Op(sock, "capture.interfaces", nil), &r)
 		printCaptureInterfaces(r)
 	case *f.captureIface != "":
 		runCapture(sock, f)
@@ -406,11 +391,11 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.deviceChange != "":
 		runDeviceChange(sock, *f.deviceChange, *f.deviceTarget, *f.dryRun, *f.yes, *f.deviceSave)
 	case *f.troubleUser != "" || *f.troubleHost != "":
-		runTroubleshootUser(sock, *f.troubleUser, *f.troubleHost, *f.troubleHours)
+		devices.RunTroubleshootUser(sock, *f.troubleUser, *f.troubleHost, *f.troubleHours)
 	case *f.deviceImport != "":
-		runDeviceImport(sock, *f.deviceImport, *f.dryRun)
+		devices.RunDeviceImport(sock, *f.deviceImport, *f.dryRun)
 	case *f.deviceSignin != "":
-		runDeviceSignin(sock, *f.deviceSignin)
+		devices.RunDeviceSignin(sock, *f.deviceSignin)
 	case *f.deviceCapture != "":
 		runDeviceCapture(sock, f)
 	case *f.deviceMCP != "":
@@ -422,8 +407,8 @@ func (f *cliFlags) run(sock string) bool {
 	case *f.traceAddr != "":
 		runNetTool(sock, "trace", *f.traceAddr)
 	case *f.whoisName != "":
-		var w WhoisInfo
-		decode(op(sock, "whois.get", map[string]string{"lookup": *f.whoisName}), &w)
+		var w core.WhoisInfo
+		core.Decode(core.Op(sock, "whois.get", map[string]string{"lookup": *f.whoisName}), &w)
 		fmt.Println(w.Text())
 	// ── log ──
 	case *f.logShow:
@@ -433,18 +418,18 @@ func (f *cliFlags) run(sock string) bool {
 		var r struct {
 			Message string `json:"message"`
 		}
-		decode(op(sock, "node.pause", map[string]bool{"paused": *f.nodePause}), &r)
+		core.Decode(core.Op(sock, "node.pause", map[string]bool{"paused": *f.nodePause}), &r)
 		fmt.Println(r.Message)
 	case *f.nodeRename != "":
 		var r struct {
 			Message string `json:"message"`
 		}
-		decode(op(sock, "node.rename", map[string]string{"name": *f.nodeRename}), &r)
+		core.Decode(core.Op(sock, "node.rename", map[string]string{"name": *f.nodeRename}), &r)
 		fmt.Println(r.Message)
 	// ── scheduler ──
 	case *f.schedule || *f.scheduleHistory:
 		var r SchedStatus
-		decode(op(sock, "schedule.status", nil), &r)
+		core.Decode(core.Op(sock, "schedule.status", nil), &r)
 		if *f.scheduleHistory {
 			if len(r.History) == 0 {
 				fmt.Println("Nothing has run on this node yet.")
@@ -477,22 +462,22 @@ func (f *cliFlags) run(sock string) bool {
 			}
 		}
 	case *f.scheduleSet != "":
-		var task SchedTask
+		var task core.SchedTask
 		if err := json.Unmarshal([]byte(*f.scheduleSet), &task); err != nil {
-			fatalf("--schedule-set takes the task as JSON: %v", err)
+			core.Fatalf("--schedule-set takes the task as JSON: %v", err)
 		}
-		var r SchedTask
-		decode(op(sock, "schedule.set", map[string]any{"task": task}), &r)
+		var r core.SchedTask
+		core.Decode(core.Op(sock, "schedule.set", map[string]any{"task": task}), &r)
 		fmt.Printf("Saved the task %q (%s)\n", r.Name, r.ID)
 	case *f.scheduleDel != "":
-		decode(op(sock, "schedule.del", map[string]string{"id": *f.scheduleDel}), &struct{}{})
+		core.Decode(core.Op(sock, "schedule.del", map[string]string{"id": *f.scheduleDel}), &struct{}{})
 		fmt.Println("Deleted.")
 	case *f.scheduleRun != "":
-		decode(op(sock, "schedule.run", map[string]string{"id": *f.scheduleRun}), &struct{}{})
+		core.Decode(core.Op(sock, "schedule.run", map[string]string{"id": *f.scheduleRun}), &struct{}{})
 		fmt.Println("Started on this node; see --schedule-history for the result.")
 	case *f.nodeStatus:
-		var r NodePauseState
-		decode(op(sock, "node.status", nil), &r)
+		var r core.NodePauseState
+		core.Decode(core.Op(sock, "node.status", nil), &r)
 		if r.Paused {
 			fmt.Println("This node is PAUSED: it is not serving. Resume it with --node-resume.")
 		} else {
@@ -507,46 +492,46 @@ func (f *cliFlags) run(sock string) bool {
 	// ── updates ──
 	case *f.updateStatus:
 		var v UpdateView
-		decode(op(sock, "update.status", nil), &v)
+		core.Decode(core.Op(sock, "update.status", nil), &v)
 		printUpdate(v)
 	case *f.updateUpload != "":
 		b, err := os.ReadFile(*f.updateUpload)
 		if err != nil {
-			fatalf("cannot read %s: %v", *f.updateUpload, err)
+			core.Fatalf("cannot read %s: %v", *f.updateUpload, err)
 		}
 		var r struct {
 			Version string `json:"version"`
 		}
-		decode(op(sock, "update.upload", map[string]any{"data": base64.StdEncoding.EncodeToString(b)}), &r)
+		core.Decode(core.Op(sock, "update.upload", map[string]any{"data": base64.StdEncoding.EncodeToString(b)}), &r)
 		fmt.Printf("Source v%s staged on this node. Apply it here with --update-apply, or to the cluster with --update-push all / --update-auto on.\n", r.Version)
 	case *f.updateApply:
 		var r struct {
 			Target string `json:"target"`
 		}
-		decode(op(sock, "update.apply", map[string]any{"force": *f.yes}), &r)
+		core.Decode(core.Op(sock, "update.apply", map[string]any{"force": *f.yes}), &r)
 		fmt.Printf("Building v%s and restarting into it…\n", r.Target)
 		if !*f.noWait {
 			waitForUpdate(sock, r.Target)
 		}
 	case *f.updatePush != "":
-		op(sock, "update.push", map[string]any{"nodes": splitCSV(*f.updatePush)})
+		core.Op(sock, "update.push", map[string]any{"nodes": splitCSV(*f.updatePush)})
 		fmt.Println("Queued. Each node updates within its sync interval, one at a time.")
 	case *f.updateCancel != "":
-		op(sock, "update.cancel", map[string]any{"nodes": splitCSV(*f.updateCancel)})
+		core.Op(sock, "update.cancel", map[string]any{"nodes": splitCSV(*f.updateCancel)})
 		fmt.Println("Cancelled.")
 	case *f.updateAuto != "":
 		on := yes(*f.updateAuto)
 		if !on && !isNo(*f.updateAuto) {
-			fatalf("--update-auto takes on or off")
+			core.Fatalf("--update-auto takes on or off")
 		}
-		op(sock, "update.auto", map[string]any{"enabled": on})
+		core.Op(sock, "update.auto", map[string]any{"enabled": on})
 		fmt.Println("Auto-update is now", map[bool]string{true: "ON", false: "off"}[on])
 	case *f.updateRepo != "":
-		op(sock, "update.repo", map[string]any{"repo": *f.updateRepo})
-		fmt.Println("Online repository set. (--update-repo default goes back to https://github.com/" + defaultRepo + ")")
+		core.Op(sock, "update.repo", map[string]any{"repo": *f.updateRepo})
+		fmt.Println("Online repository set. (--update-repo default goes back to https://github.com/" + core.DefaultRepo + ")")
 	case *f.updateHistory:
-		var h []UpdateEvent
-		decode(op(sock, "update.history", map[string]any{"limit": 0}), &h)
+		var h []core.UpdateEvent
+		core.Decode(core.Op(sock, "update.history", map[string]any{"limit": 0}), &h)
 		printUpdateHistory(h)
 	default:
 		return false
@@ -569,7 +554,7 @@ func trunc(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func printCert(i CertInfo) {
+func printCert(i core.CertInfo) {
 	if i.Error != "" {
 		fmt.Println("Certificate problem:", i.Error)
 		return
@@ -601,16 +586,16 @@ func printCert(i CertInfo) {
 }
 
 // failoverWords says whether automatic failover is in force: always automatic, on from three members.
-func failoverWords(v ClusterView) string {
-	return map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + itoa(len(v.Peers)) + " members (automatic, on from three)"
+func failoverWords(v cluster.ClusterView) string {
+	return map[bool]string{true: "on", false: "off"}[v.FailoverOn] + " with " + core.Itoa(len(v.Peers)) + " members (automatic, on from three)"
 }
 
-func printCluster(v ClusterView) {
+func printCluster(v cluster.ClusterView) {
 	if !v.Enabled {
 		fmt.Println("Clustering is disabled on this node (cluster.enabled = false).")
 		return
 	}
-	fmt.Printf("This node: %s   node id %s   identity sha256 %s\n", v.Self, v.NodeID, shortFP(v.Fingerprint))
+	fmt.Printf("This node: %s   node id %s   identity sha256 %s\n", v.Self, v.NodeID, core.ShortFP(v.Fingerprint))
 	fmt.Printf("Role: %s   epoch %d   primary %s   shared-settings revision %d\n", v.Role, v.Epoch, v.PrimaryAddr, v.SharedRev)
 	if v.Joinable {
 		fmt.Println("(not part of a multi-node cluster yet — mint a code with --cluster-token on another node and use --cluster-join)")
@@ -625,7 +610,7 @@ func printCluster(v ClusterView) {
 		if p.IsPrimary {
 			role = "primary"
 		}
-		name := orDefault(p.Hostname, "-")
+		name := core.OrDefault(p.Hostname, "-")
 		if p.Self {
 			name += " *"
 		}
@@ -634,8 +619,8 @@ func printCluster(v ClusterView) {
 		if p.Updating {
 			note = "updating"
 		}
-		fmt.Printf(f, name, trunc(orDefault(strings.Join(p.IPs, " "), "-"), 40), addr, role, map[bool]string{true: "yes", false: "NO"}[p.Reachable], itoa(int(p.Epoch)),
-			orDefault(p.Version, "-"), orDefault(p.SourceVersion, "-"), lt(p.LastSeen), trunc(note, 40))
+		fmt.Printf(f, name, trunc(core.OrDefault(strings.Join(p.IPs, " "), "-"), 40), addr, role, map[bool]string{true: "yes", false: "NO"}[p.Reachable], core.Itoa(int(p.Epoch)),
+			core.OrDefault(p.Version, "-"), core.OrDefault(p.SourceVersion, "-"), lt(p.LastSeen), trunc(note, 40))
 	}
 	fmt.Println("\n* = this node")
 	for _, r := range v.Removed {
@@ -666,12 +651,12 @@ func printUpdate(v UpdateView) {
 	}
 	repo := v.Intent.Repo
 	if repo == "" {
-		repo = defaultRepo + " (default)"
+		repo = core.DefaultRepo + " (default)"
 	}
 	fmt.Printf("Repository:    https://github.com/%s\n", repo)
 	fmt.Printf("Auto-update:   %s\n", map[bool]string{true: "ON (every node updates itself when newer source is available)", false: "off"}[v.Intent.AutoAll])
 	if v.Busy {
-		fmt.Printf("In progress:   %s\n", orDefault(v.Phase, "yes"))
+		fmt.Printf("In progress:   %s\n", core.OrDefault(v.Phase, "yes"))
 	}
 	if v.Notice != "" {
 		fmt.Println("NOTICE:", v.Notice)
@@ -694,8 +679,8 @@ func printUpdate(v UpdateView) {
 		case n.Behind:
 			state = "behind"
 		}
-		fmt.Printf(f, name, map[bool]string{true: "yes", false: "NO"}[n.Reachable], orDefault(n.Running, "-"),
-			orDefault(n.Source, "-"), map[bool]string{true: "yes", false: ""}[n.Queued], state)
+		fmt.Printf(f, name, map[bool]string{true: "yes", false: "NO"}[n.Reachable], core.OrDefault(n.Running, "-"),
+			core.OrDefault(n.Source, "-"), map[bool]string{true: "yes", false: ""}[n.Queued], state)
 	}
 	fmt.Println()
 	recent := v.History
@@ -705,7 +690,7 @@ func printUpdate(v UpdateView) {
 	printUpdateHistory(recent)
 }
 
-func printUpdateHistory(h []UpdateEvent) {
+func printUpdateHistory(h []core.UpdateEvent) {
 	if len(h) == 0 {
 		fmt.Println("No update history.")
 		return
@@ -731,11 +716,11 @@ func waitForUpdate(sock, target string) {
 	last := ""
 	for time.Now().Before(deadline) {
 		time.Sleep(2 * time.Second)
-		res, err := statusRequestTimeout(sock, map[string]any{"cmd": "update.status"}, 10*time.Second)
+		res, err := core.StatusRequestTimeout(sock, map[string]any{"cmd": "update.status"}, 10*time.Second)
 		if err != nil { // socket gone: the daemon is restarting
 			for i := 0; i < 30; i++ {
 				time.Sleep(time.Second)
-				if r2, err := statusRequestTimeout(sock, map[string]any{"cmd": "update.status"}, 5*time.Second); err == nil {
+				if r2, err := core.StatusRequestTimeout(sock, map[string]any{"cmd": "update.status"}, 5*time.Second); err == nil {
 					var v UpdateView
 					b, _ := json.Marshal(r2["data"])
 					json.Unmarshal(b, &v)
@@ -762,7 +747,7 @@ func waitForUpdate(sock, target string) {
 				return
 			}
 			if v.Last != nil && v.Last.Kind == "failed" {
-				fatalf("update failed: %s", v.Last.Detail)
+				core.Fatalf("update failed: %s", v.Last.Detail)
 			}
 		}
 	}
@@ -775,9 +760,9 @@ var canvasTag = map[string]string{"ok": "[ OK ]", "warn": "[WARN]", "bad": "[DOW
 func showCanvas(sock string) {
 	res := mustStatus(sock, "canvas")
 	if ok, _ := res["ok"].(bool); !ok {
-		fatalf("%v", res["error"])
+		core.Fatalf("%v", res["error"])
 	}
-	var gws []CanvasGateway
+	var gws []core.CanvasGateway
 	decodeData(res, &gws)
 	if len(gws) == 0 {
 		fmt.Println("The canvas is empty: no gateways. Draw one with:")
@@ -785,7 +770,7 @@ func showCanvas(sock string) {
 		return
 	}
 	now := time.Now()
-	upNote := func(u *UpInfo) string {
+	upNote := func(u *core.UpInfo) string {
 		if u == nil {
 			return ""
 		}
@@ -806,7 +791,7 @@ func showCanvas(sock string) {
 		for _, a := range g.Anycast {
 			state := "announced from this node (on lo)"
 			if !a.Up {
-				state = "withdrawn: " + orDefault(a.Reason, "not held")
+				state = "withdrawn: " + core.OrDefault(a.Reason, "not held")
 			}
 			if a.Up && a.Detail != "" {
 				state += " — " + a.Detail
@@ -840,8 +825,8 @@ func showCanvas(sock string) {
 func runPower(sock string, f *cliFlags) {
 	act := strings.ToLower(*f.power)
 	if act == "status" {
-		var p PowerPending
-		decode(op(sock, "power.status", nil), &p)
+		var p core.PowerPending
+		core.Decode(core.Op(sock, "power.status", nil), &p)
 		if !p.Scheduled {
 			fmt.Println("No restart or shutdown is scheduled.")
 			return
@@ -855,12 +840,12 @@ func runPower(sock string, f *cliFlags) {
 	if act == "poweroff" {
 		act = "shutdown"
 	}
-	req := PowerReq{Action: act, When: "now", Force: *f.yes}
+	req := core.PowerReq{Action: act, When: "now", Force: *f.yes}
 	switch {
 	case act != "restart" && act != "shutdown" && act != "cancel":
-		fatalf("--power takes restart, shutdown, cancel or status")
+		core.Fatalf("--power takes restart, shutdown, cancel or status")
 	case *f.powerIn > 0 && *f.powerAt != "":
-		fatalf("give --in or --at, not both")
+		core.Fatalf("give --in or --at, not both")
 	case *f.powerIn > 0:
 		req.When, req.Minutes = "in", *f.powerIn
 	case *f.powerAt != "":
@@ -875,8 +860,8 @@ func runPower(sock string, f *cliFlags) {
 		}
 		askYes(fmt.Sprintf("%s the whole host %s? You will lose access to it for now.%s", what, when, extra), *f.yes)
 	}
-	var r PowerResult
-	decode(op(sock, "power.do", req), &r)
+	var r core.PowerResult
+	core.Decode(core.Op(sock, "power.do", req), &r)
 	if act == "cancel" {
 		fmt.Println("The scheduled power action is cancelled.")
 		return
@@ -896,8 +881,8 @@ func runLog(sock string, f *cliFlags) {
 	if n == "" {
 		n = "0"
 	}
-	var r LogResult
-	decode(op(sock, "log.read", map[string]string{"level": *f.logMin, "q": *f.logGrep, "since": *f.logSince, "n": n}), &r)
+	var r core.LogResult
+	core.Decode(core.Op(sock, "log.read", map[string]string{"level": *f.logMin, "q": *f.logGrep, "since": *f.logSince, "n": n}), &r)
 	for _, l := range r.Lines {
 		fmt.Println(l.Raw)
 	}
@@ -913,12 +898,12 @@ func runHost(sock string, f *cliFlags) {
 	if rng == "" {
 		rng = "1h"
 	}
-	var r HostResult
+	var r core.HostResult
 	cmd := "host.get"
 	if *f.allNodes {
 		cmd = "host.cluster"
 	}
-	decode(op(sock, cmd, map[string]string{"from": rng}), &r)
+	core.Decode(core.Op(sock, cmd, map[string]string{"from": rng}), &r)
 	printClusterNote(r.Cluster)
 	n := r.Now
 	if n.At == 0 {
@@ -1032,7 +1017,7 @@ func humanBytes(v uint64) string {
 }
 
 // printClusterNote says which nodes a cluster-wide answer adds together, and which could not answer.
-func printClusterNote(c *ClusterInfo) {
+func printClusterNote(c *core.ClusterInfo) {
 	if c == nil {
 		return
 	}
@@ -1062,7 +1047,7 @@ func printCaptureInterfaces(r CaptureInterfaces) {
 		if gw[i.Name] {
 			note = "(a gateway's interface)"
 		}
-		fmt.Printf("%-16s %-5s %-18s %s\n", i.Name, map[bool]string{true: "yes", false: "no"}[i.Up], orDefault(i.MAC, "-"), note)
+		fmt.Printf("%-16s %-5s %-18s %s\n", i.Name, map[bool]string{true: "yes", false: "no"}[i.Up], core.OrDefault(i.MAC, "-"), note)
 	}
 }
 
@@ -1071,8 +1056,8 @@ func runCapture(sock string, f *cliFlags) {
 	secs := 10
 	if *f.captureSecs != "" {
 		n, err := strconv.Atoi(*f.captureSecs)
-		if err != nil || n < 1 || n > capRunMaxSeconds {
-			fatalf("--capture-seconds must be 1 to %d", capRunMaxSeconds)
+		if err != nil || n < 1 || n > core.CapRunMaxSeconds {
+			core.Fatalf("--capture-seconds must be 1 to %d", core.CapRunMaxSeconds)
 		}
 		secs = n
 	}
@@ -1082,31 +1067,31 @@ func runCapture(sock string, f *cliFlags) {
 	}
 	fmt.Fprintf(os.Stderr, "capturing on %s for %d s%s ...\n", *f.captureIface, secs, map[bool]string{true: " (filter: " + *f.captureFilter + ")", false: ""}[*f.captureFilter != ""])
 	var r CaptureRunResult
-	decode(op(sock, "capture.run", map[string]any{"iface": *f.captureIface, "filter": *f.captureFilter, "seconds": secs}), &r)
+	core.Decode(core.Op(sock, "capture.run", map[string]any{"iface": *f.captureIface, "filter": *f.captureFilter, "seconds": secs}), &r)
 	if *f.captureFile != "" {
 		if err := os.WriteFile(*f.captureFile, r.Pcap, 0o644); err != nil {
-			fatal(err)
+			core.Fatal(err)
 		}
 		fmt.Printf("%d packets kept (%d seen) written to %s\n", r.Kept, r.Seen, *f.captureFile)
 		return
 	}
-	_, pkts, err := readPcap(r.Pcap)
+	_, pkts, err := core.ReadPcap(r.Pcap)
 	if err != nil {
-		fatal(err)
+		core.Fatal(err)
 	}
 	for i, p := range pkts {
 		if i == 500 {
 			fmt.Printf("... %d more (use --capture-file to keep them all)\n", len(pkts)-500)
 			break
 		}
-		fmt.Printf("%s  %s\n", p.t.Format("15:04:05.000000"), p.summary)
+		fmt.Printf("%s  %s\n", p.T.Format("15:04:05.000000"), p.Summary)
 	}
 	fmt.Printf("%d packets kept, %d seen on %s\n", r.Kept, r.Seen, r.Iface)
 }
 
 func runClusterCapture(sock string, f *cliFlags, secs int) {
 	if *f.captureFile == "" {
-		fatalf("--all-nodes and --group need --capture-file FILE.tgz (one .pcap per node is bundled in it)")
+		core.Fatalf("--all-nodes and --group need --capture-file FILE.tgz (one .pcap per node is bundled in it)")
 	}
 	var job CaptureJob
 	args := map[string]any{"iface": *f.captureIface, "filter": *f.captureFilter, "seconds": secs}
@@ -1118,12 +1103,12 @@ func runClusterCapture(sock string, f *cliFlags, secs int) {
 			args["iface"] = ""
 		}
 	}
-	decode(op(sock, "capture.cluster.start", args), &job)
+	core.Decode(core.Op(sock, "capture.cluster.start", args), &job)
 	fmt.Fprintf(os.Stderr, "capturing on %s, on %s for %d s ...\n", job.Iface, where, secs)
 	for i := 0; i < secs+60; i++ {
 		time.Sleep(time.Second)
 		var st CaptureJob
-		decode(op(sock, "capture.cluster.status", nil), &st)
+		core.Decode(core.Op(sock, "capture.cluster.status", nil), &st)
 		if !st.Done {
 			continue
 		}
@@ -1136,31 +1121,31 @@ func runClusterCapture(sock string, f *cliFlags, secs int) {
 			fmt.Printf("%-24s %-8s %8d %10d  %s\n", name, n.Status, n.Kept, n.Bytes, n.Error)
 		}
 		if !st.Ready {
-			fatalf("%s", orDefault(st.Error, "nothing to save"))
+			core.Fatalf("%s", core.OrDefault(st.Error, "nothing to save"))
 		}
 		var b struct {
 			TGZ []byte `json:"tgz"`
 		}
-		decode(op(sock, "capture.cluster.bundle", nil), &b)
+		core.Decode(core.Op(sock, "capture.cluster.bundle", nil), &b)
 		if err := os.WriteFile(*f.captureFile, b.TGZ, 0o644); err != nil {
-			fatal(err)
+			core.Fatal(err)
 		}
 		fmt.Printf("written to %s\n", *f.captureFile)
 		return
 	}
-	fatalf("the cluster capture did not finish")
+	core.Fatalf("the cluster capture did not finish")
 }
 
 // showVmacTest runs the virtual-MAC test on this node and prints what it found.
 func showVmacTest(sock string, group int) {
-	var rs []VmacResult
-	decode(op(sock, "vmac.test", map[string]int{"group": group}), &rs)
+	var rs []core.VmacResult
+	core.Decode(core.Op(sock, "vmac.test", map[string]int{"group": group}), &rs)
 	for _, r := range rs {
 		fmt.Printf("Gateway %d: %s — %s\n", r.GroupID, r.Verdict, r.Detail)
 		for _, f := range r.Families {
 			fmt.Printf("    %s: %s\n", f.AF, f.Detail)
 		}
-		if r.Verdict == vmacNotDelivered {
+		if r.Verdict == core.VmacNotDelivered {
 			fmt.Printf("    To run without virtual MACs on every node: netdir --canvas-set gateway --group %d --real-macs on\n", r.GroupID)
 		}
 	}
@@ -1173,27 +1158,27 @@ func runTshoot(sock string, all, capture bool, file string) {
 		cmd = "tshoot.cluster"
 	}
 	if file == "" {
-		file = "netdir-tshoot-" + selfHost() + "-" + time.Now().Format("20060102-150405") + ".tgz"
+		file = "netdir-tshoot-" + core.SelfHost() + "-" + time.Now().Format("20060102-150405") + ".tgz"
 	}
 	fmt.Fprintln(os.Stderr, "collecting (up to a minute)…")
 	var b struct {
 		TGZ []byte `json:"tgz"`
 	}
-	decode(op(sock, cmd, map[string]any{"enabled": capture}), &b)
+	core.Decode(core.Op(sock, cmd, map[string]any{"enabled": capture}), &b)
 	if err := os.WriteFile(file, b.TGZ, 0o600); err != nil {
-		fatal(err)
+		core.Fatal(err)
 	}
 	fmt.Printf("written to %s (%d bytes); secrets are removed, README.txt lists what is in it\n", file, len(b.TGZ))
 }
 
 // runNetTool runs ping or traceroute (mtr) of addr on this node and prints the output when it is done.
 func runNetTool(sock, kind, addr string) {
-	var j NetJob
+	var j core.NetJob
 	args := map[string]string{"kind": kind, "client": addr}
-	decode(op(sock, "nettool.start", args), &j)
+	core.Decode(core.Op(sock, "nettool.start", args), &j)
 	for j.State == "running" {
 		time.Sleep(time.Second)
-		decode(op(sock, "nettool.get", args), &j)
+		core.Decode(core.Op(sock, "nettool.get", args), &j)
 	}
 	fmt.Println(j.Text)
 	if j.State == "error" {
@@ -1203,13 +1188,13 @@ func runNetTool(sock, kind, addr string) {
 
 // runScan asks this node for an nmap of addr and prints the report when it is done.
 func runScan(sock, addr, ports string) {
-	var j ScanJob
+	var j core.ScanJob
 	args := map[string]string{"client": addr, "ports": ports}
-	decode(op(sock, "scan.start", args), &j)
+	core.Decode(core.Op(sock, "scan.start", args), &j)
 	fmt.Fprintf(os.Stderr, "scanning %s with nmap…\n", j.Addr)
 	for j.State == "running" {
 		time.Sleep(2 * time.Second)
-		decode(op(sock, "scan.get", args), &j)
+		core.Decode(core.Op(sock, "scan.get", args), &j)
 	}
 	fmt.Println(j.Text)
 	if j.State == "error" {

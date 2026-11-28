@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // StatusServer answers JSON-line commands on a Unix socket:
@@ -27,16 +28,16 @@ import (
 // local users as before.
 type StatusServer struct {
 	path   string
-	sup    *Supervisor
+	sup    *core.Supervisor
 	mg     *Mgmt
 	alerts *AlertEngine // /metrics counts the open alerts
 	l      net.Listener
-	up     *upTracker
+	up     *core.UpTracker
 	stop   chan struct{}
 }
 
-func NewStatusServer(path string, sup *Supervisor) *StatusServer {
-	return &StatusServer{path: path, sup: sup, up: newUpTracker()}
+func NewStatusServer(path string, sup *core.Supervisor) *StatusServer {
+	return &StatusServer{path: path, sup: sup, up: core.NewUpTracker()}
 }
 
 // peerCred returns the uid and a printable name of the process on the other
@@ -82,7 +83,7 @@ func (s *StatusServer) Start() error {
 	s.l = l
 	s.stop = make(chan struct{})
 	go s.sampleUptime(s.stop)
-	go hoststats.Run(s.stop)
+	go core.Hoststats.Run(s.stop)
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -92,21 +93,21 @@ func (s *StatusServer) Start() error {
 			go s.handle(c)
 		}
 	}()
-	debugf("Status socket listening at %s", s.path)
+	core.Debugf("Status socket listening at %s", s.path)
 	return nil
 }
 
 // sampleUptime looks at the topology picture every few seconds so the uptimes notice an
 // outage even when nobody has the page open.
 func (s *StatusServer) sampleUptime(stop chan struct{}) {
-	t := time.NewTicker(upSampleEvery)
+	t := time.NewTicker(core.UpSampleEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			s.canvasGroups() // notes the uptimes
+			s.CanvasGroups() // notes the uptimes
 		}
 	}
 }
@@ -142,7 +143,7 @@ func (s *StatusServer) handle(c net.Conn) {
 	var res map[string]any
 	switch req.Cmd {
 	case "snapshot":
-		res = map[string]any{"ok": true, "data": s.snapshot(), "names": s.ipNames()}
+		res = map[string]any{"ok": true, "data": s.Snapshot(), "names": s.IPNames()}
 	case "canvas":
 		res = s.canvasView()
 	case "assert-agc":
@@ -151,7 +152,7 @@ func (s *StatusServer) handle(c net.Conn) {
 		} else if s.mg != nil && s.mg.pausedFn != nil && s.mg.pausedFn() {
 			res = map[string]any{"ok": false, "error": "this node is paused: resume it before making it the gateway controller"}
 		} else {
-			res = s.assertAGC()
+			res = s.AssertAGC()
 		}
 	default:
 		switch {
@@ -174,10 +175,13 @@ func (s *StatusServer) handle(c net.Conn) {
 	c.Write(append(b, '\n'))
 }
 
-func (s *StatusServer) snapshot() []SnapshotRow {
-	rows := []SnapshotRow{}
-	for _, e := range s.sup.engineList() {
-		rows = append(rows, e.snapshot()...)
+// Sup is the supervisor of the engines (StatusHost).
+func (s *StatusServer) Sup() *core.Supervisor { return s.sup }
+
+func (s *StatusServer) Snapshot() []core.SnapshotRow {
+	rows := []core.SnapshotRow{}
+	for _, e := range s.sup.EngineList() {
+		rows = append(rows, e.Snapshot()...)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
@@ -192,12 +196,12 @@ func (s *StatusServer) snapshot() []SnapshotRow {
 	return rows
 }
 
-func (s *StatusServer) assertAGC() map[string]any {
+func (s *StatusServer) AssertAGC() map[string]any {
 	var msgs []string
-	for _, e := range s.sup.engineList() {
-		e.mu.Lock()
-		msgs = append(msgs, e.assertAGCLocked())
-		e.mu.Unlock()
+	for _, e := range s.sup.EngineList() {
+		e.Mu.Lock()
+		msgs = append(msgs, e.AssertAGCLocked())
+		e.Mu.Unlock()
 	}
 	if len(msgs) == 0 {
 		return map[string]any{"ok": false, "error": "No engines running"}
@@ -206,18 +210,18 @@ func (s *StatusServer) assertAGC() map[string]any {
 }
 
 // ipNames maps the addresses of the cluster's nodes (as the Gateways page lists them) to the nodes' names.
-func (s *StatusServer) ipNames() map[string]string {
+func (s *StatusServer) IPNames() map[string]string {
 	if s.mg == nil || s.mg.cl == nil {
 		host, _ := os.Hostname()
 		out := map[string]string{}
-		for _, r := range s.snapshot() {
+		for _, r := range s.Snapshot() {
 			if r.Local && r.PeerIP != "" {
-				out[normIP(r.PeerIP)] = host
+				out[core.NormIP(r.PeerIP)] = host
 			}
 		}
 		return out
 	}
-	return nodeNamesByIP(s.mg.cl.View().Peers)
+	return core.NodeNamesByIP(s.mg.cl.View().Peers)
 }
 
 func denied() map[string]any {
@@ -226,29 +230,5 @@ func denied() map[string]any {
 
 // statusRequest is the CLI side.
 func statusRequest(path string, cmd map[string]any) (map[string]any, error) {
-	return statusRequestTimeout(path, cmd, 5*time.Second)
-}
-
-func statusRequestTimeout(path string, cmd map[string]any, timeout time.Duration) (map[string]any, error) {
-	d := net.Dialer{Timeout: 3 * time.Second}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	c, err := d.DialContext(ctx, "unix", path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, errors.New("netdir is not running (status socket not found)")
-		}
-		return nil, err
-	}
-	defer c.Close()
-	c.SetDeadline(time.Now().Add(timeout))
-	b, _ := json.Marshal(cmd)
-	if _, err := c.Write(append(b, '\n')); err != nil {
-		return nil, err
-	}
-	var res map[string]any
-	if err := json.NewDecoder(c).Decode(&res); err != nil {
-		return nil, err
-	}
-	return res, nil
+	return core.StatusRequestTimeout(path, cmd, 5*time.Second)
 }

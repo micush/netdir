@@ -2,53 +2,11 @@ package main
 
 import (
 	"fmt"
-	"net/http"
-	"net/netip"
 	"strings"
 	"time"
+
+	"netdir/internal/core"
 )
-
-// /metrics: this node's counters in the Prometheus text format, on the web GUI port (Configure ▸ Monitoring ▸ Metrics).
-// It is always there, but only the sources in MetricsACL may read it (an empty list is nobody, and the list is empty until
-// it is filled in); there is no login, Prometheus cannot fill in a form.  The source is the address of the connection, never a header.
-// Only counts and states are written, no client or domain names.
-
-// metricsAllowed says whether a request from this address may read /metrics.
-func (s *Supervisor) metricsAllowed(from netip.Addr) bool {
-	s.mu.Lock()
-	var acl []string
-	if s.dc != nil {
-		acl = s.dc.Settings.MetricsACL
-	}
-	s.mu.Unlock()
-	return inNets(s.metricsNets(acl), from.Unmap())
-}
-
-// metricsNets is the list as networks.  Host names in it are looked up again after a minute, not for every request.
-func (s *Supervisor) metricsNets(acl []string) []netip.Prefix {
-	key := strings.Join(acl, ",")
-	s.metricsMu.Lock()
-	defer s.metricsMu.Unlock()
-	if s.metricsKey == key && time.Since(s.metricsAt) < time.Minute {
-		return s.metricsCache
-	}
-	s.metricsKey, s.metricsAt, s.metricsCache = key, time.Now(), expandACL(acl)
-	return s.metricsCache
-}
-
-func (w *WebServer) handleMetrics(rw http.ResponseWriter, r *http.Request) {
-	ap, err := netip.ParseAddrPort(r.RemoteAddr)
-	if err != nil {
-		http.NotFound(rw, r)
-		return
-	}
-	if !w.status.sup.metricsAllowed(ap.Addr()) {
-		http.Error(rw, "forbidden", http.StatusForbidden)
-		return
-	}
-	rw.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	_, _ = rw.Write([]byte(w.status.metricsText()))
-}
 
 type metricsOut struct {
 	b    strings.Builder
@@ -67,17 +25,17 @@ func (m *metricsOut) add(name, kind, help string, labels string, v float64) {
 }
 
 // cert writes when a certificate runs out: as a time (for dashboards) and as seconds left (for alerts; negative once it has).
-func (m *metricsOut) cert(notAfterName, leftName, which string, cm *CertManager) {
+func (m *metricsOut) cert(notAfterName, leftName, which string, cm *core.CertManager) {
 	if cm == nil {
 		return
 	}
-	lc, err := cm.current(false)
-	if err != nil || lc == nil || lc.info.NotAfter.IsZero() {
+	lc, err := cm.Current(false)
+	if err != nil || lc == nil || lc.Info.NotAfter.IsZero() {
 		return
 	}
 	l := promLabel("certificate", which)
-	m.add(notAfterName, "gauge", "When the certificate runs out (unix time).", l, float64(lc.info.NotAfter.Unix()))
-	m.add(leftName, "gauge", "Seconds until the certificate runs out (negative once it has).", l, time.Until(lc.info.NotAfter).Seconds())
+	m.add(notAfterName, "gauge", "When the certificate runs out (unix time).", l, float64(lc.Info.NotAfter.Unix()))
+	m.add(leftName, "gauge", "Seconds until the certificate runs out (negative once it has).", l, time.Until(lc.Info.NotAfter).Seconds())
 }
 
 func promLabel(k, v string) string {
@@ -93,15 +51,15 @@ func b2f(b bool) float64 {
 }
 
 // metricsText is the page: the gateways, the managed devices and the host, per node.
-func (s *StatusServer) metricsText() string {
+func (s *StatusServer) MetricsText() string {
 	m := &metricsOut{seen: map[string]bool{}}
-	m.add("netdir_info", "gauge", "The version this node runs.", promLabel("version", version()), 1)
-	devs, _ := s.sup.deviceInventory()
+	m.add("netdir_info", "gauge", "The version this node runs.", promLabel("version", core.Version()), 1)
+	devs, _ := s.sup.DeviceInventory()
 	m.add("netdir_devices", "gauge", "Managed devices in the inventory.", "", float64(len(devs)))
 	if s.mg != nil {
 		m.cert("netdir_certificate_not_after_timestamp_seconds", "netdir_certificate_expires_in_seconds", "web", s.mg.certs)
 	}
-	if h := hoststats.lastNow(); h.At != 0 {
+	if h := core.Hoststats.LastNow(); h.At != 0 {
 		m.add("netdir_host_cpu_percent", "gauge", "CPU in use, all cores.", "", h.CPU)
 		m.add("netdir_host_cpu_cores", "gauge", "CPU cores.", "", float64(h.Cores))
 		for i, n := range []string{"1", "5", "15"} {
@@ -130,36 +88,20 @@ func (s *StatusServer) metricsText() string {
 	}
 	if s.alerts != nil {
 		active, acked, opened := s.alerts.counts()
-		for _, sev := range alertSeverities {
+		for _, sev := range core.AlertSeverities {
 			l := promLabel("severity", sev)
 			m.add("netdir_alerts_active", "gauge", "Open alerts that nobody has acknowledged or silenced.", l, float64(active[sev]))
 			m.add("netdir_alerts_acknowledged", "gauge", "Open alerts that someone has acknowledged (not silenced).", l, float64(acked[sev]))
 		}
 		m.add("netdir_alerts_opened_total", "counter", "Alerts opened since the history began (an alert that comes back is counted again).", "", float64(opened))
 	}
-	for _, r := range s.snapshot() {
+	for _, r := range s.Snapshot() {
 		if !r.Local {
 			continue
 		}
-		l := promLabel("group", itoa(r.GroupID)) + "," + promLabel("af", r.AF)
+		l := promLabel("group", core.Itoa(r.GroupID)) + "," + promLabel("af", r.AF)
 		m.add("netdir_gateway_active", "gauge", "1 when this node is the active gateway of the group.", l, b2f(r.State == "active"))
 		m.add("netdir_gateway_service_up", "gauge", "1 when this node's MCP and web listener is serving the gateway.", l, b2f(r.ServiceUp))
 	}
 	return m.b.String()
-}
-
-// The example Grafana dashboard and Prometheus alert rules (webui/), as downloads for a signed-in user (the links under the
-// Allowed sources list of Configure ▸ Monitoring ▸ Metrics).  They are behind the sign-in, not the metrics access list:
-// that list names the Prometheus server, not the browser.
-func (w *WebServer) handleMetricsFile(file, ctype, download string) func(http.ResponseWriter, *http.Request, *session) {
-	return func(rw http.ResponseWriter, r *http.Request, s *session) {
-		b, err := webFS.ReadFile("webui/" + file)
-		if err != nil {
-			http.NotFound(rw, r)
-			return
-		}
-		rw.Header().Set("Content-Type", ctype)
-		rw.Header().Set("Content-Disposition", `attachment; filename="`+download+`"`)
-		_, _ = rw.Write(b)
-	}
 }

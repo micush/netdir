@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"netdir/internal/core"
+)
 
 // The names set on either node of a real two-node cluster are on both after the nodes have synced, and stay there.
 func TestGatewayNamesSurviveClusterSync(t *testing.T) {
@@ -9,7 +13,7 @@ func TestGatewayNamesSurviveClusterSync(t *testing.T) {
 		t.Helper()
 		dc := n.cfg()
 		if len(dc.Groups) == 0 {
-			dc.Groups = []GroupConfig{defaultGroup()}
+			dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 		}
 		dc.Groups[0].FQDN, dc.Groups[0].AnycastFQDN = fq, any
 		if err := n.mg.PutConfigBase(dc, "test", "names", ""); err != nil {

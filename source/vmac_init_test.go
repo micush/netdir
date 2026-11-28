@@ -1,3 +1,7 @@
 package main
 
-func init() { vmacAutoOff.Store(true) }
+import (
+	"netdir/internal/core"
+)
+
+func init() { core.VmacAutoOff.Store(true) }

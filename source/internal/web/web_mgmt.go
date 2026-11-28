@@ -1,0 +1,286 @@
+package web
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
+	"netdir/internal/devices"
+)
+
+// Web routes for configuration history, the certificate, the cluster and
+// updates.  Each one is a thin wrapper over Mgmt.Op — the same dispatcher the
+// CLI uses — so the two front ends cannot drift apart.
+
+func (w *WebServer) mgmtRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/vmactest", w.authed(w.op("vmac.test", nil)))
+	mux.HandleFunc("POST /api/canvas/edit", w.authed(w.op("canvas.edit", nil))) // as --canvas-*: used by the MCP tools (mcp.go)
+	// configuration history
+	mux.HandleFunc("GET /api/devices/troubleshoot", w.authed(w.op("device.troubleshoot", []string{"user", "host", "hours", "devices", "network", "entra", "meraki", "panorama", "ad", "smax"}))) // a user's devices on the network: MCP device_troubleshoot_user (devtroubleshoot.go)
+	mux.HandleFunc("POST /api/devices/signin", w.authed(w.op("device.signin_start", nil)))                                                                                                       // Entra browser sign-in (devsignin.go)
+	mux.HandleFunc("POST /api/devices/signin/poll", w.authed(w.op("device.signin_poll", nil)))
+	mux.HandleFunc("POST /api/devices/capture", w.authed(w.op("device.capture", nil)))         // packet capture on a device: MCP device_capture (devcapture.go)
+	mux.HandleFunc("POST /api/devices/raw", w.authed(w.op("device.raw", nil)))                 // arbitrary configuration change: MCP device_change_raw (devraw.go)
+	mux.HandleFunc("POST /api/devices/mcp", w.authed(w.op("device.mcp", nil)))                 // any tool of a device's own MCP endpoint: MCP device_mcp, device_mcp_write (devmcp.go)
+	mux.HandleFunc("POST /api/devices/import", w.authed(w.op("device.import_observium", nil))) // devimport.go: GUI and CLI only, not MCP
+	mux.HandleFunc("POST /api/devices/change", w.authed(w.op("device.change", nil)))           // as --device-change: used by the MCP tool device_change (devchange.go)
+	mux.HandleFunc("GET /api/versions", w.authed(w.op("versions.list", nil)))
+	mux.HandleFunc("GET /api/versions/get", w.authed(w.op("versions.get", []string{"id"})))
+	mux.HandleFunc("GET /api/versions/diff", w.authed(w.op("versions.diff", []string{"a", "b"})))
+	mux.HandleFunc("POST /api/versions/snapshot", w.authed(w.op("versions.snapshot", nil)))
+	mux.HandleFunc("POST /api/versions/restore", w.authed(w.op("versions.restore", nil)))
+	mux.HandleFunc("GET /api/versions/download", w.authed(w.handleVersionDownload))
+	mux.HandleFunc("POST /api/versions/upload", w.authed(w.handleVersionUpload))
+	// certificate
+	mux.HandleFunc("GET /api/snmp", w.authed(w.op("snmp.status", nil)))
+	mux.HandleFunc("GET /api/lldp", w.authed(w.op("lldp.status", nil)))
+	mux.HandleFunc("GET /api/tls", w.authed(w.op("tls.status", nil)))
+	mux.HandleFunc("POST /api/tls/install", w.authed(w.op("tls.install", nil)))
+	mux.HandleFunc("POST /api/tls/csr", w.authed(w.op("tls.csr", nil)))
+	mux.HandleFunc("POST /api/tls/csr/cancel", w.authed(w.handleCSRCancel))
+	mux.HandleFunc("POST /api/tls/revert", w.authed(w.op("tls.revert", nil)))
+	mux.HandleFunc("POST /api/tls/regenerate", w.authed(w.op("tls.regenerate", nil)))
+	// cluster
+	mux.HandleFunc("GET /api/cluster", w.authed(w.op("cluster.status", nil)))
+	mux.HandleFunc("POST /api/cluster/token", w.authed(w.op("cluster.token", nil)))
+	mux.HandleFunc("POST /api/cluster/token/clear", w.authed(w.op("cluster.token.clear", nil)))
+	mux.HandleFunc("POST /api/cluster/join", w.authed(w.op("cluster.join", nil)))
+	mux.HandleFunc("POST /api/cluster/promote", w.authed(w.op("cluster.promote", nil)))
+	mux.HandleFunc("POST /api/cluster/peers/remove", w.authed(w.op("cluster.remove", nil)))
+	mux.HandleFunc("POST /api/cluster/peers/delete", w.authed(w.op("cluster.delete", nil)))
+	mux.HandleFunc("POST /api/cluster/peers/unremove", w.authed(w.op("cluster.unremove", nil)))
+	mux.HandleFunc("POST /api/cluster/leave", w.authed(w.op("cluster.leave", nil)))
+	mux.HandleFunc("POST /api/cluster/sync", w.authed(w.op("cluster.sync", nil)))
+	w.registerCapture(mux)
+	// updates
+	mux.HandleFunc("GET /api/bgp", w.authed(w.op("bgp.status", nil)))
+	mux.HandleFunc("PUT /api/bgp", w.authed(w.op("bgp.set", nil)))
+	mux.HandleFunc("POST /api/bgp/operate", w.authed(w.op("bgp.operate", nil)))
+	mux.HandleFunc("GET /api/ospf", w.authed(w.op("ospf.status", nil)))
+	mux.HandleFunc("PUT /api/ospf", w.authed(w.op("ospf.set", nil)))
+	mux.HandleFunc("POST /api/ospf/operate", w.authed(w.op("ospf.operate", nil)))
+	mux.HandleFunc("GET /api/syslog", w.authed(w.op("syslog.status", nil)))
+	mux.HandleFunc("POST /api/syslog/test", w.authed(w.op("syslog.test", nil)))
+	mux.HandleFunc("GET /api/dnsreg", w.authed(w.op("dnsreg.status", nil)))
+	mux.HandleFunc("POST /api/dnsreg/now", w.authed(w.op("dnsreg.now", nil)))
+	mux.HandleFunc("POST /api/dnsreg/remove", w.authed(w.op("dnsreg.remove", nil)))
+	mux.HandleFunc("GET /api/devices/health", w.authed(w.handleDeviceHealth))    // the primary's device checks, asked by the other nodes (devicehealth.go)
+	mux.HandleFunc("POST /api/devices/recheck", w.authed(w.HandleDeviceRecheck)) // ask one device again now (devicehealth.go): right-click ▸ Network tools ▸ Recheck
+	mux.HandleFunc("GET /api/mcpusage", w.authed(w.handleMCPUsage))              // what the MCP endpoint is used for: Monitor ▸ MCP (mcpusage.go)
+	mux.HandleFunc("GET /api/log", w.authed(w.op("log.view", []string{"level", "q", "since", "n"})))
+	mux.HandleFunc("GET /api/host", w.authed(w.op("host.get", []string{"from", "to"})))
+	mux.HandleFunc("GET /api/dnslookup/full", w.authed(w.op("dns.lookup.full", []string{"lookup"})))
+	mux.HandleFunc("GET /api/backup", w.authed(w.op("backup.status", nil)))
+	mux.HandleFunc("POST /api/backup/run", w.authed(w.op("backup.run", nil)))
+	mux.HandleFunc("POST /api/backup/test", w.authed(w.op("backup.test", nil)))
+	mux.HandleFunc("POST /api/backup/install", w.authed(w.op("backup.install", nil)))
+	mux.HandleFunc("POST /api/backup/files", w.authed(w.op("backup.files", nil)))
+	mux.HandleFunc("POST /api/backup/cluster", w.authed(w.op("backup.cluster", nil)))
+	mux.HandleFunc("POST /api/backup/provision", w.authed(w.op("backup.provision", nil)))
+	mux.HandleFunc("POST /api/backup/upload", w.authedCT(w.handleBackupUpload, false))
+	mux.HandleFunc("POST /api/backup/restore/prepare", w.authed(w.op("backup.restore.prepare", nil)))
+	mux.HandleFunc("POST /api/backup/restore/apply", w.authed(w.op("backup.restore.apply", nil)))
+	mux.HandleFunc("POST /api/backup/restore/cancel", w.authed(w.op("backup.restore.cancel", nil)))
+	mux.HandleFunc("GET /api/alerts", w.authed(w.op("alerts.list", nil)))
+	mux.HandleFunc("POST /api/alerts/ack", w.authed(w.op("alerts.ack", nil)))
+	mux.HandleFunc("POST /api/alerts/silence", w.authed(w.op("alerts.silence", nil)))
+	mux.HandleFunc("POST /api/alerts/resolve", w.authed(w.op("alerts.resolve", nil)))
+	mux.HandleFunc("POST /api/alerts/fix", w.authed(w.op("alerts.fix", nil)))
+	mux.HandleFunc("POST /api/alerts/test", w.authed(w.op("alerts.test", nil)))
+	mux.HandleFunc("GET /api/schedule", w.authed(w.op("schedule.status", nil)))
+	mux.HandleFunc("POST /api/schedule/task", w.authed(w.op("schedule.set", nil)))
+	mux.HandleFunc("POST /api/schedule/delete", w.authed(w.op("schedule.del", nil)))
+	mux.HandleFunc("POST /api/schedule/run", w.authed(w.op("schedule.run", nil)))
+	mux.HandleFunc("GET /api/hostlookup", w.authed(w.op("host.lookup", []string{"lookup"})))
+	mux.HandleFunc("GET /api/whois", w.authed(w.op("whois.get", []string{"lookup"})))
+	mux.HandleFunc("GET /api/curl", w.authed(w.op("curl.get", []string{"lookup", "method", "follow", "insecure"}))) // MCP net_curl (curl.go)
+	mux.HandleFunc("GET /api/dig", w.authed(w.op("dig.get", []string{"name", "type", "server"})))                   // MCP net_dig (dig.go)
+	mux.HandleFunc("POST /api/scan", w.authed(w.op("scan.start", nil)))
+	mux.HandleFunc("GET /api/scan", w.authed(w.op("scan.get", []string{"client", "ports"})))
+	mux.HandleFunc("POST /api/nettool", w.authed(w.op("nettool.start", nil)))
+	mux.HandleFunc("GET /api/nettool", w.authed(w.op("nettool.get", []string{"kind", "client", "count", "size", "df", "family"})))
+	mux.HandleFunc("GET /api/portcheck", w.authed(w.op("portcheck.get", []string{"client", "ports", "family"})))     // MCP net_port (netprobe.go)
+	mux.HandleFunc("GET /api/tlscheck", w.authed(w.op("tlscheck.get", []string{"client", "port", "sni", "family"}))) // MCP net_tls
+	mux.HandleFunc("GET /api/arp", w.authed(w.op("arp.get", []string{"ip"})))                                        // MCP net_arp
+	mux.HandleFunc("POST /api/wake", w.authed(w.op("wake.send", nil)))                                               // MCP net_wake (needs a read-write key)
+	// the whole cluster's numbers added together (not relayable: the node asked does the asking of the others)
+	mux.HandleFunc("GET /api/clusterhost", w.authed(w.op("host.cluster", []string{"gw", "from", "to"})))
+	mux.HandleFunc("GET /api/nodepause", w.authed(w.op("node.status", nil)))
+	mux.HandleFunc("POST /api/nodepause", w.authed(w.op("node.pause", nil)))
+	mux.HandleFunc("POST /api/noderename", w.authed(w.op("node.rename", nil)))
+	mux.HandleFunc("GET /api/users", w.authed(w.op("users.list", nil)))
+	mux.HandleFunc("POST /api/users/add", w.authed(w.op("users.add", nil)))
+	mux.HandleFunc("POST /api/users/password", w.authed(w.op("users.password", nil)))
+	mux.HandleFunc("POST /api/users/expiry", w.authed(w.op("users.expiry", nil)))
+	mux.HandleFunc("POST /api/users/delete", w.authed(w.op("users.delete", nil)))
+	mux.HandleFunc("POST /api/users/grant", w.authed(w.op("users.grant", nil)))
+	mux.HandleFunc("POST /api/users/access", w.authed(w.op("users.access", nil)))
+	mux.HandleFunc("POST /api/users/revoke", w.authed(w.op("users.revoke", nil)))
+	mux.HandleFunc("GET /api/power", w.authed(w.op("power.status", nil)))
+	mux.HandleFunc("POST /api/power", w.authed(w.op("power.do", nil)))
+	mux.HandleFunc("GET /api/update", w.authed(w.op("update.status", nil)))
+	mux.HandleFunc("GET /api/update/history", w.authed(w.op("update.history", nil)))
+	mux.HandleFunc("POST /api/update/upload", w.authedCT(w.handleUpdateUpload, false))
+	mux.HandleFunc("POST /api/update/fetch", w.authedCT(w.handleUpdateFetch, false))
+	mux.HandleFunc("POST /api/update/apply", w.authed(w.op("update.apply", nil)))
+	mux.HandleFunc("POST /api/update/push", w.authed(w.op("update.push", nil)))
+	mux.HandleFunc("POST /api/update/cancel", w.authed(w.op("update.cancel", nil)))
+	mux.HandleFunc("POST /api/update/auto", w.authed(w.op("update.auto", nil)))
+	mux.HandleFunc("POST /api/update/repo", w.authed(w.op("update.repo", nil)))
+}
+
+// op adapts a Mgmt.Op command to an HTTP handler.  GET handlers take their
+// arguments from the listed query parameters, POST handlers from the JSON body.
+func (w *WebServer) op(cmd string, query []string) func(http.ResponseWriter, *http.Request, *core.Session) {
+	return func(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+		var args json.RawMessage
+		switch {
+		case r.Method == http.MethodGet:
+			m := map[string]string{}
+			for _, q := range query {
+				m[q] = r.URL.Query().Get(q)
+			}
+			args, _ = json.Marshal(m)
+		case r.ContentLength != 0:
+			body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, maxBody))
+			if err != nil {
+				core.JsonError(rw, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			}
+			args = body
+		}
+		if cmd == "versions.restore" || cmd == "cluster.promote" || cmd == "cluster.leave" || cmd == "cluster.join" || cmd == "update.apply" || cmd == "power.do" || cmd == "node.pause" || cmd == "node.rename" || cmd == "schedule.run" || cmd == "schedule.set" || cmd == "schedule.del" || strings.HasPrefix(cmd, "users.") && cmd != "users.list" {
+			core.Warnf("web: %q ran %s (from %s)", s.User, cmd, core.ClientIP(r))
+		}
+		data, err := w.Mg.Op(cmd, args, s.User)
+		if err != nil {
+			code := http.StatusUnprocessableEntity
+			if errors.Is(err, cluster.ErrNoVersion) {
+				code = http.StatusNotFound
+			}
+			core.JsonError(rw, code, err.Error())
+			return
+		}
+		if v, ok := data.(core.AlertView); ok && cmd == "alerts.list" {
+			data = w.scopeAlerts(devices.ScopeOf(s), v)
+		}
+		core.WriteJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": data})
+	}
+}
+
+// scopeAlerts drops the alerts about a gateway or a device the caller may not see (devscope.go); the other alerts stay.
+func (w *WebServer) scopeAlerts(sc *core.DevScope, v core.AlertView) core.AlertView {
+	if !sc.Limited() {
+		return v
+	}
+	tags := map[string][]string{}
+	if devs, err := w.Status.Sup().DeviceInventory(); err == nil {
+		for _, d := range devs {
+			tags[d.Name] = d.Tags
+		}
+	}
+	keep := func(in []core.Alert) []core.Alert {
+		out := make([]core.Alert, 0, len(in))
+		for _, al := range in {
+			d, _ := core.AlertDefByID(al.Rule)
+			switch d.Subject {
+			case "gateway":
+				if n, ok := devices.AlertSubjectGateway(al.Subject); ok && !sc.AllowsGateway(n) {
+					continue
+				}
+			case "device":
+				if !sc.Allows(al.Subject, tags[al.Subject]) {
+					continue
+				}
+			}
+			out = append(out, al)
+		}
+		return out
+	}
+	v.Alerts = keep(v.Alerts)
+	return v
+}
+
+func (w *WebServer) handleCSRCancel(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+	w.Mg.Certs().CancelCSR()
+	core.WriteJSON(rw, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleVersionDownload serves one version (or the live config) as a file
+// that can be uploaded again.
+func (w *WebServer) handleVersionDownload(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+	id := r.URL.Query().Get("id")
+	meta, cfg, err := w.Mg.VersionGet(id)
+	if err != nil {
+		code := http.StatusUnprocessableEntity
+		if errors.Is(err, cluster.ErrNoVersion) {
+			code = http.StatusNotFound
+		}
+		core.JsonError(rw, code, err.Error())
+		return
+	}
+	name := "netdir-config-" + meta.ID + ".json"
+	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	rw.Write(append([]byte(cfg), '\n'))
+}
+
+func (w *WebServer) handleVersionUpload(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+	var req struct {
+		Config json.RawMessage `json:"config"`
+		Note   string          `json:"note"`
+	}
+	if !core.ReadJSON(rw, r, maxBody, &req) {
+		return
+	}
+	if len(req.Config) == 0 {
+		core.JsonError(rw, http.StatusBadRequest, "missing \"config\"")
+		return
+	}
+	core.Warnf("web: %q imported a configuration (from %s)", s.User, core.ClientIP(r))
+	dc, err := w.Mg.ConfigImport(req.Config, s.User, req.Note)
+	if err != nil {
+		core.JsonError(rw, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	core.WriteJSON(rw, http.StatusOK, map[string]any{"ok": true, "config": dc})
+}
+
+func (w *WebServer) handleUpdateUpload(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+	body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, core.MaxUploadBytes))
+	if err != nil {
+		core.JsonError(rw, http.StatusRequestEntityTooLarge, "upload too large (limit "+strconv.Itoa(core.MaxUploadBytes>>20)+" MB)")
+		return
+	}
+	core.Warnf("web: %q uploaded a release archive (%d bytes, from %s)", s.User, len(body), core.ClientIP(r))
+	ver, err := w.Mg.UpdateUpload(body, s.User)
+	if err != nil {
+		core.JsonError(rw, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	core.WriteJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"version": ver}})
+}
+
+// handleBackupUpload keeps a backup file the operator picked in the browser until the restore is prepared from it.
+func (w *WebServer) handleBackupUpload(rw http.ResponseWriter, r *http.Request, s *core.Session) {
+	body, err := io.ReadAll(http.MaxBytesReader(rw, r.Body, core.MaxUploadBytes))
+	if err != nil {
+		core.JsonError(rw, http.StatusRequestEntityTooLarge, "upload too large (limit "+strconv.Itoa(core.MaxUploadBytes>>20)+" MB)")
+		return
+	}
+	if w.Mg.Backup() == nil {
+		core.JsonError(rw, http.StatusUnprocessableEntity, "backups are not available on this node")
+		return
+	}
+	core.Warnf("web: %q uploaded a backup file (%d bytes, from %s)", s.User, len(body), core.ClientIP(r))
+	if err := w.Mg.Backup().SaveUpload(body); err != nil {
+		core.JsonError(rw, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	core.WriteJSON(rw, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"bytes": len(body)}})
+}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // runLLDP is the --lldp family:
@@ -13,27 +15,27 @@ import (
 //	--lldp-enable | --lldp-disable  switch LLDP on or off for the whole cluster (shared setting)
 func runLLDP(sock string, f *cliFlags) {
 	if *f.lldpOn && *f.lldpOff {
-		fatalf("--lldp-enable and --lldp-disable cannot be used together")
+		core.Fatalf("--lldp-enable and --lldp-disable cannot be used together")
 	}
 	if *f.lldpOn || *f.lldpOff {
-		op(sock, "lldp.set", map[string]any{"enabled": *f.lldpOn})
+		core.Op(sock, "lldp.set", map[string]any{"enabled": *f.lldpOn})
 		fmt.Println("LLDP is now", map[bool]string{true: "ON on every node of the cluster", false: "off"}[*f.lldpOn])
 		if !*f.lldpOn {
 			return
 		}
 	}
-	var st LLDPStatus
-	decode(op(sock, "lldp.status", nil), &st)
+	var st core.LLDPStatus
+	core.Decode(core.Op(sock, "lldp.status", nil), &st)
 	// just switched on: the daemon starts lldpd once it has reloaded the configuration, a moment later
 	for i := 0; *f.lldpOn && i < 20 && st.Installed && !st.Running && !st.Deferred; i++ {
 		time.Sleep(250 * time.Millisecond)
-		decode(op(sock, "lldp.status", nil), &st)
+		core.Decode(core.Op(sock, "lldp.status", nil), &st)
 	}
 	fmt.Print(lldpStatusText(st))
 }
 
 // lldpStatusText is the --lldp report.
-func lldpStatusText(st LLDPStatus) string {
+func lldpStatusText(st core.LLDPStatus) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "LLDP: %s (shared setting)\n", map[bool]string{true: "on", false: "off"}[st.Enabled])
 	fmt.Fprintf(&b, "lldpd on this node: %s\n", lldpStateWords(st))
@@ -67,7 +69,7 @@ func lldpStatusText(st LLDPStatus) string {
 }
 
 // lldpStateWords says in a few words what lldpd is doing here, as the GUI does.
-func lldpStateWords(st LLDPStatus) string {
+func lldpStateWords(st core.LLDPStatus) string {
 	switch {
 	case !st.Installed:
 		return "not installed (install the lldpd package; on RHEL, Rocky and Alma it is in EPEL)"

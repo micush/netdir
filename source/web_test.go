@@ -16,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/mcp"
+	"netdir/internal/web"
 )
 
 // fakeAuth: user "alice"/"pw" is in the group, "bob"/"pw" authenticates but is not.
@@ -45,7 +49,7 @@ func (f *fakeAuth) InGroup(user, group string) (bool, error) {
 type webEnv struct {
 	t       *testing.T
 	ts      *httptest.Server
-	ws      *WebServer
+	ws      *web.WebServer
 	mg      *Mgmt
 	auth    *fakeAuth
 	conf    string
@@ -56,11 +60,11 @@ type webEnv struct {
 
 func newWebEnv(t *testing.T) *webEnv {
 	t.Helper()
-	failDelay = time.Millisecond
+	web.FailDelay = time.Millisecond
 	e := &webEnv{t: t, auth: &fakeAuth{}}
 	dir := t.TempDir()
 	e.conf = filepath.Join(dir, "netdir.conf")
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Cluster.Enabled = false
 	mg, err := NewMgmt(e.conf, filepath.Join(dir, "state"), dc)
 	if err != nil {
@@ -68,7 +72,7 @@ func newWebEnv(t *testing.T) *webEnv {
 	}
 	mg.reloadFn = func() error {
 		e.reloads.Add(1)
-		nu, err := loadConfig(e.conf)
+		nu, err := core.LoadConfig(e.conf)
 		if err != nil {
 			return err
 		}
@@ -76,10 +80,11 @@ func newWebEnv(t *testing.T) *webEnv {
 		return nil
 	}
 	e.mg = mg
-	sup := NewSupervisor(context.Background(), newDaemonConfig())
+	sup := core.NewSupervisor(context.Background(), core.NewDaemonConfig())
 	st := NewStatusServer("", sup)
 	st.mg = mg
-	e.ws = NewWebServer(mg, st, e.auth)
+	e.ws = web.NewWebServer(mg, st, e.auth)
+	mcp.NewMCPListeners(e.ws)
 	e.ts = httptest.NewServer(e.ws.Handler())
 	t.Cleanup(e.ts.Close)
 	// A bare client that keeps cookies by hand: the Secure cookie would be
@@ -127,7 +132,7 @@ func (e *webEnv) login(user, pass string) resp {
 	cookie, e.csrf = "", ""
 	if r.code == 200 {
 		for _, c := range (&http.Response{Header: r.hdr}).Cookies() {
-			if c.Name == sessionCookie {
+			if c.Name == web.SessionCookie {
 				cookie = c.Name + "=" + c.Value
 				if !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteStrictMode {
 					e.t.Fatalf("session cookie flags wrong: %+v", c)
@@ -152,9 +157,9 @@ func withAuth(e *webEnv, csrf bool) func(*http.Request) {
 
 func TestLoginRules(t *testing.T) {
 	e := newWebEnv(t)
-	p := defaultWeb()
+	p := core.DefaultWeb()
 	p.MaxFailedLogins = 20 // this test is about the messages, not the lockout
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	for _, c := range []struct{ u, p string }{{"alice", "wrong"}, {"bob", "pw"}, {"nobody", "pw"}, {"", "pw"}} { // stay under the lockout threshold
 		r := e.login(c.u, c.p)
 		if r.code != http.StatusUnauthorized {
@@ -169,7 +174,7 @@ func TestLoginRules(t *testing.T) {
 		}
 	}
 	// bob authenticated in PAM but is not in the netdir group → still refused
-	if r := e.login("alice", "pw"); r.code != 200 || r.body["user"] != "alice" || r.body["version"] != version() {
+	if r := e.login("alice", "pw"); r.code != 200 || r.body["user"] != "alice" || r.body["version"] != core.Version() {
 		t.Fatalf("alice login: %d %v", r.code, r.body)
 	}
 }
@@ -214,22 +219,22 @@ func TestLogoutInvalidatesSession(t *testing.T) {
 func TestSessionIdleTimeoutAndGroupRevocation(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	e.ws.mu.Lock()
-	for _, s := range e.ws.sessions {
-		s.last = time.Now().Add(-time.Hour)
+	e.ws.Mu.Lock()
+	for _, s := range e.ws.Sessions {
+		s.Last = time.Now().Add(-time.Hour)
 	}
-	e.ws.mu.Unlock()
+	e.ws.Mu.Unlock()
 	if r := e.do("GET", "/api/session", nil, withAuth(e, false)); r.code != 401 {
 		t.Fatal("idle session not expired")
 	}
 
 	e.login("alice", "pw")
 	e.auth.removed.Store(true) // alice leaves the netdir group
-	e.ws.mu.Lock()
-	for _, s := range e.ws.sessions {
-		s.checked = time.Now().Add(-time.Hour) // force the periodic re-check
+	e.ws.Mu.Lock()
+	for _, s := range e.ws.Sessions {
+		s.Checked = time.Now().Add(-time.Hour) // force the periodic re-check
 	}
-	e.ws.mu.Unlock()
+	e.ws.Mu.Unlock()
 	if r := e.do("GET", "/api/session", nil, withAuth(e, false)); r.code != 401 {
 		t.Fatal("session survived group removal")
 	}
@@ -237,7 +242,7 @@ func TestSessionIdleTimeoutAndGroupRevocation(t *testing.T) {
 
 func TestLoginThrottle(t *testing.T) {
 	e := newWebEnv(t)
-	max := defaultWeb().MaxFailedLogins // 3 attempts, 1 minute window, 15 minute lockout
+	max := core.DefaultWeb().MaxFailedLogins // 3 attempts, 1 minute window, 15 minute lockout
 	for i := 1; i < max; i++ {
 		r := e.login("alice", "nope")
 		// a guesser is not told how many tries it has left, nor what the policy is, nor which group is needed
@@ -278,9 +283,9 @@ func TestLoginThrottle(t *testing.T) {
 
 func TestLoginThrottleUsesConfiguredPolicy(t *testing.T) {
 	e := newWebEnv(t)
-	p := defaultWeb()
+	p := core.DefaultWeb()
 	p.MaxFailedLogins, p.LockoutMinutes = 1, 2
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	r := e.login("bob", "nope")
 	if ra, _ := r.body["retry_after"].(float64); r.code != http.StatusTooManyRequests || ra < 119 || ra > 121 {
 		t.Fatalf("one allowed failure, two minute lockout: %d %v", r.code, r.body)
@@ -296,7 +301,7 @@ func TestSecurityHeadersAndStatic(t *testing.T) {
 	}
 	defer res.Body.Close()
 	page, _ := io.ReadAll(res.Body)
-	if res.StatusCode != 200 || !bytes.Contains(page, []byte("/app.js")) {
+	if res.StatusCode != 200 || !bytes.Contains(page, []byte("/app/core.js")) {
 		t.Fatalf("index: %d", res.StatusCode)
 	}
 	csp := res.Header.Get("Content-Security-Policy")
@@ -311,20 +316,23 @@ func TestSecurityHeadersAndStatic(t *testing.T) {
 	if bytes.Contains(page, []byte("<script>")) || bytes.Contains(page, []byte(" onclick=")) {
 		t.Fatal("inline script in index.html would violate the CSP")
 	}
-	for _, p := range []string{"/app.js", "/style.css"} {
+	for _, p := range []string{"/app/core.js", "/app/settings.js", "/app/boot.js", "/style.css"} {
 		r, _ := http.Get(e.ts.URL + p)
 		b, _ := io.ReadAll(r.Body)
 		r.Body.Close()
-		if r.StatusCode != 200 || len(b) < 500 {
+		if r.StatusCode != 200 || len(b) < 200 {
 			t.Fatalf("%s: %d len=%d", p, r.StatusCode, len(b))
 		}
 	}
-	// app.js knows the version of the daemon that served it, so an open page can tell an upgrade happened
-	if r, _ := http.Get(e.ts.URL + "/app.js"); r != nil {
+	if r, _ := http.Get(e.ts.URL + "/app/nope.js"); r == nil || r.StatusCode != http.StatusNotFound {
+		t.Fatal("a script that is not there must be 404")
+	}
+	// the GUI knows the version of the daemon that served it, so an open page can tell an upgrade happened
+	if r, _ := http.Get(e.ts.URL + "/app/core.js"); r != nil {
 		b, _ := io.ReadAll(r.Body)
 		r.Body.Close()
-		if bytes.Contains(b, []byte("@@BUILD@@")) || !bytes.Contains(b, []byte(`const BUILD = "`+version()+`";`)) {
-			t.Fatal("app.js does not carry the daemon's version")
+		if bytes.Contains(b, []byte("@@BUILD@@")) || !bytes.Contains(b, []byte(`const BUILD = "`+core.Version()+`";`)) {
+			t.Fatal("app/core.js does not carry the daemon's version")
 		}
 	}
 	// the stylesheet must follow the system theme
@@ -339,51 +347,14 @@ func TestSecurityHeadersAndStatic(t *testing.T) {
 	}
 }
 
-func TestWebConfigValidation(t *testing.T) {
-	ok := defaultWeb()
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if ok.Listen != ":22161" || ok.Group != "netdir,netdir-users" || ok.PAMService != "netdir" || ok.MaxFailedLogins != 3 || ok.FailedLoginWindowMinutes != 1 || ok.LockoutMinutes != 15 {
-		t.Fatalf("defaults wrong: %+v", ok)
-	}
-	for name, mod := range map[string]func(*WebConfig){
-		"bad listen":   func(w *WebConfig) { w.Listen = "22161" },
-		"bad port":     func(w *WebConfig) { w.Listen = ":99999" },
-		"cert w/o key": func(w *WebConfig) { w.CertFile = "/x.crt" },
-		"empty group":  func(w *WebConfig) { w.Group = "" },
-		"zero idle":    func(w *WebConfig) { w.SessionIdleMinutes = 0 },
-		"zero tries":   func(w *WebConfig) { w.MaxFailedLogins = 0 },
-		"zero window":  func(w *WebConfig) { w.FailedLoginWindowMinutes = 0 },
-		"zero lockout": func(w *WebConfig) { w.LockoutMinutes = 0 },
-	} {
-		w := defaultWeb()
-		mod(&w)
-		if w.Validate() == nil {
-			t.Fatalf("%s accepted", name)
-		}
-	}
-	// the old "enabled" key still loads (the GUI is always on) and is dropped
-	var legacy WebConfig
-	if err := json.Unmarshal([]byte(`{"enabled": false, "listen": ":1234"}`), &legacy); err != nil {
-		t.Fatalf("old config with web.enabled must still load: %v", err)
-	}
-	if legacy.Listen != ":1234" || legacy.LegacyEnabled != nil {
-		t.Fatalf("legacy load: %+v", legacy)
-	}
-	if b, _ := json.Marshal(legacy); strings.Contains(string(b), `"enabled"`) {
-		t.Fatalf("enabled must not be written back: %s", b)
-	}
-}
-
 // End to end over real TLS with a self-signed certificate generated into the
 // config directory.  Skipped where PAM is unavailable (non-cgo builds).
 func TestHTTPSListenerSelfSigned(t *testing.T) {
-	if !pamAvailable {
+	if !core.PamAvailable {
 		t.Skip("built without PAM")
 	}
 	e := newWebEnv(t)
-	cfg := defaultWeb()
+	cfg := core.DefaultWeb()
 	cfg.Listen = "127.0.0.1:0"
 	// pick a free port first, since Apply takes an address
 	ln, err := newLocalListener()
@@ -429,11 +400,11 @@ func TestSessionsSurviveARestart(t *testing.T) {
 	if r := e.login("alice", "pw"); r.code != 200 {
 		t.Fatalf("login: %d", r.code)
 	}
-	tok := strings.TrimPrefix(cookie, sessionCookie+"=")
+	tok := strings.TrimPrefix(cookie, web.SessionCookie+"=")
 	if tok == "" {
 		t.Fatal("no session cookie")
 	}
-	f := filepath.Join(e.ws.stateDir, sessionsFile)
+	f := filepath.Join(e.ws.StateDir, core.SessionsFile)
 	b, err := os.ReadFile(f)
 	if err != nil {
 		t.Fatal(err)
@@ -445,10 +416,11 @@ func TestSessionsSurviveARestart(t *testing.T) {
 		t.Fatalf("sessions file mode %v", fi.Mode())
 	}
 	// a new process: a fresh WebServer over the same state dir
-	ws2 := NewWebServer(e.mg, nil, e.auth)
+	ws2 := web.NewWebServer(e.mg, nil, e.auth)
+	mcp.NewMCPListeners(ws2)
 	r := httptest.NewRequest("GET", "/api/session", nil)
-	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: tok})
-	if ws2.lookup(r) == nil {
+	r.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: tok})
+	if ws2.Lookup(r) == nil {
 		t.Fatal("the session did not survive the restart")
 	}
 	// a stopping daemon leaves the file alone
@@ -469,7 +441,7 @@ func TestSessionsSurviveARestart(t *testing.T) {
 func TestConfigSaveNeverChangesTheNodePause(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	b, _ := json.Marshal(defaultGroup())
+	b, _ := json.Marshal(core.DefaultGroup())
 	var g map[string]any
 	_ = json.Unmarshal(b, &g)
 	cfg := map[string]any{"groups": []any{g}}
@@ -514,7 +486,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 	}
 	cfg := r.body["config"].(map[string]any)
 	if g, _ := cfg["groups"].([]any); len(g) == 0 { // no file yet means no gateways; give the test one to edit
-		b, _ := json.Marshal(defaultGroup())
+		b, _ := json.Marshal(core.DefaultGroup())
 		var m map[string]any
 		_ = json.Unmarshal(b, &m)
 		cfg["groups"] = []any{m}
@@ -568,7 +540,7 @@ func TestConfigGetPutValidateAndSave(t *testing.T) {
 	if err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("saved file: %v %v", err, st)
 	}
-	dc, err := loadConfig(e.conf)
+	dc, err := core.LoadConfig(e.conf)
 	if err != nil || dc.Groups[0].VIP4 != "10.9.0.1/24" ||
 		dc.Settings.MetricsACL[0] != "10.0.0.123" {
 		t.Fatalf("saved content wrong: %v %+v", err, dc)

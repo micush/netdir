@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"netdir/internal/core"
 )
 
 // runBGP is the --bgp family:
@@ -15,8 +17,8 @@ import (
 //	--bgp-disable | --bgp-enable            stop / restart BGP on this node, keeping the settings
 //	--bgp-neighbor-disable ADDR | --bgp-neighbor-enable ADDR   shut one neighbor down / bring it back
 func runBGP(sock string, f *cliFlags) {
-	var st BGPStatus
-	decode(op(sock, "bgp.status", nil), &st)
+	var st core.BGPStatus
+	core.Decode(core.Op(sock, "bgp.status", nil), &st)
 	changed := false
 	c := st.Config
 
@@ -26,7 +28,7 @@ func runBGP(sock string, f *cliFlags) {
 		} else {
 			n, err := strconv.ParseUint(*f.asn, 10, 32)
 			if err != nil || n == 0 {
-				fatalf("--asn must be a number from 1 to 4294967295, or off")
+				core.Fatalf("--asn must be a number from 1 to 4294967295, or off")
 			}
 			c.ASN = uint32(n)
 		}
@@ -34,7 +36,7 @@ func runBGP(sock string, f *cliFlags) {
 	}
 	if *f.routerID != "" {
 		if *f.routerID != "-" && c.ASN == 0 {
-			fatalf("--router-id needs a local AS number: give --asn N too (or set it first)")
+			core.Fatalf("--router-id needs a local AS number: give --asn N too (or set it first)")
 		}
 		if *f.routerID == "-" {
 			c.RouterID = ""
@@ -50,7 +52,7 @@ func runBGP(sock string, f *cliFlags) {
 		case "no", "off", "false":
 			c.BFDOff = true
 		default:
-			fatalf("--bfd takes yes or no")
+			core.Fatalf("--bfd takes yes or no")
 		}
 		changed = true
 	}
@@ -62,8 +64,8 @@ func runBGP(sock string, f *cliFlags) {
 			c.ASPrepend = 0
 		default:
 			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 || n > bgpPrependMax {
-				fatalf("--as-prepend takes 0 (none) to %d: how many more times the local AS goes on every announcement", bgpPrependMax)
+			if err != nil || n < 0 || n > core.BgpPrependMax {
+				core.Fatalf("--as-prepend takes 0 (none) to %d: how many more times the local AS goes on every announcement", core.BgpPrependMax)
 			}
 			c.ASPrepend = n
 		}
@@ -79,23 +81,23 @@ func runBGP(sock string, f *cliFlags) {
 		if t.flag == "-" {
 			*t.dst = 0
 		} else if v, err := strconv.Atoi(t.flag); err != nil || v < 1 {
-			fatalf("--%s must be a number of seconds, or - for the default", t.name)
+			core.Fatalf("--%s must be a number of seconds, or - for the default", t.name)
 		} else {
 			*t.dst = v
 		}
 		changed = true
 	}
 	if *f.nbrAdd != "" {
-		n := BGPNeighbor{Peer: *f.nbrAdd, Description: *f.descr, Password: *f.passwd}
+		n := core.BGPNeighbor{Peer: *f.nbrAdd, Description: *f.descr, Password: *f.passwd}
 		as, err := strconv.ParseUint(*f.remoteAS, 10, 32)
 		if err != nil || as == 0 {
-			fatalf("--bgp-neighbor-add needs --remote-as N (the neighbor's AS number)")
+			core.Fatalf("--bgp-neighbor-add needs --remote-as N (the neighbor's AS number)")
 		}
 		n.RemoteAS = uint32(as)
 		if *f.multihop != "" {
 			mh, err := strconv.Atoi(*f.multihop)
 			if err != nil || mh < 1 || mh > 255 {
-				fatalf("--multihop must be a number from 2 to 255 (1 or empty: directly connected)")
+				core.Fatalf("--multihop must be a number from 2 to 255 (1 or empty: directly connected)")
 			}
 			n.Multihop = mh
 		}
@@ -113,40 +115,40 @@ func runBGP(sock string, f *cliFlags) {
 			kept = append(kept, n)
 		}
 		if !found {
-			fatalf("there is no BGP neighbor %s (see --bgp)", *f.nbrDel)
+			core.Fatalf("there is no BGP neighbor %s (see --bgp)", *f.nbrDel)
 		}
 		c.Neighbors, changed = kept, true
 	}
 	if changed {
-		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
-		decode(op(sock, "bgp.set", c), &st)
+		st = core.BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
+		core.Decode(core.Op(sock, "bgp.set", c), &st)
 	}
 	// switching things on and off (Operate ▸ Anycast) is separate from the settings
 	switch {
 	case *f.bgpDisable && *f.bgpEnable:
-		fatalf("--bgp-disable and --bgp-enable cannot be used together")
+		core.Fatalf("--bgp-disable and --bgp-enable cannot be used together")
 	case *f.bgpDisable:
-		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
-		decode(op(sock, "bgp.operate", BGPOperateArgs{Enabled: false}), &st)
+		st = core.BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
+		core.Decode(core.Op(sock, "bgp.operate", core.BGPOperateArgs{Enabled: false}), &st)
 	case *f.bgpEnable:
-		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
-		decode(op(sock, "bgp.operate", BGPOperateArgs{Enabled: true}), &st)
+		st = core.BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
+		core.Decode(core.Op(sock, "bgp.operate", core.BGPOperateArgs{Enabled: true}), &st)
 	}
 	if *f.nbrDisable != "" && *f.nbrEnable != "" {
-		fatalf("--bgp-neighbor-disable and --bgp-neighbor-enable cannot be used together")
+		core.Fatalf("--bgp-neighbor-disable and --bgp-neighbor-enable cannot be used together")
 	}
 	if *f.nbrDisable != "" {
-		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
-		decode(op(sock, "bgp.operate", BGPOperateArgs{Peer: *f.nbrDisable, Enabled: false}), &st)
+		st = core.BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
+		core.Decode(core.Op(sock, "bgp.operate", core.BGPOperateArgs{Peer: *f.nbrDisable, Enabled: false}), &st)
 	}
 	if *f.nbrEnable != "" {
-		st = BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
-		decode(op(sock, "bgp.operate", BGPOperateArgs{Peer: *f.nbrEnable, Enabled: true}), &st)
+		st = core.BGPStatus{} // a fresh answer: a field it leaves out (omitempty) must not keep the old value
+		core.Decode(core.Op(sock, "bgp.operate", core.BGPOperateArgs{Peer: *f.nbrEnable, Enabled: true}), &st)
 	}
 	printBGP(st)
 }
 
-func printBGP(st BGPStatus) {
+func printBGP(st core.BGPStatus) {
 	c := st.Config
 	if st.Blocked != "" {
 		fmt.Printf("BGP is unavailable: %s.\n", st.Blocked)
@@ -168,7 +170,7 @@ func printBGP(st BGPStatus) {
 		}
 		return
 	}
-	rid := orDefault(c.RouterID, "chosen by FRR")
+	rid := core.OrDefault(c.RouterID, "chosen by FRR")
 	fmt.Printf("BGP is on: AS %d, router id %s, %s\n", c.ASN, rid, map[bool]string{false: "BFD on every neighbor", true: "BFD off"}[c.BFDOff])
 	if c.ASPrepend > 0 {
 		fmt.Printf("  AS path prepend: %d (the local AS %d that many more times on every announcement)\n", c.ASPrepend, c.ASN)
@@ -185,13 +187,13 @@ func printBGP(st BGPStatus) {
 		if a.Up {
 			fmt.Printf("  announced  %s\n", a.Addr)
 		} else {
-			fmt.Printf("  withdrawn  %s  (%s)\n", a.Addr, orDefault(a.Reason, "not held"))
+			fmt.Printf("  withdrawn  %s  (%s)\n", a.Addr, core.OrDefault(a.Reason, "not held"))
 		}
 	}
 	if len(c.Neighbors) == 0 {
 		fmt.Println("  No neighbors yet: --bgp-neighbor-add ADDR --remote-as N")
 	}
-	live := map[string]BGPPeer{}
+	live := map[string]core.BGPPeer{}
 	for _, p := range st.Peers {
 		live[p.Peer] = p
 	}

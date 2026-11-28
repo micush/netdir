@@ -1,15 +1,13 @@
 package main
 
 import (
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
 
 // toolsEnv is an MCP endpoint with two gateways, paris and london; the network tools device is on the gateways named in on.
@@ -17,27 +15,27 @@ func toolsEnv(t *testing.T, on ...string) (*webEnv, func(msg string, hdr ...stri
 	t.Helper()
 	e, post := mcpEnv(t, "127.0.0.1")
 	kro, klim := testMCPKey(), testMCPKey()
-	keys, err := normMCPKeys([]MCPKey{{Name: "ro", Access: "ro", Key: kro}, {Name: "lim", Access: "rw", Key: klim, Devices: []string{"none"}}})
+	keys, err := core.NormMCPKeys([]core.MCPKey{{Name: "ro", Access: "ro", Key: kro}, {Name: "lim", Access: "rw", Key: klim, Devices: []string{"none"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPKeys = keys
-	sup.dc.Settings.Devices = []device.Device{{Name: "tools", Platform: "tools", Address: "localhost"}}
-	attachDevices(sup.dc)
-	for i := range sup.dc.Groups {
-		sup.dc.Groups[i].Devices = nil
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPKeys = keys
+	sup.Dc.Settings.Devices = []device.Device{{Name: "tools", Platform: "tools", Address: "localhost"}}
+	attachDevices(sup.Dc)
+	for i := range sup.Dc.Groups {
+		sup.Dc.Groups[i].Devices = nil
 	}
-	sup.dc.Groups = []GroupConfig{{GroupID: 161, Name: "paris"}, {GroupID: 162, Name: "london"}}
-	for i := range sup.dc.Groups {
+	sup.Dc.Groups = []core.GroupConfig{{GroupID: 161, Name: "paris"}, {GroupID: 162, Name: "london"}}
+	for i := range sup.Dc.Groups {
 		for _, n := range on {
-			if strings.EqualFold(sup.dc.Groups[i].Name, n) {
-				sup.dc.Groups[i].Devices = []string{"tools"}
+			if strings.EqualFold(sup.Dc.Groups[i].Name, n) {
+				sup.Dc.Groups[i].Devices = []string{"tools"}
 			}
 		}
 	}
-	sup.mu.Unlock()
+	sup.Mu.Unlock()
 	return e, post, map[string]string{"ro": kro, "lim": klim}
 }
 
@@ -111,10 +109,10 @@ func TestMCPNetToolsGateways(t *testing.T) {
 		}
 	}
 	// with the tools on both, a gateway has to be named
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Groups[1].Devices = []string{"tools"}
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Groups[1].Devices = []string{"tools"}
+	sup.Mu.Unlock()
 	if txt, isErr := call("net_ping", `{"host":"10.1.1.1"}`); !isErr || !strings.Contains(txt, "from which gateway") || !strings.Contains(txt, "london (162)") {
 		t.Errorf("two gateways, none named: %v %s", isErr, txt)
 	}
@@ -170,67 +168,5 @@ func TestMCPNetToolsRun(t *testing.T) {
 	txt = call("net_curl", `{"url":"https://example.com/","method":"get","follow":true,"insecure":true}`)
 	if !strings.Contains(txt, "-i") || strings.Contains(txt, " -I") || !strings.Contains(txt, "-L --max-redirs 3") || !strings.Contains(txt, "-k") {
 		t.Errorf("net_curl GET: %s", txt)
-	}
-}
-
-// Where a gateway's tools run: here when this node serves it, otherwise on a reachable node that does (the one the Topology page asks).
-func TestToolsNodeFor(t *testing.T) {
-	n := func(addr, gw string, self bool) CanvasNode {
-		return CanvasNode{Addr: addr, Gw: gw, Self: self, Reachable: true}
-	}
-	g := func(nodes ...CanvasNode) CanvasGateway { return CanvasGateway{GroupID: 162, Name: "phx", Nodes: nodes} }
-	for _, c := range []struct {
-		name, want string
-		gw         CanvasGateway
-		fail       bool
-	}{
-		{"served here", "", g(n("a", "ok", true), n("b", "ok", false)), false},
-		{"degraded here", "", g(n("a", "degraded", true), n("b", "ok", false)), false},
-		{"served by a peer", "b", g(n("a", "notserving", true), n("c", "degraded", false), n("b", "ok", false)), false},
-		{"paused here", "b", g(n("a", "paused", true), n("b", "ok", false)), false},
-		{"nobody", "", g(n("a", "notserving", true), n("b", "notserving", false), n("c", "down", false)), true},
-		{"a single node", "", g(), false},
-	} {
-		got, err := toolsNodeFor(c.gw)
-		if (err != nil) != c.fail || got != c.want {
-			t.Errorf("%s: %q %v", c.name, got, err)
-		}
-	}
-}
-
-// A read-only caller may start the look jobs, here or through /api/proxy on another node, and nothing else.
-func TestReadOnlyJob(t *testing.T) {
-	req := func(method, target string) *http.Request { return httptest.NewRequest(method, target, nil) }
-	for target, want := range map[string]bool{
-		"/api/nettool": true, "/api/scan": true,
-		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fnettool": true,
-		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fscan":    true,
-		"/api/wake": false, "/api/proxy?node=10.0.0.2&path=%2Fapi%2Fwake": false,
-		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fconfig":                false,
-		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fdevices%2Fchange":      false,
-		"/api/proxy?node=10.0.0.2&path=%2Fapi%2Fnettool%2F..%2Fconfig": false,
-		"/api/devices/change": false,
-	} {
-		if got := readOnlyJob(req("POST", target)); got != want {
-			t.Errorf("POST %s: %v, want %v", target, got, want)
-		}
-	}
-	body := func(target, b string) *http.Request { return httptest.NewRequest("POST", target, strings.NewReader(b)) }
-	for b, want := range map[string]bool{
-		`{"target":"depot","tool":""}`: true, `{"target":"depot","tool":"files_list","args":{"folder":"/"},"write":false}`: true,
-		`{"target":"depot","tool":"files_delete","write":true}`: false, `{"target":"depot","write":1}`: false, `not json`: false,
-	} {
-		for _, target := range []string{"/api/devices/mcp", "/api/proxy?node=10.0.0.2&path=%2Fapi%2Fdevices%2Fmcp"} {
-			r := body(target, b)
-			if got := readOnlyJob(r); got != want {
-				t.Errorf("POST %s %s: %v, want %v", target, b, got, want)
-			}
-			if rest, _ := io.ReadAll(r.Body); string(rest) != b {
-				t.Errorf("the body was not put back: %q", rest)
-			}
-		}
-	}
-	if readOnlyJob(req("PUT", "/api/nettool")) {
-		t.Error("a PUT was let through")
 	}
 }

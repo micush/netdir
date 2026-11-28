@@ -2,21 +2,17 @@ package main
 
 import (
 	"errors"
-	"fmt"
+
+	"netdir/internal/core"
 )
 
-// NodePauseState is what the Node page and `netdir --node-status` show.
-type NodePauseState struct {
-	Paused bool `json:"paused"`
-}
-
 // NodePauseStatus says whether this node is paused.
-func (m *Mgmt) NodePauseStatus() (NodePauseState, error) {
+func (m *Mgmt) NodePauseStatus() (core.NodePauseState, error) {
 	dc, _, err := m.LiveConfig()
 	if err != nil {
-		return NodePauseState{}, err
+		return core.NodePauseState{}, err
 	}
-	return NodePauseState{Paused: dc.NodePaused}, nil
+	return core.NodePauseState{Paused: dc.NodePaused}, nil
 }
 
 // NodePause takes this whole node out of service (or puts it back): every gateway
@@ -69,7 +65,7 @@ func (m *Mgmt) othersInService() int {
 	if m.othersFn != nil {
 		return m.othersFn()
 	}
-	return m.cl.otherNodesInService()
+	return m.cl.OtherNodesInService()
 }
 
 // lastServerOf names a gateway this node serves that no other member serves, so pausing the node would leave it with nobody.
@@ -82,27 +78,5 @@ func (m *Mgmt) lastServerOf() string {
 	if m.gwFn == nil || m.cl == nil || !m.cl.Enabled() {
 		return ""
 	}
-	return lastServing(m.localGateways(), m.cl.peerGateways())
-}
-
-func lastServing(mine []GwState, peers []peerGateways) string {
-	for _, g := range mine {
-		if !g.Serving {
-			continue
-		}
-		covered := false
-		for _, p := range peers {
-			if p.Down {
-				continue
-			}
-			if !p.Known || p.Serving[g.GroupID] {
-				covered = true // an older node cannot say; assume it serves
-				break
-			}
-		}
-		if !covered {
-			return fmt.Sprintf("this is the only node serving gateway %d, so pausing it would stop that gateway — resume or repair another node that can serve it first; to stop the gateway on purpose, pause the gateway instead", g.GroupID)
-		}
-	}
-	return ""
+	return core.LastServing(m.LocalGateways(), m.cl.PeerGateways())
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
 
 // netdirStub is another Network Director's MCP endpoint: list_devices (one device of its own, one below the director it has as a
@@ -34,7 +35,7 @@ func netdirStub(t *testing.T, calls *[]string, mu *sync.Mutex) device.Device {
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &q)
 		mu.Lock()
-		*calls = append(*calls, q.Params.Name+" "+toStr(q.Params.Arguments["target"]))
+		*calls = append(*calls, q.Params.Name+" "+core.ToStr(q.Params.Arguments["target"]))
 		mu.Unlock()
 		var v any
 		switch q.Params.Name {
@@ -46,13 +47,13 @@ func netdirStub(t *testing.T, calls *[]string, mu *sync.Mutex) device.Device {
 					map[string]any{"name": "looped", "platform": "eos", "address": "10.0.0.99", "via": []string{"x"}, "inst": "parent1"}}}
 		case "device_facts":
 			var rs []any
-			for _, n := range strings.Split(toStr(q.Params.Arguments["target"]), ",") {
+			for _, n := range strings.Split(core.ToStr(q.Params.Arguments["target"]), ",") {
 				rs = append(rs, map[string]any{"device": n, "platform": "vcenter", "ok": true, "data": map[string]any{"hostname": "host-of-" + n}, "ms": 5})
 			}
 			v = map[string]any{"op": "facts", "asked": len(rs), "failed": 0, "results": rs}
 		case "device_change_raw":
 			var rs []any
-			for _, n := range strings.Split(toStr(q.Params.Arguments["target"]), ",") {
+			for _, n := range strings.Split(core.ToStr(q.Params.Arguments["target"]), ",") {
 				rs = append(rs, map[string]any{"device": n, "platform": "vcenter", "ok": true, "data": map[string]any{"applied": q.Params.Arguments["dry_run"] != true}, "ms": 5})
 			}
 			v = map[string]any{"op": "raw", "dry_run": q.Params.Arguments["dry_run"] == true, "asked": len(rs), "failed": 0, "results": rs}
@@ -71,31 +72,31 @@ func netdirStub(t *testing.T, calls *[]string, mu *sync.Mutex) device.Device {
 
 func resetDown(t *testing.T) {
 	t.Helper()
-	down.mu.Lock()
-	down.list, down.errs, down.at = nil, nil, time.Time{}
-	down.mu.Unlock()
+	core.Down.Mu.Lock()
+	core.Down.List, core.Down.Errs, core.Down.At = nil, nil, time.Time{}
+	core.Down.Mu.Unlock()
 	t.Cleanup(func() {
-		down.mu.Lock()
-		down.list, down.errs, down.at = nil, nil, time.Time{}
-		down.mu.Unlock()
+		core.Down.Mu.Lock()
+		core.Down.List, core.Down.Errs, core.Down.At = nil, nil, time.Time{}
+		core.Down.Mu.Unlock()
 	})
 }
 
 func TestChainedDirectorsAnswerForDevicesBelow(t *testing.T) {
 	resetDown(t)
-	old := instanceOf
-	instanceOf = func() string { return "parent1" }
-	t.Cleanup(func() { instanceOf = old })
+	old := core.InstanceOf
+	core.InstanceOf = func() string { return "parent1" }
+	t.Cleanup(func() { core.InstanceOf = old })
 	var calls []string
 	var mu sync.Mutex
 	nd3 := netdirStub(t, &calls, &mu)
 	e, post := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
-	sup.dc.Settings.Devices = []device.Device{nd3, {Name: "sw1", Platform: "iosxe", Address: "10.0.0.1", Credential: "k", Insecure: true}}
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
+	sup.Dc.Settings.Devices = []device.Device{nd3, {Name: "sw1", Platform: "iosxe", Address: "10.0.0.1", Credential: "k", Insecure: true}}
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
 
 	_, m := post(mcpCall("list_devices", `{}`))
 	txt, isErr := toolResult(t, m)
@@ -103,13 +104,13 @@ func TestChainedDirectorsAnswerForDevicesBelow(t *testing.T) {
 		t.Fatalf("list_devices: %s", txt)
 	}
 	var got struct {
-		Remote []RemoteDevice    `json:"remote"`
-		Errs   map[string]string `json:"remote_errors"`
+		Remote []core.RemoteDevice `json:"remote"`
+		Errs   map[string]string   `json:"remote_errors"`
 	}
 	if err := json.Unmarshal([]byte(txt), &got); err != nil {
 		t.Fatalf("%v: %s", err, txt)
 	}
-	by := map[string]RemoteDevice{}
+	by := map[string]core.RemoteDevice{}
 	for _, r := range got.Remote {
 		by[r.Name] = r
 	}
@@ -167,12 +168,12 @@ func TestChangeGoesDownForANamedDevice(t *testing.T) {
 	if err := e.mg.PutConfig(dc, "test", "devices"); err != nil {
 		t.Fatal(err)
 	}
-	sup := e.ws.status.sup // the index is made from the supervisor's copy, the change reads the live one
-	sup.mu.Lock()
-	sup.dc.Settings.DeviceCredentials, sup.dc.Settings.Devices = dc.Settings.DeviceCredentials, dc.Settings.Devices
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
-	if list, _ := sup.remoteDevices(5*time.Second, true); len(list) == 0 {
+	sup := e.ws.Status.Sup() // the index is made from the supervisor's copy, the change reads the live one
+	sup.Mu.Lock()
+	sup.Dc.Settings.DeviceCredentials, sup.Dc.Settings.Devices = dc.Settings.DeviceCredentials, dc.Settings.Devices
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
+	if list, _ := sup.RemoteDevices(5*time.Second, true); len(list) == 0 {
 		t.Fatal("no index")
 	}
 	mu.Lock()
@@ -210,47 +211,15 @@ func TestChangeGoesDownForANamedDevice(t *testing.T) {
 func TestDirectorBelowThatIsDown(t *testing.T) {
 	resetDown(t)
 	e, _ := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
-	sup.dc.Settings.Devices = []device.Device{{Name: "nd9", Platform: "netdir", Address: "127.0.0.1", Port: 1, Credential: "k", Insecure: true}}
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
-	list, errs := sup.remoteDevices(5*time.Second, true)
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.DeviceCredentials = []device.Credential{{Name: "k", Token: "KEY"}}
+	sup.Dc.Settings.Devices = []device.Device{{Name: "nd9", Platform: "netdir", Address: "127.0.0.1", Port: 1, Credential: "k", Insecure: true}}
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
+	list, errs := sup.RemoteDevices(5*time.Second, true)
 	if len(list) != 0 || errs["nd9"] == "" {
 		t.Errorf("a director that does not answer: %v %v", list, errs)
-	}
-}
-
-func TestBuildRemote(t *testing.T) {
-	dir := device.Device{Name: "nd3", Platform: "netdir"}
-	dir2 := device.Device{Name: "nd2", Platform: "netdir"}
-	local := []device.Device{{Name: "sw1"}}
-	parts := []downPart{
-		{dir: dir, below: []device.Below{
-			{Name: "a", Platform: "eos", Address: "10.0.0.1", Inst: "i1"},
-			{Name: "sw1", Platform: "eos", Address: "10.0.0.2", Inst: "i1"},
-			{Name: "deep", Platform: "eos", Address: "10.0.0.3", Inst: "i2", Via: []string{"n4", "n5", "n6", "n7", "n8"}}, // too long a chain
-			{Name: "back", Platform: "eos", Address: "10.0.0.4", Inst: "me"},                                              // this installation's own
-		}},
-		{dir: dir2, below: []device.Below{
-			{Name: "a-again", Platform: "eos", Address: "10.0.0.1", Inst: "i1", Via: []string{"x"}}, // the same device by a longer way
-			{Name: "a", Platform: "eos", Address: "10.1.0.1", Inst: "i3"},                           // another device with the name taken
-		}},
-	}
-	out := buildRemote(local, parts, "me")
-	var names []string
-	for _, r := range out {
-		names = append(names, r.Name+"="+strings.Join(r.Via, ">"))
-	}
-	want := "a=nd2,a@nd3=nd3,sw1@nd3=nd3"
-	if strings.Join(names, ",") != want {
-		t.Errorf("index:\n got %v\nwant %s", names, want)
-	}
-	// the same address under another installation is another device; with no installation named, only the same name on the same director is the same
-	again := buildRemote(nil, []downPart{{dir: dir, below: []device.Below{{Name: "a", Platform: "eos", Address: "10.0.0.1"}, {Name: "b", Platform: "eos", Address: "10.0.0.1"}}}}, "")
-	if len(again) != 2 {
-		t.Errorf("unnamed owner: %+v", again)
 	}
 }
 
@@ -274,12 +243,12 @@ func TestMCPReadsPBSAdminTree(t *testing.T) {
 	host, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 	pn, _ := strconv.Atoi(port)
 	e, post := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
-	sup.dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.DeviceCredentials = []device.Credential{{Name: "pbs", Token: "u@pbs!t:sec"}}
+	sup.Dc.Settings.Devices = []device.Device{{Name: "pbs1", Platform: "pbs", Address: host, Port: pn, Credential: "pbs", Insecure: true}}
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
 	for path, want := range map[string]string{"/admin/datastore": `"store"`, "/admin/datastore/backup/snapshots": `"backup-id"`} {
 		_, m := post(mcpCall("device_api_get", `{"target":"pbs1","path":"`+path+`"}`))
 		txt, isErr := toolResult(t, m)
@@ -363,23 +332,5 @@ func TestMCPWritesPBSWithRW(t *testing.T) {
 		if n != 1 || !strings.Contains(puts[0], "new") {
 			t.Errorf("what Backup Server received: %v", puts)
 		}
-	}
-}
-
-// a list of a neighbor that is not up to date must not bring a device back through the installation that published it: netdir1 and netdir2
-// have each other as devices, netdir3 (below netdir1) goes down, and netdir2 still lists its devices through netdir1
-func TestStaleEntryDoesNotComeBack(t *testing.T) {
-	dir2 := device.Device{Name: "netdir2", Platform: "netdir"}
-	out := buildRemote([]device.Device{dir2}, []downPart{{dir: dir2, below: []device.Below{
-		{Name: "technitium", Platform: "technitium", Address: "10.2.0.5", Inst: "i2", Path: []string{"i2"}},
-		{Name: "observium", Platform: "observium", Address: "10.3.0.5", Inst: "i3", Via: []string{"netdir1"}, Path: []string{"i2", "i1", "i3"}}, // i2 got it from i1, which has lost it
-	}}}, "i1")
-	if len(out) != 1 || out[0].Name != "technitium" {
-		t.Errorf("what netdir1 lists through netdir2: %+v", out)
-	}
-	// the same list for an installation that is not in the path keeps it
-	if got := buildRemote([]device.Device{dir2}, []downPart{{dir: dir2, below: []device.Below{
-		{Name: "observium", Platform: "observium", Address: "10.3.0.5", Inst: "i3", Via: []string{"netdir1"}, Path: []string{"i2", "i1", "i3"}}}}}, "i9"); len(got) != 1 {
-		t.Errorf("an installation outside the path: %+v", got)
 	}
 }

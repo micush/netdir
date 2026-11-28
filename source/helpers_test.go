@@ -2,32 +2,20 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"strconv"
 	"sync"
-	"testing"
+
+	"netdir/internal/core"
 )
 
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 // pauseTestConfig is a one-gateway configuration, for the pause tests.
-func pauseTestConfig() *DaemonConfig {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{defaultGroup()}
+func pauseTestConfig() *core.DaemonConfig {
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 	if err := dc.Validate(); err != nil {
 		panic(err)
 	}
 	return dc
 }
-
-func fmtN(i int) string { return strconv.Itoa(i) }
 
 // lockedBuf is a log sink several goroutines may write to.
 type lockedBuf struct {

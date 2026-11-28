@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+
+	"netdir/internal/core"
 )
 
 // The Monitor ▸ Gateways page lists the election of every gateway.  A node only runs the elections of the gateways it
@@ -14,12 +16,12 @@ import (
 
 // takeGatewayRows adds the rows of group gid (every address family) from a serving node's answer to gs, as that node
 // shows them but with nobody marked local, and returns the result in group order.
-func takeGatewayRows(gs, from []GatewayGroup, gid int) []GatewayGroup {
+func takeGatewayRows(gs, from []core.GatewayGroup, gid int) []core.GatewayGroup {
 	for _, g := range from {
 		if g.GroupID != gid {
 			continue
 		}
-		ms := make([]GatewayMember, len(g.Members))
+		ms := make([]core.GatewayMember, len(g.Members))
 		copy(ms, g.Members)
 		for i := range ms {
 			ms[i].Local = false
@@ -37,7 +39,7 @@ func takeGatewayRows(gs, from []GatewayGroup, gid int) []GatewayGroup {
 }
 
 // gatewaysVia fills in the gateways this node does not run from a node that serves them.
-func (s *StatusServer) gatewaysVia(ctx context.Context, gs []GatewayGroup) []GatewayGroup {
+func (s *StatusServer) GatewaysVia(ctx context.Context, gs []core.GatewayGroup) []core.GatewayGroup {
 	if s.mg == nil || s.mg.cl == nil {
 		return gs
 	}
@@ -45,16 +47,16 @@ func (s *StatusServer) gatewaysVia(ctx context.Context, gs []GatewayGroup) []Gat
 	for _, g := range gs {
 		have[g.GroupID] = true
 	}
-	fetched := map[string][]GatewayGroup{}
-	ask := func(n CanvasNode) []GatewayGroup {
+	fetched := map[string][]core.GatewayGroup{}
+	ask := func(n core.CanvasNode) []core.GatewayGroup {
 		if l, done := fetched[n.Addr]; done {
 			return l
 		}
 		cctx, cancel := context.WithTimeout(ctx, viaFetchTimeout)
 		defer cancel()
-		resp, err := s.mg.cl.Relay(cctx, n.Addr, proxyReq{User: "gateways", Method: http.MethodGet, Path: "/api/gateways?own=1"})
+		resp, err := s.mg.cl.Relay(cctx, n.Addr, core.ProxyReq{User: "gateways", Method: http.MethodGet, Path: "/api/gateways?own=1"})
 		var out struct {
-			Data []GatewayGroup `json:"data"`
+			Data []core.GatewayGroup `json:"data"`
 		}
 		if err == nil && resp.Status == http.StatusOK && json.Unmarshal(resp.Body, &out) == nil {
 			fetched[n.Addr] = out.Data
@@ -63,11 +65,11 @@ func (s *StatusServer) gatewaysVia(ctx context.Context, gs []GatewayGroup) []Gat
 		}
 		return fetched[n.Addr]
 	}
-	for _, cg := range s.canvasGroups() {
+	for _, cg := range s.CanvasGroups() {
 		if have[cg.GroupID] {
 			continue
 		}
-		for _, n := range servingPeers(cg) {
+		for _, n := range core.ServingPeers(cg) {
 			l := ask(n)
 			if len(l) == 0 {
 				continue

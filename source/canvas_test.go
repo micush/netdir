@@ -1,61 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
-
-func TestGroupsKeyMeaning(t *testing.T) {
-	load := func(js string) *DaemonConfig {
-		t.Helper()
-		dc := newDaemonConfig()
-		if err := json.Unmarshal([]byte(js), dc); err != nil {
-			t.Fatal(err)
-		}
-		return dc
-	}
-	if n := len(load(`{}`).Groups); n != 1 {
-		t.Fatalf("absent groups = default group, got %d", n)
-	}
-	if n := len(load(`{"groups":null}`).Groups); n != 1 {
-		t.Fatalf("null groups = default group, got %d", n)
-	}
-	dc := load(`{"groups":[]}`)
-	if dc.Groups == nil || len(dc.Groups) != 0 {
-		t.Fatalf("explicit empty groups must stay empty: %v", dc.Groups)
-	}
-	if err := dc.Validate(); err != nil {
-		t.Fatalf("a config with no gateways is valid: %v", err)
-	}
-	// and it survives a save/load round trip as [] (not null, not the default)
-	path := t.TempDir() + "/c.json"
-	if err := dc.save(path); err != nil {
-		t.Fatal(err)
-	}
-	back, err := loadConfig(path)
-	if err != nil || len(back.Groups) != 0 {
-		t.Fatalf("round trip: %v %v", back, err)
-	}
-}
-
-func TestDuplicateSharedAddressRefused(t *testing.T) {
-	dc := newDaemonConfig()
-	g2 := defaultGroup()
-	g2.GroupID = 2
-	dc.Groups = append(dc.Groups, g2) // same 10.0.0.1/24 as group 1
-	err := dc.Validate()
-	if err == nil || !strings.Contains(err.Error(), "shared address") {
-		t.Fatalf("two gateways on one address must be refused: %v", err)
-	}
-	dc.Groups[1].VIP4 = "10.0.1.1/24"
-	if err := dc.Validate(); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestWebCanvasEndpoint(t *testing.T) {
 	e := newWebEnv(t)
@@ -73,7 +25,7 @@ func TestWebCanvasEndpoint(t *testing.T) {
 }
 
 func TestCanvasMembers(t *testing.T) {
-	rows := []SnapshotRow{
+	rows := []core.SnapshotRow{
 		{GroupID: 1, AF: "v4", PeerIP: "10.0.0.5", Local: true, AfnID: 1, Weight: 100, AGCIP: "10.0.0.5"},
 		{GroupID: 1, AF: "v6", PeerIP: "10.0.0.5", Local: true, AfnID: 1, Weight: 100, AGCIP: "10.0.0.5"},
 		{GroupID: 1, AF: "v4", PeerIP: "10.0.0.6", AfnID: 2, State: "active", AGCIP: "10.0.0.5"},
@@ -93,17 +45,17 @@ func TestCanvasMembers(t *testing.T) {
 // A dual-stack gateway has two engines per node, and each speaks from its own address, so membersOf sees a node twice.
 // The circle's tooltip counts nodes: 4 nodes with IPv4 and IPv6 running said "Serving nodes: 8".
 func TestMergeFamilyMembersCountsNodes(t *testing.T) {
-	var rows []SnapshotRow
+	var rows []core.SnapshotRow
 	names := map[string]string{}
 	for i := 1; i <= 4; i++ {
 		v4, v6 := "192.168.5."+string(rune('0'+i)), "fe80::"+string(rune('0'+i))
 		names[v4], names[v6] = "ntp"+string(rune('0'+i)), "ntp"+string(rune('0'+i))
 		rows = append(rows,
-			SnapshotRow{GroupID: 100, AF: "v6", PeerIP: v6, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "fe80::1"},
-			SnapshotRow{GroupID: 100, AF: "v4", PeerIP: v4, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
+			core.SnapshotRow{GroupID: 100, AF: "v6", PeerIP: v6, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "fe80::1"},
+			core.SnapshotRow{GroupID: 100, AF: "v4", PeerIP: v4, AfnID: i, Weight: 100, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
 	}
-	rows = append(rows, SnapshotRow{GroupID: 100, AF: "v4", PeerIP: "192.168.5.99", AfnID: 9, State: "active"}) // an address no node owns
-	gs := []CanvasGateway{{GroupID: 100, Members: membersOf(rows, 100)}}
+	rows = append(rows, core.SnapshotRow{GroupID: 100, AF: "v4", PeerIP: "192.168.5.99", AfnID: 9, State: "active"}) // an address no node owns
+	gs := []core.CanvasGateway{{GroupID: 100, Members: membersOf(rows, 100)}}
 	if len(gs[0].Members) != 9 {
 		t.Fatalf("membersOf sees %d, want 9 (8 per-family entries and the stranger)", len(gs[0].Members))
 	}
@@ -130,16 +82,16 @@ func TestMergeFamilyMembersCountsNodes(t *testing.T) {
 // A dual-stack gateway elects its controllers per family: each node says which families it is the controller for, and
 // the merge keeps that apart (the drawing shows the IPv6-only controller in blue).
 func TestMergeFamilyMembersKeepsControllerFamilies(t *testing.T) {
-	var rows []SnapshotRow
+	var rows []core.SnapshotRow
 	names := map[string]string{}
 	for i := 1; i <= 2; i++ {
 		v4, v6 := "192.168.5."+string(rune('0'+i)), "fe80::"+string(rune('0'+i))
 		names[v4], names[v6] = "ntp"+string(rune('0'+i)), "ntp"+string(rune('0'+i))
 		rows = append(rows,
-			SnapshotRow{GroupID: 1, AF: "v6", PeerIP: v6, AfnID: i, State: "active", Local: i == 1, AGCIP: "fe80::2"},
-			SnapshotRow{GroupID: 1, AF: "v4", PeerIP: v4, AfnID: i, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
+			core.SnapshotRow{GroupID: 1, AF: "v6", PeerIP: v6, AfnID: i, State: "active", Local: i == 1, AGCIP: "fe80::2"},
+			core.SnapshotRow{GroupID: 1, AF: "v4", PeerIP: v4, AfnID: i, State: "active", Local: i == 1, AGCIP: "192.168.5.1"})
 	}
-	gs := []CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
+	gs := []core.CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
 	mergeFamilyMembers(gs, names)
 	ms := gs[0].Members
 	if len(ms) != 2 || ms[0].IP != "192.168.5.1" || ms[0].AGCAFs != "v4" || ms[1].IP != "192.168.5.2" || ms[1].AGCAFs != "v6" || !ms[0].AGC || !ms[1].AGC {
@@ -149,7 +101,7 @@ func TestMergeFamilyMembersKeepsControllerFamilies(t *testing.T) {
 	for i := range rows {
 		rows[i].AGCIP = map[string]string{"v4": "192.168.5.1", "v6": "fe80::1"}[rows[i].AF]
 	}
-	gs = []CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
+	gs = []core.CanvasGateway{{GroupID: 1, Members: membersOf(rows, 1)}}
 	mergeFamilyMembers(gs, names)
 	if ms := gs[0].Members; ms[0].AGCAFs != "v4+v6" || ms[1].AGC || ms[1].AGCAFs != "" {
 		t.Fatalf("both controllers on ntp1: %+v", ms)
@@ -158,11 +110,11 @@ func TestMergeFamilyMembersKeepsControllerFamilies(t *testing.T) {
 
 // Only the entries of nodes no longer in the cluster are dropped, from one gateway or all.
 func TestCanvasPruneLeftNodes(t *testing.T) {
-	dc := newDaemonConfig()
-	a, b := defaultGroup(), defaultGroup()
+	dc := core.NewDaemonConfig()
+	a, b := core.DefaultGroup(), core.DefaultGroup()
 	a.GroupID, a.ExcludedNodes = 100, []string{"member01", "gone0001", "gone0002"}
 	b.GroupID, b.ExcludedNodes = 101, []string{"gone0001"}
-	dc.Groups = []GroupConfig{a, b}
+	dc.Groups = []core.GroupConfig{a, b}
 	msg, err := applyCanvasEdit(dc, canvasEdit{Action: "prune", Kind: "node", Group: 100, members: "member01,member02"})
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +137,8 @@ func TestCanvasPruneLeftNodes(t *testing.T) {
 }
 
 func TestApplyCanvasEdit(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{}
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{}
 	do := func(e canvasEdit) {
 		t.Helper()
 		if _, err := applyCanvasEdit(dc, e); err != nil {
@@ -204,10 +156,10 @@ func TestApplyCanvasEdit(t *testing.T) {
 		t.Fatalf("a bare gateway is valid: %v", err)
 	}
 	do(canvasEdit{Action: "add", Kind: "gateway", VIP: "2001:db8::1/64"})
-	if len(dc.Groups) != 2 || dc.Groups[0].GroupID != firstGroupID || dc.Groups[1].GroupID != firstGroupID+1 || dc.Groups[1].VIP6 == "" || dc.Groups[1].Interface != "eth0" {
+	if len(dc.Groups) != 2 || dc.Groups[0].GroupID != core.FirstGroupID || dc.Groups[1].GroupID != core.FirstGroupID+1 || dc.Groups[1].VIP6 == "" || dc.Groups[1].Interface != "eth0" {
 		t.Fatalf("gateways: %+v", dc.Groups)
 	}
-	fail(canvasEdit{Action: "add", Kind: "gateway", Group: firstGroupID, VIP: "10.9.9.9/24"}, "already exists")
+	fail(canvasEdit{Action: "add", Kind: "gateway", Group: core.FirstGroupID, VIP: "10.9.9.9/24"}, "already exists")
 	fail(canvasEdit{Action: "add", Kind: "gateway"}, "--vip")
 	// a gateway can be added and deleted again
 	do(canvasEdit{Action: "add", Kind: "gateway", Group: 7, VIP: "10.7.0.1/24"})
@@ -219,11 +171,11 @@ func TestApplyCanvasEdit(t *testing.T) {
 	}
 	do(canvasEdit{Action: "del", Kind: "gateway", Group: 7})
 	// delete a circle: the whole gateway goes, the other one is untouched
-	do(canvasEdit{Action: "del", Kind: "gateway", Group: firstGroupID})
-	if len(dc.Groups) != 1 || dc.Groups[0].GroupID != firstGroupID+1 {
+	do(canvasEdit{Action: "del", Kind: "gateway", Group: core.FirstGroupID})
+	if len(dc.Groups) != 1 || dc.Groups[0].GroupID != core.FirstGroupID+1 {
 		t.Fatalf("after gateway delete: %+v", dc.Groups)
 	}
-	do(canvasEdit{Action: "del", Kind: "gateway", Group: firstGroupID + 1})
+	do(canvasEdit{Action: "del", Kind: "gateway", Group: core.FirstGroupID + 1})
 	if len(dc.Groups) != 0 {
 		t.Fatal("deleting the last circle leaves no configuration")
 	}
@@ -235,27 +187,27 @@ func TestApplyCanvasEdit(t *testing.T) {
 }
 
 func TestBuildCanvasPerFamilyStatus(t *testing.T) {
-	g := defaultGroup()
+	g := core.DefaultGroup()
 	g.VIP6 = "2001:db8::1/64"
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{g}
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{g}
 
-	v4ok := SnapshotRow{GroupID: 1, AF: "v4", Local: true, State: "active", ServiceUp: true}
-	v6ok := SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "active", ServiceUp: true}
-	v6wait := SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "listen"}
+	v4ok := core.SnapshotRow{GroupID: 1, AF: "v4", Local: true, State: "active", ServiceUp: true}
+	v6ok := core.SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "active", ServiceUp: true}
+	v6wait := core.SnapshotRow{GroupID: 1, AF: "v6", Local: true, State: "listen"}
 
-	both := buildCanvas(dc, []SnapshotRow{v4ok, v6ok})[0]
+	both := buildCanvas(dc, []core.SnapshotRow{v4ok, v6ok})[0]
 	if both.Status != "ok" || len(both.Families) != 2 {
 		t.Fatalf("both families fine: %s %+v", both.Status, both.Families)
 	}
-	mixed := buildCanvas(dc, []SnapshotRow{v4ok, v6wait})[0]
+	mixed := buildCanvas(dc, []core.SnapshotRow{v4ok, v6wait})[0]
 	if mixed.Status != "warn" || mixed.Families[0].Status != "ok" || mixed.Families[1].Status != "warn" {
 		t.Fatalf("IPv6 not serving must not hide behind a healthy IPv4: %s %+v", mixed.Status, mixed.Families)
 	}
 	if !strings.Contains(mixed.Detail, "IPv6") || !strings.Contains(mixed.Detail, "IPv4") {
 		t.Fatalf("the detail must name both families: %q", mixed.Detail)
 	}
-	missing := buildCanvas(dc, []SnapshotRow{v4ok})[0]
+	missing := buildCanvas(dc, []core.SnapshotRow{v4ok})[0]
 	if missing.Status != "warn" || missing.Families[1].Status != "idle" {
 		t.Fatalf("an IPv6 engine that is missing is a warning: %s %+v", missing.Status, missing.Families)
 	}
@@ -266,14 +218,14 @@ func TestBuildCanvasPerFamilyStatus(t *testing.T) {
 }
 
 func TestBuildCanvasColours(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{defaultGroup()}
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 	// not running: grey circle
 	if cv := buildCanvas(dc, nil); cv[0].Status != "idle" {
 		t.Fatalf("not running: %+v", cv[0])
 	}
 	// running and the service answering: green
-	rows := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", ServiceUp: true}}
+	rows := []core.SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "active", ServiceUp: true}}
 	if cv := buildCanvas(dc, rows); cv[0].Status != "ok" {
 		t.Fatalf("all fine => green, got %s (%s)", cv[0].Status, cv[0].Detail)
 	}
@@ -283,7 +235,7 @@ func TestBuildCanvasColours(t *testing.T) {
 		t.Fatalf("service down => red, got %s (%s)", cv[0].Status, cv[0].Detail)
 	}
 	// not serving yet: yellow
-	standby := []SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "listen"}}
+	standby := []core.SnapshotRow{{GroupID: 1, AF: "v4", Local: true, State: "listen"}}
 	if cv := buildCanvas(dc, standby); cv[0].Status != "warn" {
 		t.Fatalf("not serving => yellow, got %s", cv[0].Status)
 	}
@@ -291,7 +243,7 @@ func TestBuildCanvasColours(t *testing.T) {
 
 // Dragging in the drawing (and --canvas-move) reorders the anycast addresses.
 func TestCanvasMove(t *testing.T) {
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Groups[0].GroupID = 1
 	dc.Groups[0].ExtraVIPs = []string{"203.0.113.1", "203.0.113.2", "203.0.113.3"}
 	must := func(e canvasEdit) {
@@ -323,7 +275,7 @@ func TestCanvasMove(t *testing.T) {
 }
 
 func TestCanvasDeviceDisable(t *testing.T) {
-	dc := &DaemonConfig{}
+	dc := &core.DaemonConfig{}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}}
 	if msg, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "device", Device: "sw1"}); err != nil || !dc.Settings.Devices[0].Disabled || !strings.Contains(msg, "disabled") {
 		t.Fatalf("pause: %q %v", msg, err)
@@ -343,7 +295,7 @@ func TestCanvasDeviceDisable(t *testing.T) {
 
 // Pause ▸ This node on a device: only this node's list changes; the inventory entry stays enabled, and this node reads it as disabled.
 func TestCanvasDevicePauseThisNode(t *testing.T) {
-	dc := &DaemonConfig{}
+	dc := &core.DaemonConfig{}
 	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}, {Name: "sw2", Platform: "iosxe", Address: "10.0.0.3", Credential: "c"}}
 	if msg, err := applyCanvasEdit(dc, canvasEdit{Action: "pause", Kind: "device", Device: "sw1", Scope: "node"}); err != nil || !strings.Contains(msg, "this node") {
 		t.Fatalf("pause here: %q %v", msg, err)
@@ -352,7 +304,7 @@ func TestCanvasDevicePauseThisNode(t *testing.T) {
 		t.Error("pausing on this node must not disable the device for every node")
 	}
 	attachDevices(dc)
-	eff := dc.effectiveDevices()
+	eff := dc.EffectiveDevices()
 	if !eff[0].Disabled || eff[1].Disabled {
 		t.Errorf("effective devices: sw1 disabled=%v, sw2 disabled=%v", eff[0].Disabled, eff[1].Disabled)
 	}
@@ -369,7 +321,7 @@ func TestCanvasDevicePauseThisNode(t *testing.T) {
 		t.Error("a bad scope was accepted")
 	}
 	// a name that is no longer in the inventory is dropped by Validate
-	dc2 := newDaemonConfig()
+	dc2 := core.NewDaemonConfig()
 	dc2.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}}
 	dc2.Settings.DeviceCredentials = []device.Credential{{Name: "c", Username: "u", Password: "p"}}
 	dc2.PausedDevicesHere = []string{"sw1", "gone", "sw1"}
@@ -381,44 +333,11 @@ func TestCanvasDevicePauseThisNode(t *testing.T) {
 	}
 }
 
-// A device on no gateway is never contacted, listed or offered over MCP: effectiveDevices reads it as disabled (and unattached);
-// putting it on a gateway undoes that, and the saved inventory is never changed.
-func TestUnattachedDeviceReadsAsDisabled(t *testing.T) {
-	dc := &DaemonConfig{}
-	dc.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.2", Credential: "c"}, {Name: "sw2", Platform: "iosxe", Address: "10.0.0.3", Credential: "c"}}
-	dc.Groups = []GroupConfig{{GroupID: 1, Devices: []string{"sw1"}}, {GroupID: 2}}
-	eff := dc.effectiveDevices()
-	if eff[0].Disabled || eff[0].Unattached {
-		t.Errorf("sw1 is on a gateway: %+v", eff[0])
-	}
-	if !eff[1].Disabled || !eff[1].Unattached {
-		t.Errorf("sw2 is on no gateway: %+v", eff[1])
-	}
-	if dc.Settings.Devices[1].Disabled || dc.Settings.Devices[1].Unattached {
-		t.Error("effectiveDevices changed the saved inventory")
-	}
-	dc.Groups[1].Devices = []string{"sw2"} // on another gateway: live
-	if eff = dc.effectiveDevices(); eff[1].Disabled || eff[1].Unattached {
-		t.Errorf("sw2 is on gateway 2: %+v", eff[1])
-	}
-	dc.Groups = nil // no gateway at all: nothing is attached
-	if eff = dc.effectiveDevices(); !eff[0].Disabled || !eff[1].Disabled {
-		t.Errorf("no gateways: %+v", eff)
-	}
-	// the refusal says what to do
-	if got := offWhy(device.Device{Unattached: true}); !strings.Contains(got, "no gateway") {
-		t.Errorf("offWhy: %q", got)
-	}
-	if got := offWhy(device.Device{Disabled: true}); !strings.Contains(got, "enable it") {
-		t.Errorf("offWhy: %q", got)
-	}
-}
-
 // A device that answers and holds alerts is drawn "alert" (its own colour); one that is down stays "bad", whatever it holds.
 func TestCanvasDeviceWithAlerts(t *testing.T) {
-	dc := &DaemonConfig{}
+	dc := &core.DaemonConfig{}
 	dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium"}, {Name: "cen", Platform: "centreon"}, {Name: "plain", Platform: "iosxe"}}
-	g := &GroupConfig{Devices: []string{"obs", "cen", "plain"}}
+	g := &core.GroupConfig{Devices: []string{"obs", "cen", "plain"}}
 	health := map[string]device.Health{
 		"obs":   {Status: "ok", Detail: "Observium: 2 alerts: a; b", AlertCount: 2},
 		"cen":   {Status: "bad", Detail: "the API port does not answer", AlertCount: 5},

@@ -3,6 +3,8 @@ package main
 import (
 	"sort"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // Staggering.  A task's place in its window comes from a hash of the node, the task and the occurrence (schedOffset), which
@@ -21,11 +23,11 @@ type schedOcc struct {
 	id   string
 	base int64
 	w    int64
-	task *SchedTask
+	task *core.SchedTask
 }
 
 // runOffset is where after base this node runs the occurrence of t, keeping clear of the node's other jobs.  s.mu is held.
-func (s *Scheduler) runOffset(node string, t SchedTask, base time.Time) time.Duration {
+func (s *Scheduler) runOffset(node string, t core.SchedTask, base time.Time) time.Duration {
 	if t.WindowSec <= 0 {
 		return 0
 	}
@@ -45,11 +47,11 @@ func (s *Scheduler) runOffset(node string, t SchedTask, base time.Time) time.Dur
 		changed := false
 		for i := range s.tasks {
 			u := &s.tasks[i]
-			if u.Disabled || !u.appliesTo(node) {
+			if u.Disabled || !u.AppliesTo(node) {
 				continue
 			}
 			w := int64(u.WindowSec)
-			for _, b := range u.basesFor(node, time.Unix(lo-w-gap, 0), time.Unix(hi+gap, 0)) {
+			for _, b := range u.BasesFor(node, time.Unix(lo-w-gap, 0), time.Unix(hi+gap, 0)) {
 				k := u.ID + "|" + strconvI(b.Unix())
 				if _, ok := set[k]; ok {
 					continue

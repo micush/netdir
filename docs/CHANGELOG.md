@@ -1,5 +1,71 @@
 # Changelog
 
+## [v250] - 2026-11-28 — the Go code is split into packages, and the GUI into one script per page
+
+### Changed
+- **The Go code is now six packages instead of one, plus the device drivers.** Before, about 300 files were one `package main`, where any file could reach into any other. Now each package imports only the ones below it:
+  - `internal/core`: configuration, the gateway engines, BGP, OSPF, SNMP, LLDP, the supervisor and its device checks, the network tools, certificates, backups, updates, captures and shared helpers (26,022 lines, 344 tests).
+  - `internal/cluster`: the signed, pinned node channel, joining, the election, shared settings and rolling updates (5,192 lines, 41 tests).
+  - `internal/devices`: between the daemon and the drivers. It decides which node a device request goes to (the one that checks the device), and runs the reads, raw calls, changes, captures and troubleshooting, and the scope of devices each caller may use (1,022 lines, 11 tests).
+  - `internal/web`: the management GUI, sign-in (MCP clients' OAuth sign-in too), sessions, the relay and the device pages' API (4,002 lines, 21 tests).
+  - `internal/mcp`: the MCP endpoint and its `device_*` and `net_*` tools (2,290 lines, 20 tests).
+  - `main` in `source/`: the CLI, the management layer (`Mgmt`), the status server, alerts and the scheduler (249 tests that need a whole node).
+  - The drivers stay the separate package `netdir/device` (304 tests). It is unchanged and imports none of the above.
+- The package is named `devices` (plural) so it is not mixed up with `device`. One local variable named `devices` in `devtroubleshoot.go` is now `follow`, so it does not hide the package.
+- **Lower packages no longer reach up.** Before the move, each place where lower code used higher code was replaced with an interface or a hook. These are the same as in FileDirector v120, FlowDirector v57 and LogDirector v52:
+  - the cluster uses `ClusterHost`, which `Mgmt` fills in;
+  - the web server uses `WebHost` and `StatusHost`;
+  - the layers above hand the cluster what they answer on the cluster port (`Cluster.SetRoutes`; `Mgmt` gives `/cluster/proxy`);
+  - MCP attaches itself to the web server's `/mcp` (`SetMCP`);
+  - the gateway and anycast uptime bookkeeping moved into the cluster.
+- **One change only netdir needed.** The device checks (which node checks a device, the other nodes' reports, the instance ID that tells a loop of directors) reached the cluster through a global pointer to the whole `Mgmt`. They now get the node's cluster through a small interface, `HealthCluster`, with five methods: `Enabled`, `Snapshot`, `PeerList`, `Relay` and `NodeSecret`. It is set when the node starts. `PeerList` and `NodeSecret` are new methods on the cluster; nothing else changed.
+- **How the move was done.** A tool driven by the type checker moved each declaration, exported the 730 names used across packages, and qualified every use. Struct fields that became exported got `json:"-"`, so no JSON reply, config file or cluster message changed.
+- `go:embed` cannot reach above its directory, so `embed.go` in `source/` embeds `webui/` and `VERSION` and hands them down.
+- **`webui/app.js` (6,273 lines) is now 22 scripts in `webui/app/`:**
+  - `core.js` holds what every page uses: state, the API, the drawing helpers, the shell and sign-in.
+  - There is one file per page: `topology.js`, `devices.js`, `gateways.js`, `settings.js`, `capture.js` and the rest.
+  - `boot.js` comes last.
+  - They are classic scripts sharing one scope, in the same order as before, so nothing runs differently.
+  - The server answers `/app/<name>.js` with the version filled in for the reload-after-upgrade check; `/app.js` is gone.
+- Tests that read the GUI's source (help coverage, hints, the weak-key list, the platform names) now read the scripts `index.html` loads.
+- CLAUDE.md describes the new layout and how to add a page.
+
+### Emptied (kept, never deleted)
+- 152 `.go` files in `source/` whose code moved into `internal/` now hold only `package main` and a comment naming where the code went. `webui/app.js` is emptied the same way. They are kept so a tree copied over an older one still builds.
+
+### Verified
+- gofmt, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./...` and `CGO_ENABLED=0 go test ./...`, builds for linux amd64, arm64, arm, 386 and riscv64. The same 990 tests ran before and after the split.
+- `node --check` of every script, plus an eslint pass over the 22 scripts, each seeing what the others declare: no undefined or twice-declared name.
+- **Three real daemons with real PAM**, joined into a cluster, and a fourth standalone node added to them as a device (platform `netdir`):
+  - on a replica, MCP `initialize` and `tools/list` (28 tools), `list_nodes`, `list_devices` and `device_facts` worked;
+  - with the device on a gateway, `device_mcp` worked from the primary and both replicas: the device's tool list, and its `list_nodes` called through it. Device health was the same on all three nodes;
+  - all three nodes gave the same instance ID and the standalone node its own, so `HealthCluster` reaches the cluster secret;
+  - an edit of the shared settings saved on a replica reached all three nodes, recorded as `fdtest (via 127.0.0.1:23032)`;
+  - a request relayed through `/api/proxy` to another node worked;
+  - `--cluster-promote` worked;
+  - `--update-upload` and `--update-push all` of this tree, numbered one higher for the test: every node built the new layout from source, restarted and confirmed it, and MCP and the device tools still worked afterwards.
+- **Chromium, light and dark:** all 26 pages load with no script error, every `/app/` script loads, and the help panel opens.
+
+### Not verified
+- Device requests sent on to the node that checks the device, with that node elsewhere. The three nodes share one host and one gateway, so one node checked the device for all of them. The rollout also held back until the test gateway was removed, because a gateway shared by three nodes on one host reads as bad. That is a test-setup limit, not a change in this release.
+
+## [v249] - 2026-11-28 — help leftovers, a loadable example config, 2 empty files removed
+
+### Fixed
+- **`netdir.conf.example` did not load**: the daemon stopped with `Configuration error: device vcenter: credential "vcenterlogin" is not in the credentials list`. Seven devices named credentials that `device_credentials` did not have: `vcenterlogin`, `ns1key`, `rc0token`, `d42ro`, `smaxuser`, `centkey` and `lab`. They are added, each with the fields its driver reads (a user name and password for vCenter, Device42, SMAX and Junos; a token for NS1, RcodeZero and Centreon).
+- Two help lines on the Cluster page still described NTP, left over from the fork: "answering NTP on the address" now says the MCP and web listener, and the certificate line says it is used by the MCP listener on every gateway address (there is no NTS here).
+
+### Changed
+- `ntpUp` in `clusternet.go` is renamed `serviceUp`. No behaviour change.
+
+### Removed
+- `apiroutes.go` and `apiroutes_test.go`, the two intentionally empty files kept since v152 so an overwrite would replace the old ones. Removed with the owner's approval: clear the source directory before copying a new tree over an old one.
+
+### Verified
+- gofmt, `go build`, `go vet ./...`, `go test -race -count=1 ./...`, `CGO_ENABLED=0 go vet ./... && go test ./...`, builds for linux amd64, arm64, arm, 386 and riscv64, `node --check` of every script.
+- The example config starts the daemon (with the listeners moved to 127.0.0.1).
+- Chromium, light and dark, real PAM login: all 26 pages open with no script errors; the help on Configure ▸ Gateways and Configure ▸ Web GUI shows the new lines and no NTP text.
+
 ## [v248] - 2026-11-28 — device_mcp works for read-only MCP callers
 
 ### Fixed

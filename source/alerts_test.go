@@ -6,12 +6,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
 )
 
 type alertRig struct {
 	t    *testing.T
 	e    *AlertEngine
-	cfg  *AlertsConfig
+	cfg  *core.AlertsConfig
 	now  time.Time
 	bad  bool
 	val  float64
@@ -20,13 +22,13 @@ type alertRig struct {
 	sent []string
 }
 
-func newAlertRig(t *testing.T, rule string, r AlertRule) *alertRig {
+func newAlertRig(t *testing.T, rule string, r core.AlertRule) *alertRig {
 	g := &alertRig{t: t, rule: rule, now: time.Unix(1_700_000_000, 0)}
-	g.cfg = &AlertsConfig{Webhook: "http://hook.example/x", Rules: map[string]AlertRule{rule: r}}
+	g.cfg = &core.AlertsConfig{Webhook: "http://hook.example/x", Rules: map[string]core.AlertRule{rule: r}}
 	if err := g.cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	g.e = NewAlertEngine(t.TempDir(), "node1", func() *AlertsConfig { return g.cfg })
+	g.e = NewAlertEngine(t.TempDir(), "node1", func() *core.AlertsConfig { return g.cfg })
 	g.e.now = func() time.Time { return g.now }
 	g.e.send = func(u string, b []byte) error {
 		var m map[string]any
@@ -70,7 +72,7 @@ func (g *alertRig) events() string {
 
 func TestAlertValueNeedsToStayPastTheThreshold(t *testing.T) {
 	forMin := 1
-	g := newAlertRig(t, "cpu_high", AlertRule{Threshold: 80, ForMin: &forMin})
+	g := newAlertRig(t, "cpu_high", core.AlertRule{Threshold: 80, ForMin: &forMin})
 	g.val = 95
 	g.step(true, 3) // 45 s
 	if g.open() != 0 {
@@ -91,22 +93,13 @@ func TestAlertValueNeedsToStayPastTheThreshold(t *testing.T) {
 	}
 }
 
-// The alerts of any node can be seen and handled from the GUI of another one.
-func TestAlertsCanBeRelayedToAnotherNode(t *testing.T) {
-	for _, c := range [][2]string{{"GET", "/api/alerts"}, {"POST", "/api/alerts/ack"}, {"POST", "/api/alerts/silence"}, {"POST", "/api/alerts/resolve"}, {"POST", "/api/alerts/fix"}, {"POST", "/api/alerts/test"}} {
-		if err := proxyAllowed(c[0], c[1]); err != nil {
-			t.Errorf("%s %s: %v", c[0], c[1], err)
-		}
-	}
-}
-
 // Alerts opened in the same second must come out in one fixed order on every View, not in the
 // map's order: the Alerts page polls, and rows that swap places look like values changing.
 func TestAlertViewOrderStableForSameSecond(t *testing.T) {
-	e := NewAlertEngine(t.TempDir(), "node1", func() *AlertsConfig { return &AlertsConfig{} })
+	e := NewAlertEngine(t.TempDir(), "node1", func() *core.AlertsConfig { return &core.AlertsConfig{} })
 	e.now = func() time.Time { return time.Unix(1_700_000_100, 0) }
 	add := func(id, rule, subject string, opened, closed int64) {
-		e.alerts[id] = &Alert{ID: id, Rule: rule, Subject: subject, Node: "node1", Opened: opened, Closed: closed}
+		e.alerts[id] = &core.Alert{ID: id, Rule: rule, Subject: subject, Node: "node1", Opened: opened, Closed: closed}
 	}
 	add("c3", "upstream_down", "203.0.113.3", 1000, 1360)
 	add("a1", "upstream_falseticker", "203.0.113.1", 1000, 1360)

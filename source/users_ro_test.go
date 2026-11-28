@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"netdir/internal/core"
 )
 
 const (
@@ -12,7 +14,7 @@ const (
 
 func roFixture(t *testing.T, group string) (*Mgmt, *[]usersCall) {
 	m, calls := usersFixture(t, group, roPasswdFx, "")
-	m.webPolicy.Store(&WebConfig{Group: "netdir", ReadGroup: "netdir-ro"})
+	m.webPolicy.Store(&core.WebConfig{Group: "netdir", ReadGroup: "netdir-ro"})
 	return m, calls
 }
 
@@ -40,7 +42,7 @@ func TestUsersListShowsReadOnlyAccounts(t *testing.T) {
 			t.Errorf("%s is in a group already and must not be offered: %v", o, v.Others)
 		}
 	}
-	m.webPolicy.Store(&WebConfig{Group: "netdir"})
+	m.webPolicy.Store(&core.WebConfig{Group: "netdir"})
 	if v := m.UsersList(); v.ReadGroup != "" || len(v.Users) != 2 {
 		t.Errorf("with no read-only setting: %+v", v)
 	}
@@ -61,7 +63,7 @@ func TestUserAddAndGrantReadOnly(t *testing.T) {
 	if got := callLines(*calls); !strings.Contains(got, "usermod -aG netdir-ro gina") {
 		t.Errorf("grant read-only:\n%s", got)
 	}
-	m.webPolicy.Store(&WebConfig{Group: "netdir"})
+	m.webPolicy.Store(&core.WebConfig{Group: "netdir"})
 	if _, _, err := m.UserAdd("frank", "long-enough-1", 0, true, "alice"); err == nil || !strings.Contains(err.Error(), "no read-only group") {
 		t.Errorf("read-only with no read-only group set: %v", err)
 	}

@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 func TestSchedulerUpdateOnlineWhenAlreadyNewest(t *testing.T) {
@@ -17,9 +20,9 @@ func TestSchedulerUpdateOnlineWhenAlreadyNewest(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	oa, oh := ghAPI, ghHost
-	ghAPI, ghHost = srv.URL, srv.URL
-	defer func() { ghAPI, ghHost = oa, oh }()
+	oa, oh := web.GhAPI, web.GhHost
+	web.GhAPI, web.GhHost = srv.URL, srv.URL
+	defer func() { web.GhAPI, web.GhHost = oa, oh }()
 	mg := newPowerMgmt(t)
 	out, err := mg.sched.builtin("update_online", "test")
 	if err != nil || !strings.Contains(out, "up to date") {
@@ -28,9 +31,9 @@ func TestSchedulerUpdateOnlineWhenAlreadyNewest(t *testing.T) {
 }
 
 func TestSchedulerUpdateOnlineCannotReach(t *testing.T) {
-	oa := ghAPI
-	ghAPI = "http://127.0.0.1:1"
-	defer func() { ghAPI = oa }()
+	oa := web.GhAPI
+	web.GhAPI = "http://127.0.0.1:1"
+	defer func() { web.GhAPI = oa }()
 	mg := newPowerMgmt(t)
 	if _, err := mg.sched.builtin("update_online", "test"); err == nil {
 		t.Fatal("an unreachable GitHub must fail the task")
@@ -55,7 +58,7 @@ func TestSchedulerRebootsTheHost(t *testing.T) {
 
 func TestSchedRunAllOnAMemberlessNode(t *testing.T) {
 	mg := newPowerMgmt(t)
-	mg.sched.SetTasks([]SchedTask{mustTask(t, SchedTask{ID: "a1", Name: "a", Action: "shell", Command: "true", Freq: "daily"})})
+	mg.sched.SetTasks([]core.SchedTask{mustTask(t, core.SchedTask{ID: "a1", Name: "a", Action: "shell", Command: "true", Freq: "daily"})})
 	out, err := mg.SchedRunAll("a1", "me")
 	if err != nil || len(out) != 1 {
 		t.Fatalf("%v %v", out, err)

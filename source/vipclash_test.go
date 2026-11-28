@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+
+	"netdir/internal/core"
 )
 
 func TestVIPCannotBeANodeAddress(t *testing.T) {
@@ -20,15 +22,19 @@ func TestVIPCannotBeANodeAddress(t *testing.T) {
 		bits = 64
 	}
 	vip := netip.PrefixFrom(own, bits).String()
-	mk := func(g GroupConfig) *DaemonConfig { dc := newDaemonConfig(); dc.Groups = []GroupConfig{g}; return dc }
-	g := defaultGroup()
+	mk := func(g core.GroupConfig) *core.DaemonConfig {
+		dc := core.NewDaemonConfig()
+		dc.Groups = []core.GroupConfig{g}
+		return dc
+	}
+	g := core.DefaultGroup()
 	g.VIP4, g.VIP6 = "", ""
 	if own.Is4() {
 		g.VIP4 = vip
 	} else {
 		g.VIP6 = vip
 	}
-	err := checkVIPsNotNodes(mk(defaultGroup()), mk(g), nil)
+	err := checkVIPsNotNodes(mk(core.DefaultGroup()), mk(g), nil)
 	if err == nil || !strings.Contains(err.Error(), own.String()) {
 		t.Fatalf("a node's own address was accepted as a shared address: %v", err)
 	}
@@ -37,9 +43,9 @@ func TestVIPCannotBeANodeAddress(t *testing.T) {
 		t.Fatalf("an existing address blocked a save: %v", err)
 	}
 	// anycast addresses too
-	h := defaultGroup()
+	h := core.DefaultGroup()
 	h.ExtraVIPs = []string{own.String()}
-	if err := checkVIPsNotNodes(mk(defaultGroup()), mk(h), nil); err == nil {
+	if err := checkVIPsNotNodes(mk(core.DefaultGroup()), mk(h), nil); err == nil {
 		t.Fatal("anycast address equal to a node address accepted")
 	}
 }

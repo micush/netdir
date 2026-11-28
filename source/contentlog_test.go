@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"netdir/internal/core"
+	"netdir/internal/mcp"
 )
 
 // logEnv is an MCP environment whose content log goes to a temporary directory.
@@ -12,23 +15,23 @@ func logEnv(t *testing.T, on bool, acl ...string) (*webEnv, func(msg string, hdr
 	t.Helper()
 	dir := t.TempDir()
 	e, post := mcpEnv(t, acl...)
-	startContentLog(dir)
-	mcpContent.mu.Lock()
-	mcpContent.rf = nil
-	mcpContent.mu.Unlock()
-	t.Cleanup(func() { startContentLog("") })
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.MCPLog = on
-	sup.mu.Unlock()
+	mcp.StartContentLog(dir)
+	mcp.McpContent.Mu.Lock()
+	mcp.McpContent.Rf = nil
+	mcp.McpContent.Mu.Unlock()
+	t.Cleanup(func() { mcp.StartContentLog("") })
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.MCPLog = on
+	sup.Mu.Unlock()
 	return e, post, dir
 }
 
-func setLog(e *webEnv, f func(s *Settings)) {
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	f(&sup.dc.Settings)
-	sup.mu.Unlock()
+func setLog(e *webEnv, f func(s *core.Settings)) {
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	f(&sup.Dc.Settings)
+	sup.Mu.Unlock()
 }
 
 func readMCPLog(dir string) string {
@@ -81,7 +84,7 @@ func TestContentLogRefusedAndNeverTheKey(t *testing.T) {
 
 func TestContentLogKeepsABoundedAmount(t *testing.T) {
 	e, post, dir := logEnv(t, true, "127.0.0.1 rw")
-	setLog(e, func(s *Settings) { s.MCPLogMB = 1 })
+	setLog(e, func(s *core.Settings) { s.MCPLogMB = 1 })
 	big := `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"` + strings.Repeat("a", 20000) + `"}}`
 	for i := 0; i < 150; i++ {
 		post(big)
@@ -99,25 +102,10 @@ func TestContentLogKeepsABoundedAmount(t *testing.T) {
 
 func TestContentLogCutsLongEntries(t *testing.T) {
 	e, post, dir := logEnv(t, true, "127.0.0.1 rw")
-	setLog(e, func(s *Settings) { s.MCPLogEntryKB = 1 })
+	setLog(e, func(s *core.Settings) { s.MCPLogEntryKB = 1 })
 	post(`{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":"` + strings.Repeat("a", 5000) + `"}}`)
 	log := readMCPLog(dir)
 	if !strings.Contains(log, "request cut:") || len(log) > 3000 {
 		t.Fatalf("%d bytes: %.300s", len(log), log)
-	}
-}
-
-func TestContentLogSettingsAreChecked(t *testing.T) {
-	for _, bad := range []func(s *Settings){func(s *Settings) { s.MCPLogMB = 1001 }, func(s *Settings) { s.MCPLogMB = -1 }, func(s *Settings) { s.MCPLogEntryKB = 8193 }} {
-		dc := newDaemonConfig()
-		bad(&dc.Settings)
-		if dc.Validate() == nil {
-			t.Error("a bad content log setting was accepted")
-		}
-	}
-	dc := newDaemonConfig()
-	dc.Settings.MCPLogMB, dc.Settings.MCPLogEntryKB = 50, 256
-	if err := dc.Validate(); err != nil || dc.Settings.MCPLogMB != 0 || dc.Settings.MCPLogEntryKB != 0 {
-		t.Fatalf("the defaults are not written: %v %+v", err, dc.Settings)
 	}
 }

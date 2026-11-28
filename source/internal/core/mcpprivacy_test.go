@@ -1,0 +1,147 @@
+package core
+
+import (
+	"encoding/base64"
+	"strings"
+	"testing"
+)
+
+func TestPrivacyMACModes(t *testing.T) {
+	r := StandardRules()
+	r.MACs = "oui"
+	out := NewMaskRules(r).Text("mac 00:1a:2b:3c:4d:5e and 001a.2b3c.4d5e and ipv6 2001:db8:1:2:3:4:5:6")
+	if !strings.Contains(out, "00:1a:2b:xx:xx:xx") || !strings.Contains(out, "001a.2bxx.xxxx") || strings.Contains(out, "3c:4d:5e") {
+		t.Errorf("oui: %s", out)
+	}
+	if !strings.Contains(out, "2001:db8:1:2:3:4:5:6") {
+		t.Errorf("an IPv6 address was taken for a MAC: %s", out)
+	}
+	r.MACs = "hide"
+	if out = NewMaskRules(r).Text("00-1a-2b-3c-4d-5e"); strings.Contains(out, "00-1a") || out != "xx-xx-xx-xx-xx-xx" {
+		t.Errorf("hide: %s", out)
+	}
+}
+
+func TestPrivacyWordsAndSerials(t *testing.T) {
+	r := StandardRules()
+	r.Words = []string{"Contoso", "public", "corp-edge"}
+	r.Serials = "hide"
+	m := NewMaskRules(r)
+	out := m.Text("Contoso CONTOSO at corp-edge-1 uses 8.8.8.8 and public dns")
+	if strings.Contains(strings.ToLower(out), "contoso") || strings.Contains(out, "corp-edge") {
+		t.Errorf("words leaked: %s", out)
+	}
+	if !strings.Contains(out, "x.x.x.x") {
+		t.Errorf("the address was broken by the word \"public\": %s", out)
+	}
+	f := strings.Fields(out)
+	if f[0] != f[1] {
+		t.Errorf("the same word, in another case, must give the same token: %s", out)
+	}
+	j := string(m.Json([]byte(`{"serial":"FOC1234X0AB","note":"Contoso lab"}`)))
+	if strings.Contains(j, "X0AB") || strings.Contains(j, "Contoso") || !strings.Contains(j, "MASKED-SERIAL-") {
+		t.Errorf("%s", j)
+	}
+	r.Serials = "show"
+	if j = string(NewMaskRules(r).Json([]byte(`{"serial":"FOC1234X0AB"}`))); !strings.Contains(j, "FOC1234X0AB") {
+		t.Errorf("show: %s", j)
+	}
+}
+
+func TestPrivacyNormalize(t *testing.T) {
+	if c, err := normPrivacy(&PrivacyConfig{Default: " Standard "}); c != nil || err != nil {
+		t.Errorf("the defaults leave no key: %v %v", c, err)
+	}
+	c, err := normPrivacy(&PrivacyConfig{Default: "STRICT", Standard: &PrivacyRules{Serials: "TAIL", Words: []string{" acme ", "ACME", "", "lab-sw"}}})
+	if err != nil || c.Default != "strict" || c.Standard.Serials != "tail" || c.Standard.MACs != "show" || strings.Join(c.Standard.Words, ",") != "acme,lab-sw" {
+		t.Errorf("%+v %v", c, err)
+	}
+	for _, bad := range []*PrivacyConfig{
+		{Default: "paranoid"}, {Standard: &PrivacyRules{IPKeep: 4}}, {Strict: &PrivacyRules{Serials: "some"}}, {Strict: &PrivacyRules{MACs: "x"}},
+		{Standard: &PrivacyRules{Words: []string{"ab"}}}, {Standard: &PrivacyRules{Words: []string{"bad\nword"}}},
+	} {
+		if _, err := normPrivacy(bad); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestPrivacyACLAndKeys(t *testing.T) {
+	got, err := NormMCPACL([]string{"10.1.1.50 rw Strict", "10.1.1.50 none", "10.1.0.0/24 standard", "10.2.0.0/24 ro", "10.3.0.0/24 STRICT"})
+	want := "10.1.1.50 rw strict,10.1.0.0/24 standard,10.2.0.0/24,10.3.0.0/24 strict"
+	if err != nil || strings.Join(got, ",") != want {
+		t.Errorf("%v %v (want %s)", got, err, want)
+	}
+	for _, bad := range []string{"10.1.1.1 rw strict extra", "10.1.1.1 paranoid", "10.1.1.1 strict none", "10.1.0.0/24 rw strict"} {
+		if _, err := NormMCPACL([]string{bad}); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	k := testMCPKey()
+	out, err := NormMCPKeys([]MCPKey{{Name: "a", Key: k, Privacy: "Strict"}})
+	if err != nil || out[0].Privacy != "strict" {
+		t.Errorf("%+v %v", out, err)
+	}
+	if _, err := NormMCPKeys([]MCPKey{{Name: "a", Key: k, Privacy: "x"}}); err == nil {
+		t.Errorf("a bad key level was accepted")
+	}
+	if StrictestLevel("", "none", "strict", "standard") != "strict" || StrictestLevel("", "") != "" || StrictestLevel("none", "") != "none" {
+		t.Errorf("strictest")
+	}
+}
+
+// An Infoblox _ref carries the address inside its base64 part: masking only the readable name leaked it.
+func TestPrivacyMasksEncodedRefs(t *testing.T) {
+	enc := base64.RawStdEncoding.EncodeToString([]byte("dns.host_address$._default.int.example.net.host1.10.129.23.3"))
+	ref := "record:host/" + enc + ":host1.int.example.net/default"
+	for name, m := range map[string]*maskRules{"strict": NewMaskRules(StrictRules())} {
+		out := m.Text(ref)
+		if strings.Contains(out, enc) || strings.Contains(out, "10.129") || !strings.Contains(out, "MASKED-REF-") || !strings.HasPrefix(out, "record:host/") {
+			t.Errorf("%s: %s", name, out)
+		}
+	}
+	// at the standard level a private address is not hidden, so the reference is left alone (and usable)
+	if out := NewMaskRules(StandardRules()).Text(ref); !strings.Contains(out, enc) {
+		t.Errorf("standard changed a reference with nothing to hide: %s", out)
+	}
+	// a word of the owner's own inside the encoding
+	r := StandardRules()
+	r.Words = []string{"contoso"}
+	e2 := base64.RawStdEncoding.EncodeToString([]byte("network$10.0.0.0/8/contoso-lab/default"))
+	if out := NewMaskRules(r).Text("network/" + e2 + ":10.0.0.0/8"); strings.Contains(out, e2) {
+		t.Errorf("word in base64: %s", out)
+	}
+	// ordinary long words and identifiers are left alone
+	for _, id := range []string{"internationalizationconfiguration", "0123456789abcdef0123456789abcdef", "Cisco-IOS-XE-native:interface"} {
+		if out := NewMaskRules(StrictRules()).Text(id); out != id {
+			t.Errorf("changed %q to %q", id, out)
+		}
+	}
+}
+
+func TestPrivacyKeepLastAndNIC(t *testing.T) {
+	r := StandardRules()
+	r.PrivateIPs = true
+	r.IPKeep = -2
+	out := NewMaskRules(r).Text("a 203.0.114.7 b 10.20.30.40 c 2001:4860:4860::8888")
+	for _, want := range []string{"x.x.114.7", "x.x.30.40", "x:x:x:x:x:x:0:8888"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q missing: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "203.0") || strings.Contains(out, "10.20") || strings.Contains(out, "2001:4860") {
+		t.Errorf("the front of an address leaked: %s", out)
+	}
+	r.IPKeep = -1
+	if out = NewMaskRules(r).Text("x 203.0.114.7"); !strings.HasSuffix(out, ".7") || strings.Contains(out, "114") {
+		t.Errorf("last 1: %s", out)
+	}
+	if _, err := normPrivacy(&PrivacyConfig{Strict: &PrivacyRules{IPKeep: -4}}); err == nil {
+		t.Errorf("-4 was accepted")
+	}
+	r.MACs = "nic"
+	out = NewMaskRules(r).Text("00:1a:2b:3c:4d:5e / 001a.2b3c.4d5e")
+	if !strings.Contains(out, "xx:xx:xx:3c:4d:5e") || !strings.Contains(out, "xxxx.xx3c.4d5e") || strings.Contains(out, "00:1a") || strings.Contains(out, "001a") {
+		t.Errorf("nic: %s", out)
+	}
+}

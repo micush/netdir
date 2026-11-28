@@ -9,25 +9,26 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
 )
 
 // ── one node ─────────────────────────────────────────────────────────────────
 
 // CaptureInterfaces lists what a capture can be started on, and the interfaces the gateways use (the usual choice).
 type CaptureInterfaces struct {
-	Interfaces []capIface `json:"interfaces"`
-	Gateway    []string   `json:"gateway"` // the interfaces of the configured gateways, in order
+	Interfaces []core.CapIface `json:"interfaces"`
+	Gateway    []string        `json:"gateway"` // the interfaces of the configured gateways, in order
 }
 
 func (m *Mgmt) captureInterfaces() CaptureInterfaces {
-	out := CaptureInterfaces{Interfaces: captureInterfaces(), Gateway: []string{}}
+	out := CaptureInterfaces{Interfaces: core.CaptureInterfaces(), Gateway: []string{}}
 	if dc, _, err := m.LiveConfig(); err == nil && dc != nil {
 		seen := map[string]bool{}
 		for _, g := range dc.Groups {
@@ -42,15 +43,15 @@ func (m *Mgmt) captureInterfaces() CaptureInterfaces {
 
 // CaptureStart starts the capture of this node's Capture page (it replaces one that is running).
 func (m *Mgmt) CaptureStart(iface, filter, actor string) error {
-	if err := m.capture.startOn(iface, filter); err != nil {
+	if err := m.capture.StartOn(iface, filter); err != nil {
 		return err
 	}
-	warnf("capture: %s started a packet capture on %s (filter %q)", actor, iface, filter)
+	core.Warnf("capture: %s started a packet capture on %s (filter %q)", actor, iface, filter)
 	return nil
 }
 
-func (m *Mgmt) CaptureStop()  { m.capture.stop() }
-func (m *Mgmt) CaptureClear() { m.capture.clear() }
+func (m *Mgmt) CaptureStop()  { m.capture.Stop() }
+func (m *Mgmt) CaptureClear() { m.capture.Clear() }
 
 // CaptureRunResult is a capture that ran for a fixed time into a private buffer of its own.
 type CaptureRunResult struct {
@@ -65,15 +66,15 @@ type CaptureRunResult struct {
 
 // CaptureRun captures for the given seconds on iface (nothing else on the node is disturbed) and returns the .pcap.
 func (m *Mgmt) CaptureRun(ctx context.Context, iface, filter string, seconds int, actor string) (*CaptureRunResult, error) {
-	if seconds < 1 || seconds > capRunMaxSeconds {
-		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", capRunMaxSeconds)
+	if seconds < 1 || seconds > core.CapRunMaxSeconds {
+		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", core.CapRunMaxSeconds)
 	}
-	warnf("capture: %s started a %d s packet capture on %s (filter %q)", actor, seconds, iface, filter)
-	pcap, kept, seen, err := captureRun(ctx, iface, filter, time.Duration(seconds)*time.Second, capRelayBytes)
+	core.Warnf("capture: %s started a %d s packet capture on %s (filter %q)", actor, seconds, iface, filter)
+	pcap, kept, seen, err := core.CaptureRun(ctx, iface, filter, time.Duration(seconds)*time.Second, core.CapRelayBytes)
 	if err != nil {
 		return nil, err
 	}
-	return &CaptureRunResult{Iface: iface, Filter: filter, Seconds: seconds, Kept: kept, Seen: seen, Pcap: pcap, Truncated: kept >= capRunMaxPackets}, nil
+	return &CaptureRunResult{Iface: iface, Filter: filter, Seconds: seconds, Kept: kept, Seen: seen, Pcap: pcap, Truncated: kept >= core.CapRunMaxPackets}, nil
 }
 
 // ── a timed capture that is started and then asked for ───────────────────────
@@ -135,8 +136,8 @@ func (m *Mgmt) CaptureJobStart(id, iface, filter string, seconds int, actor stri
 	if id == "" || len(id) > 40 || strings.ContainsAny(id, " \r\n/?&") {
 		return nil, errors.New("a capture needs an id (up to 40 characters)")
 	}
-	if seconds < 1 || seconds > capRunMaxSeconds {
-		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", capRunMaxSeconds)
+	if seconds < 1 || seconds > core.CapRunMaxSeconds {
+		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", core.CapRunMaxSeconds)
 	}
 	m.capruns.mu.Lock()
 	if m.capruns.m == nil {
@@ -158,7 +159,7 @@ func (m *Mgmt) CaptureJobStart(id, iface, filter string, seconds int, actor stri
 		m.capruns.mu.Unlock()
 		return nil, errors.New("this node already holds several timed captures: try again in a moment")
 	}
-	cs, err := beginPrivate(iface, filter, capRelayBytes) // refused here (no such interface, a bad filter), not later
+	cs, err := core.BeginPrivate(iface, filter, core.CapRelayBytes) // refused here (no such interface, a bad filter), not later
 	if err != nil {
 		m.capruns.mu.Unlock()
 		return nil, err
@@ -166,10 +167,10 @@ func (m *Mgmt) CaptureJobStart(id, iface, filter string, seconds int, actor stri
 	r := &capRun{id: id, iface: iface, filter: filter, seconds: seconds, started: time.Now()}
 	m.capruns.m[id] = r
 	m.capruns.mu.Unlock()
-	warnf("capture: %s started a %d s packet capture on %s (filter %q)", actor, seconds, iface, filter)
+	core.Warnf("capture: %s started a %d s packet capture on %s (filter %q)", actor, seconds, iface, filter)
 	go func() {
 		time.Sleep(time.Duration(seconds) * time.Second)
-		pcap, kept, seen := finishPrivate(cs, capRelayBytes)
+		pcap, kept, seen := core.FinishPrivate(cs, core.CapRelayBytes)
 		r.mu.Lock()
 		r.pcap, r.kept, r.seen, r.done, r.finished = pcap, kept, seen, true, time.Now()
 		r.mu.Unlock()
@@ -231,16 +232,16 @@ type capJobs struct {
 // With a gateway (gid > 0) it runs only on the nodes that serve it, on its interface, and keeps only the packets to and
 // from its addresses (and the filter, when there is one).
 func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds, gid int, actor string) (*CaptureJob, error) {
-	if seconds < 1 || seconds > capRunMaxSeconds {
-		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", capRunMaxSeconds)
+	if seconds < 1 || seconds > core.CapRunMaxSeconds {
+		return nil, fmt.Errorf("the capture time must be 1 to %d seconds", core.CapRunMaxSeconds)
 	}
-	if len(filter) > capFilterMax {
-		return nil, fmt.Errorf("the filter is too long (at most %d characters)", capFilterMax)
+	if len(filter) > core.CapFilterMax {
+		return nil, fmt.Errorf("the filter is too long (at most %d characters)", core.CapFilterMax)
 	}
-	if _, err := compileCapFilter(filter); err != nil {
+	if _, err := core.CompileCapFilter(filter); err != nil {
 		return nil, err
 	}
-	var keep func(PeerView) bool
+	var keep func(core.PeerView) bool
 	where := "every node"
 	if gid > 0 {
 		dc, _, err := m.LiveConfig()
@@ -251,7 +252,7 @@ func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds, gid int, actor
 		if err != nil {
 			return nil, err
 		}
-		keep, where = gatewayNodes(g), "the nodes of gateway "+strconv.Itoa(gid)
+		keep, where = cluster.GatewayNodes(g), "the nodes of gateway "+strconv.Itoa(gid)
 		if iface == "" {
 			iface = g.Interface
 		}
@@ -262,10 +263,10 @@ func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds, gid int, actor
 				filter = "(" + hosts + ") and (" + filter + ")"
 			}
 		}
-		if len(filter) > capFilterMax {
-			return nil, fmt.Errorf("the filter is too long (at most %d characters)", capFilterMax)
+		if len(filter) > core.CapFilterMax {
+			return nil, fmt.Errorf("the filter is too long (at most %d characters)", core.CapFilterMax)
 		}
-		if _, err := compileCapFilter(filter); err != nil {
+		if _, err := core.CompileCapFilter(filter); err != nil {
 			return nil, err
 		}
 	}
@@ -286,14 +287,14 @@ func (m *Mgmt) CaptureClusterStart(iface, filter string, seconds, gid int, actor
 	job := &CaptureJob{ID: m.capjobs.seq, Started: time.Now(), Seconds: seconds, Iface: iface, Filter: filter, Gateway: gid}
 	m.capjobs.cur = job
 	m.capjobs.mu.Unlock()
-	warnf("capture: %s started a %d s packet capture on %s, on %s (filter %q)", actor, seconds, where, iface, filter)
+	core.Warnf("capture: %s started a %d s packet capture on %s, on %s (filter %q)", actor, seconds, where, iface, filter)
 	go job.run(m, actor, keep)
 	return job, nil
 }
 
 // gatewayCapHosts is a capture filter for the addresses of a gateway: its VIPs, further shared addresses and anycast
 // addresses ("host A or host B ...", "" when it has none).
-func gatewayCapHosts(g *GroupConfig) string {
+func gatewayCapHosts(g *core.GroupConfig) string {
 	var hosts []string
 	seen := map[string]bool{}
 	for _, a := range append(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...), g.ExtraVIPs...) {
@@ -307,13 +308,11 @@ func gatewayCapHosts(g *GroupConfig) string {
 	return strings.Join(hosts, " or ")
 }
 
-var capNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
-
 // run starts the capture on every node (this one directly, the others through the cluster relay), asks each node for
 // its result until the time is over, and bundles them.  Every request is a quick one.
-func (j *CaptureJob) run(m *Mgmt, actor string, keep func(PeerView) bool) {
-	token := randHex(8)
-	targets := clusterTargetsSel(m, keep)
+func (j *CaptureJob) run(m *Mgmt, actor string, keep func(core.PeerView) bool) {
+	token := core.RandHex(8)
+	targets := cluster.ClusterTargetsSel(m.cl, keep)
 	nodes := make([]*CaptureNode, len(targets))
 	for i, t := range targets {
 		nodes[i] = &CaptureNode{Name: t.Name, Addr: t.Addr, Self: t.Self, Iface: j.Iface, Status: "running"}
@@ -348,7 +347,7 @@ func (j *CaptureJob) run(m *Mgmt, actor string, keep func(PeerView) bool) {
 }
 
 // captureOn runs the capture on one node: start it, then ask for it until it is done.
-func (j *CaptureJob) captureOn(m *Mgmt, t clusterTarget, token, actor string) (*CaptureRunStatus, error) {
+func (j *CaptureJob) captureOn(m *Mgmt, t cluster.ClusterTarget, token, actor string) (*CaptureRunStatus, error) {
 	ask := func(method, path string, body any) (*CaptureRunStatus, error) {
 		if t.Self {
 			if method == "POST" {
@@ -356,7 +355,7 @@ func (j *CaptureJob) captureOn(m *Mgmt, t clusterTarget, token, actor string) (*
 			}
 			return m.CaptureJobGet(token)
 		}
-		req := proxyReq{User: actor, Method: method, Path: path}
+		req := core.ProxyReq{User: actor, Method: method, Path: path}
 		if body != nil {
 			req.Body, _ = json.Marshal(body)
 			req.CT = "application/json"
@@ -373,7 +372,7 @@ func (j *CaptureJob) captureOn(m *Mgmt, t clusterTarget, token, actor string) (*
 			Error string            `json:"error"`
 		}
 		if json.Unmarshal(resp.Body, &env) != nil || resp.Status != 200 || !env.OK || env.Data == nil {
-			return nil, errors.New(firstNonEmpty(env.Error, fmt.Sprintf("answered %d", resp.Status)))
+			return nil, errors.New(core.FirstNonEmpty(env.Error, fmt.Sprintf("answered %d", resp.Status)))
 		}
 		return env.Data, nil
 	}
@@ -442,7 +441,7 @@ func (j *CaptureJob) bundle() {
 			continue
 		}
 		ok++
-		base := strings.Trim(capNameRe.ReplaceAllString(who, "_"), "_")
+		base := strings.Trim(core.CapNameRe.ReplaceAllString(who, "_"), "_")
 		if base == "" {
 			base = "node"
 		}
@@ -527,77 +526,18 @@ func (m *Mgmt) CaptureClusterBundle() ([]byte, error) {
 		return nil, errors.New("the capture is still running")
 	}
 	if j.tgz == nil {
-		return nil, errors.New(firstNonEmpty(j.Error, "there is nothing to download"))
+		return nil, errors.New(core.FirstNonEmpty(j.Error, "there is nothing to download"))
 	}
 	return j.tgz, nil
 }
 
-// ── the web side ─────────────────────────────────────────────────────────────
-
-func (w *WebServer) registerCapture(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/capture/interfaces", w.authed(w.op("capture.interfaces", nil)))
-	mux.HandleFunc("POST /api/capture/start", w.authed(w.op("capture.start", nil)))
-	mux.HandleFunc("POST /api/capture/stop", w.authed(w.op("capture.stop", nil)))
-	mux.HandleFunc("POST /api/capture/clear", w.authed(w.op("capture.clear", nil)))
-	mux.HandleFunc("GET /api/capture/packets", w.authed(w.op("capture.packets", []string{"since"})))
-	// a timed capture in a buffer of its own, started and then asked for (each request is quick: the peer channel
-	// gives a slow request only a few seconds per address before it tries the next one)
-	mux.HandleFunc("POST /api/capture/job", w.authed(w.op("capture.job.start", nil)))
-	mux.HandleFunc("GET /api/capture/job", w.authed(w.op("capture.job.get", []string{"id"})))
-	mux.HandleFunc("GET /api/capture/download", w.authed(w.handleCaptureDownload))
-	// every node at once: the node asked asks the others itself, so none of these can be relayed
-	mux.HandleFunc("POST /api/clustercapture/start", w.authed(w.op("capture.cluster.start", nil)))
-	mux.HandleFunc("GET /api/clustercapture/status", w.authed(w.op("capture.cluster.status", nil)))
-	mux.HandleFunc("GET /api/clustercapture/download", w.authed(w.handleClusterCaptureDownload))
-	w.registerTshoot(mux)
-}
-
-// handleCaptureDownload sends the buffer of this node's Capture page as a .tgz holding one .pcap.  Reached through another
-// node it is the newest packets that fit the peer channel.
-func (w *WebServer) handleCaptureDownload(rw http.ResponseWriter, r *http.Request, s *session) {
-	w.mg.capture.mu.Lock()
-	iface := w.mg.capture.iface
-	w.mg.capture.mu.Unlock()
-	if iface == "" {
-		iface = "capture"
-	}
-	limit := 0
-	if _, relayed := r.Context().Value(proxyCtxKey{}).(*session); relayed {
-		limit = capRelayBytes
-	}
-	host, _ := hostnameShort()
-	now := time.Now()
-	base := fmt.Sprintf("netdir-%s-%s-%s", host, capNameRe.ReplaceAllString(iface, "_"), now.Format("20060102-150405"))
-	var pcap bytes.Buffer
-	w.mg.capture.writePcap(&pcap, limit)
-	var out bytes.Buffer
-	gz := gzip.NewWriter(&out)
-	tw := tar.NewWriter(gz)
-	if tw.WriteHeader(&tar.Header{Name: base + ".pcap", Mode: 0o644, Size: int64(pcap.Len()), ModTime: now}) == nil {
-		tw.Write(pcap.Bytes())
-	}
-	tw.Close()
-	gz.Close()
-	rw.Header().Set("Content-Type", "application/gzip")
-	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", base+".tgz"))
-	rw.Write(out.Bytes())
-}
-
-func (w *WebServer) handleClusterCaptureDownload(rw http.ResponseWriter, r *http.Request, s *session) {
-	b, err := w.mg.CaptureClusterBundle()
-	if err != nil {
-		jsonError(rw, http.StatusConflict, err.Error())
-		return
-	}
-	rw.Header().Set("Content-Type", "application/gzip")
-	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "netdir-cluster-capture-"+time.Now().Format("20060102-150405")+".tgz"))
-	rw.Write(b)
-}
-
-func hostnameShort() (string, error) {
-	h := selfHost()
-	if i := strings.IndexByte(h, '.'); i > 0 {
-		h = h[:i]
-	}
-	return capNameRe.ReplaceAllString(h, "_"), nil
+// CapturePcap is the buffer of this node's Capture page as a .pcap (at most limit bytes of the newest packets; 0: all) and the
+// interface it was taken on.
+func (m *Mgmt) CapturePcap(limit int) (string, []byte) {
+	m.capture.Mu.Lock()
+	iface := m.capture.Iface
+	m.capture.Mu.Unlock()
+	var b bytes.Buffer
+	m.capture.WritePcap(&b, limit)
+	return iface, b.Bytes()
 }

@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 type fakeIdP struct {
@@ -112,7 +115,7 @@ func (f *fakeIdP) signIn(e *webEnv, provider string, mut func(claims, hdr map[st
 	}
 	var ck string
 	for _, c := range res.Cookies() {
-		if c.Name == ssoCookie {
+		if c.Name == web.SsoCookie {
 			if !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode {
 				f.t.Fatalf("sso cookie flags: %+v", c)
 			}
@@ -121,7 +124,7 @@ func (f *fakeIdP) signIn(e *webEnv, provider string, mut func(claims, hdr map[st
 	}
 	back := get("/api/sso/callback?code=good-code&state="+url.QueryEscape(q.Get("state")), ck)
 	for _, c := range back.Cookies() {
-		if c.Name == sessionCookie && c.Value != "" {
+		if c.Name == web.SessionCookie && c.Value != "" {
 			return back, c.Name + "=" + c.Value
 		}
 	}
@@ -130,12 +133,12 @@ func (f *fakeIdP) signIn(e *webEnv, provider string, mut func(claims, hdr map[st
 
 func ssoEnv(t *testing.T, users ...string) (*webEnv, *fakeIdP) {
 	f := newFakeIdP(t)
-	ssoInsecure, ssoGoogleIssuer, ssoEntraBase = true, f.srv.URL, f.srv.URL
+	core.SsoInsecure, core.SsoGoogleIssuer, core.SsoEntraBase = true, f.srv.URL, f.srv.URL
 	t.Cleanup(func() {
-		ssoInsecure, ssoGoogleIssuer, ssoEntraBase = false, "https://accounts.google.com", "https://login.microsoftonline.com"
+		core.SsoInsecure, core.SsoGoogleIssuer, core.SsoEntraBase = false, "https://accounts.google.com", "https://login.microsoftonline.com"
 	})
 	e := newWebEnv(t)
-	p := defaultWeb()
+	p := core.DefaultWeb()
 	p.GoogleClientID, p.GoogleClientSecret = "gid", f.secret
 	p.EntraTenant, p.EntraClientID, p.EntraClientSecret = "11111111-2222-3333-4444-555555555555", "eid", f.secret
 	p.OIDCName, p.OIDCIssuer, p.OIDCClientID, p.OIDCClientSecret = "Company SSO", f.srv.URL, "oid", f.secret
@@ -143,7 +146,7 @@ func ssoEnv(t *testing.T, users ...string) (*webEnv, *fakeIdP) {
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	return e, f
 }
 
@@ -214,7 +217,7 @@ func TestSSORefusals(t *testing.T) {
 	res, _ := e.client.Do(req)
 	res.Body.Close()
 	for _, c := range res.Cookies() {
-		if c.Name == sessionCookie && c.Value != "" {
+		if c.Name == web.SessionCookie && c.Value != "" {
 			t.Fatal("a forged callback signed someone in")
 		}
 	}
@@ -232,7 +235,7 @@ func TestSSORefusals(t *testing.T) {
 		f.nonce, f.challnge, f.redirect = loc.Query().Get("nonce"), loc.Query().Get("code_challenge"), loc.Query().Get("redirect_uri")
 		ck := ""
 		for _, c := range res.Cookies() {
-			if c.Name == ssoCookie {
+			if c.Name == web.SsoCookie {
 				ck = c.Name + "=" + c.Value
 			}
 		}
@@ -247,7 +250,7 @@ func TestSSORefusals(t *testing.T) {
 	}
 	hasSession := func(r *http.Response) bool {
 		for _, c := range r.Cookies() {
-			if c.Name == sessionCookie && c.Value != "" {
+			if c.Name == web.SessionCookie && c.Value != "" {
 				return true
 			}
 		}
@@ -266,67 +269,24 @@ func TestSSOSessionFollowsTheList(t *testing.T) {
 	}
 	// demoted: the next check (a minute later) makes it read-only; removed: it ends
 	age := func() {
-		e.ws.mu.Lock()
-		for _, s := range e.ws.sessions {
-			s.checked = time.Now().Add(-time.Hour)
+		e.ws.Mu.Lock()
+		for _, s := range e.ws.Sessions {
+			s.Checked = time.Now().Add(-time.Hour)
 		}
-		e.ws.mu.Unlock()
+		e.ws.Mu.Unlock()
 	}
-	p := *e.ws.policy.Load()
+	p := *e.ws.Policy.Load()
 	p.Users = []string{"alice@example.com ro"}
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	age()
 	if r := sessionOf(e, ck); r.code != 200 || r.body["read_only"] != true {
 		t.Fatalf("after demotion: %d %v", r.code, r.body)
 	}
 	p.Users = nil
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	age()
 	if r := sessionOf(e, ck); r.code != 401 {
 		t.Fatalf("after removal: %d", r.code)
-	}
-}
-
-func TestSSOConfigRules(t *testing.T) {
-	c := SSOConfig{Users: []string{"Alice@Example.com rw, bob@example.com", "carol@example.com read-only", "alice@example.com ro"}}
-	if err := c.validateSSO(); err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Join(c.Users, "|"); got != "alice@example.com ro|bob@example.com ro|carol@example.com ro" {
-		t.Fatalf("users: %s", got)
-	}
-	for _, bad := range []SSOConfig{
-		{Users: []string{"not-an-email"}}, {Users: []string{"a@b@c"}}, {EntraTenant: "contoso.com"},
-		{BaseURL: "http://x.example"}, {BaseURL: "https://x.example/path"}, {GoogleClientID: "has space"},
-	} {
-		if err := bad.validateSSO(); err == nil {
-			t.Errorf("%+v was accepted", bad)
-		}
-	}
-	// half set up is not an error and is not a provider
-	h := SSOConfig{GoogleClientID: "x"}
-	if err := h.validateSSO(); err != nil || len(h.providers()) != 0 {
-		t.Fatalf("half set up: %v %v", err, h.providers())
-	}
-	// the cluster's document is unchanged while nothing is set, and carries the settings when they are
-	dc := newDaemonConfig()
-	if sharedOf(dc).SSO != nil {
-		t.Fatal("an empty SSO block appears in the shared document")
-	}
-	dc.Web.GoogleClientID, dc.Web.GoogleClientSecret, dc.Web.Users = "g", "s", []string{"a@b.co rw"}
-	sc := sharedOf(dc)
-	if sc.SSO == nil || sc.SSO.GoogleClientID != "g" {
-		t.Fatal("not shared")
-	}
-	var back DaemonConfig
-	b, _ := json.Marshal(dc)
-	if err := json.Unmarshal(b, &back); err != nil || back.Web.GoogleClientSecret != "s" || len(back.Web.Users) != 1 {
-		t.Fatalf("round trip: %v %+v", err, back.Web.SSOConfig)
-	}
-	// a read-only account is not shown the secrets
-	red, _ := json.Marshal(redactSecrets(dc.Web))
-	if strings.Contains(string(red), `"s"`) && strings.Contains(string(red), "sso_google_client_secret\":\"s") {
-		t.Fatalf("secret shown: %s", red)
 	}
 }
 
@@ -350,46 +310,23 @@ func TestSSOGenericProvider(t *testing.T) {
 		}
 	}
 	// the discovery document must name the issuer it was fetched from
-	cfg := e.ws.ssoCfg()
+	cfg := e.ws.SsoCfg()
 	cfg.OIDCIssuer = f.srv.URL + "/other"
 	cfg.OIDCClientID, cfg.OIDCClientSecret = "oid", f.secret
-	p := cfg.provider("oidc")
-	st := newSSOState()
-	if _, err := st.discovery(p); err == nil {
+	p := cfg.Provider("oidc")
+	st := web.NewSSOState()
+	if _, err := st.Discovery(p); err == nil {
 		t.Fatal("a discovery document naming another issuer was accepted")
 	}
 	// the settings: https only, a trailing slash is dropped, half set up is off
-	ssoInsecure = false // the tests allowed http for the fake provider; real settings may not
-	c := SSOConfig{OIDCIssuer: "https://auth.example.lan/realms/main/", OIDCName: "Home", OIDCClientID: "x"}
-	if err := c.validateSSO(); err != nil || c.OIDCIssuer != "https://auth.example.lan/realms/main" || len(c.providers()) != 0 {
+	core.SsoInsecure = false // the tests allowed http for the fake provider; real settings may not
+	c := core.SSOConfig{OIDCIssuer: "https://auth.example.lan/realms/main/", OIDCName: "Home", OIDCClientID: "x"}
+	if err := c.ValidateSSO(); err != nil || c.OIDCIssuer != "https://auth.example.lan/realms/main" || len(c.Providers()) != 0 {
 		t.Fatalf("%v %+v", err, c)
 	}
-	for _, bad := range []SSOConfig{{OIDCIssuer: "http://auth.example.lan"}, {OIDCIssuer: "auth.example.lan"}, {OIDCName: "<b>x</b>"}, {OIDCName: strings.Repeat("x", 41)}} {
-		if err := bad.validateSSO(); err == nil {
+	for _, bad := range []core.SSOConfig{{OIDCIssuer: "http://auth.example.lan"}, {OIDCIssuer: "auth.example.lan"}, {OIDCName: "<b>x</b>"}, {OIDCName: strings.Repeat("x", 41)}} {
+		if err := bad.ValidateSSO(); err == nil {
 			t.Errorf("%+v was accepted", bad)
 		}
-	}
-}
-
-// A provider with a certificate of its own (self-signed) is refused until "Do not check the provider's certificate" is on.
-func TestSSOSkipVerify(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"issuer": "https://" + r.Host, "authorization_endpoint": "https://" + r.Host + "/auth",
-			"token_endpoint": "https://" + r.Host + "/token", "jwks_uri": "https://" + r.Host + "/keys"})
-	}))
-	defer srv.Close()
-	c := SSOConfig{OIDCIssuer: srv.URL, OIDCClientID: "c", OIDCClientSecret: "s"}
-	if err := c.validateSSO(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newSSOState().discovery(c.provider("oidc")); err == nil {
-		t.Fatal("a self-signed certificate was accepted")
-	}
-	c.OIDCSkipVerify = true
-	if d, err := newSSOState().discovery(c.provider("oidc")); err != nil || d.Issuer != srv.URL {
-		t.Fatalf("with the checkbox on: %v", err)
-	}
-	if c.empty() || (SSOConfig{OIDCSkipVerify: true}).empty() {
-		t.Fatal("the checkbox alone must count as a setting")
 	}
 }

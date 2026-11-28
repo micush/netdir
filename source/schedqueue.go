@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sort"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // One scheduled job at a time per node: a job that falls due while another is running waits its turn (first come, first
@@ -33,7 +35,7 @@ func (s *Scheduler) queuedLocked(id string) bool {
 func (s *Scheduler) drainLocked() {
 	node := s.node
 	if node == "" {
-		node = localNodeID()
+		node = core.LocalNodeID()
 	}
 	now := s.now().Unix()
 	for len(s.running) == 0 {
@@ -50,7 +52,7 @@ func (s *Scheduler) drainLocked() {
 		q := s.st.Queue[pick]
 		s.st.Queue = append(s.st.Queue[:pick:pick], s.st.Queue[pick+1:]...)
 		for _, t := range s.tasks {
-			if t.ID == q.ID && !t.Disabled && t.appliesTo(node) {
+			if t.ID == q.ID && !t.Disabled && t.AppliesTo(node) {
 				actor := "schedule"
 				if q.Actor != "" {
 					actor = q.Actor
@@ -75,7 +77,7 @@ func (s *Scheduler) RunQueued(id, actor string, delay time.Duration) error {
 		if s.running[id] || s.queuedLocked(id) {
 			return errors.New("that task is running or already waiting")
 		}
-		warnf("scheduler: %q asked to run task %q%s", actor, t.Name, map[bool]string{true: " (after a delay)", false: ""}[delay > 0])
+		core.Warnf("scheduler: %q asked to run task %q%s", actor, t.Name, map[bool]string{true: " (after a delay)", false: ""}[delay > 0])
 		s.st.Queue = append(s.st.Queue, schedQueued{ID: id, NotBefore: s.now().Add(delay).Unix(), Actor: actor})
 		s.saveLocked()
 		s.drainLocked()
@@ -87,7 +89,7 @@ func (s *Scheduler) RunQueued(id, actor string, delay time.Duration) error {
 // SchedRunAll asks every node the task is for to run it now, one after another schedStagger apart in node-ID order; each node
 // runs it when it has finished what it is doing.  The answer says what each node was told.
 func (m *Mgmt) SchedRunAll(id, actor string) (map[string]string, error) {
-	var task *SchedTask
+	var task *core.SchedTask
 	m.sched.mu.Lock()
 	for i := range m.sched.tasks {
 		if m.sched.tasks[i].ID == id {
@@ -108,16 +110,16 @@ func (m *Mgmt) SchedRunAll(id, actor string) (map[string]string, error) {
 		snap := m.cl.Snapshot()
 		ts = append(ts, target{snap.NodeID, snap.SelfAddr, true})
 		for _, p := range snap.Peers {
-			if p.Addr != snap.SelfAddr && !containsStr(snap.Removed, p.Addr) {
+			if p.Addr != snap.SelfAddr && !core.ContainsStr(snap.Removed, p.Addr) {
 				ts = append(ts, target{p.NodeID, p.Addr, false})
 			}
 		}
 	} else {
-		ts = append(ts, target{localNodeID(), "this node", true})
+		ts = append(ts, target{core.LocalNodeID(), "this node", true})
 	}
 	var sel []target
 	for _, t := range ts {
-		if task.appliesTo(t.id) {
+		if task.AppliesTo(t.id) {
 			sel = append(sel, t)
 		}
 	}
@@ -134,8 +136,8 @@ func (m *Mgmt) SchedRunAll(id, actor string) (map[string]string, error) {
 		} else {
 			body, _ := json.Marshal(map[string]any{"id": id, "queue": true, "delay_sec": int(delay / time.Second)})
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			var resp *proxyResp
-			resp, err = m.cl.Relay(ctx, t.addr, proxyReq{User: actor, Method: http.MethodPost, Path: "/api/schedule/run", CT: "application/json", Body: body})
+			var resp *core.ProxyResp
+			resp, err = m.cl.Relay(ctx, t.addr, core.ProxyReq{User: actor, Method: http.MethodPost, Path: "/api/schedule/run", CT: "application/json", Body: body})
 			cancel()
 			if err == nil && resp.Status != http.StatusOK {
 				err = fmt.Errorf("answered %d", resp.Status)

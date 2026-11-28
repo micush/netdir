@@ -3,12 +3,14 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"netdir/internal/core"
 )
 
 // SyslogState is the answer of syslog.status: the settings and what forwarding is doing.
 type SyslogState struct {
-	Config SyslogConfig `json:"config"`
-	Status SyslogStatus `json:"status"`
+	Config core.SyslogConfig `json:"config"`
+	Status core.SyslogStatus `json:"status"`
 }
 
 // SyslogStatus is the settings of this node and the state of forwarding.
@@ -17,7 +19,7 @@ func (m *Mgmt) SyslogStatus() (SyslogState, error) {
 	if err != nil {
 		return SyslogState{}, err
 	}
-	st := SyslogState{Status: sysSink.Status()}
+	st := SyslogState{Status: core.SysSink.Status()}
 	if dc.Syslog != nil {
 		st.Config = *dc.Syslog
 	}
@@ -25,7 +27,7 @@ func (m *Mgmt) SyslogStatus() (SyslogState, error) {
 }
 
 // SyslogSet saves this node's syslog settings; forwarding follows at once.
-func (m *Mgmt) SyslogSet(c SyslogConfig, actor string) error {
+func (m *Mgmt) SyslogSet(c core.SyslogConfig, actor string) error {
 	dc, _, err := m.LiveConfig()
 	if err != nil {
 		return err
@@ -35,9 +37,9 @@ func (m *Mgmt) SyslogSet(c SyslogConfig, actor string) error {
 	}
 	note := "syslog: off"
 	if c.Enabled {
-		note = "syslog: " + c.protocol() + " to " + strings.TrimSpace(c.Server)
+		note = "syslog: " + c.ProtocolOrDefault() + " to " + strings.TrimSpace(c.Server)
 	}
-	if c.empty() {
+	if c.Empty() {
 		dc.Syslog = nil
 	} else {
 		dc.Syslog = &c
@@ -55,7 +57,7 @@ func (m *Mgmt) SyslogSet(c SyslogConfig, actor string) error {
 //	--syslog-test                             send a test message and report whether it arrived
 func runSyslog(sock string, f *cliFlags) {
 	var st SyslogState
-	decode(op(sock, "syslog.status", nil), &st)
+	core.Decode(core.Op(sock, "syslog.status", nil), &st)
 	c := st.Config
 	changed := false
 	if v := *f.syslogServer; v != "" {
@@ -84,7 +86,7 @@ func runSyslog(sock string, f *cliFlags) {
 		c.Insecure, changed = true, true
 	}
 	if *f.syslogOff && *f.syslogOn {
-		fatalf("--syslog-disable and --syslog-enable cannot be used together")
+		core.Fatalf("--syslog-disable and --syslog-enable cannot be used together")
 	}
 	if *f.syslogOff && c.Enabled {
 		c.Enabled, changed = false, true
@@ -93,12 +95,12 @@ func runSyslog(sock string, f *cliFlags) {
 		c.Enabled, changed = true, true
 	}
 	if changed {
-		decode(op(sock, "syslog.set", c), &st)
+		core.Decode(core.Op(sock, "syslog.set", c), &st)
 	}
 	printSyslog(st)
 	if *f.syslogTest {
-		var ts SyslogStatus
-		decode(op(sock, "syslog.test", nil), &ts)
+		var ts core.SyslogStatus
+		core.Decode(core.Op(sock, "syslog.test", nil), &ts)
 		fmt.Printf("Test message delivered to %s (%d sent so far).\n", ts.Address, ts.Sent)
 	}
 }
@@ -110,7 +112,7 @@ func printSyslog(st SyslogState) {
 			fmt.Printf("Syslog forwarding is off on this node (server %s kept); turn it on with --syslog-enable\n", c.Server)
 		} else {
 			fmt.Println("Syslog forwarding is off on this node.")
-			fmt.Printf("  Set it up with: %s --syslog-server logs.example.com --syslog-protocol tls\n", strings.TrimSuffix(logFileName, ".log"))
+			fmt.Printf("  Set it up with: %s --syslog-server logs.example.com --syslog-protocol tls\n", strings.TrimSuffix(core.LogFileName, ".log"))
 		}
 		return
 	}
@@ -118,7 +120,7 @@ func printSyslog(st SyslogState) {
 	if s.Connected {
 		state = "connected"
 	}
-	fmt.Printf("Syslog forwarding is on: %s to %s, %s, facility %s, %s\n", s.Protocol, s.Address, c.format(), orDefault(c.Facility, "daemon"), state)
+	fmt.Printf("Syslog forwarding is on: %s to %s, %s, facility %s, %s\n", s.Protocol, s.Address, c.FormatOrDefault(), core.OrDefault(c.Facility, "daemon"), state)
 	fmt.Printf("  Sent %d, dropped %d, queued %d", s.Sent, s.Dropped, s.Queued)
 	if s.LastSent != "" {
 		fmt.Printf(", last sent %s", s.LastSent)

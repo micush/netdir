@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"netdir/internal/core"
 )
 
 // runOSPF is the --ospf family:
@@ -16,8 +18,8 @@ import (
 //	--ospf-disable | --ospf-enable               stop / restart OSPF on this node, keeping the settings
 //	--ospf-interface-disable NAME | --ospf-interface-enable NAME
 func runOSPF(sock string, f *cliFlags) {
-	var st OSPFStatus
-	decode(op(sock, "ospf.status", nil), &st)
+	var st core.OSPFStatus
+	core.Decode(core.Op(sock, "ospf.status", nil), &st)
 	changed := false
 	c := st.Config
 
@@ -39,14 +41,14 @@ func runOSPF(sock string, f *cliFlags) {
 		if t.flag == "-" {
 			*t.dst = 0
 		} else if v, err := strconv.Atoi(t.flag); err != nil || v < 1 {
-			fatalf("--%s must be a number, or - for the default", t.name)
+			core.Fatalf("--%s must be a number, or - for the default", t.name)
 		} else {
 			*t.dst = v
 		}
 		changed = true
 	}
 	if *f.ospfIfAdd != "" {
-		nf := OSPFInterface{Name: *f.ospfIfAdd, Area: *f.ospfArea, Network: *f.ospfNetwork, Password: *f.ospfKey}
+		nf := core.OSPFInterface{Name: *f.ospfIfAdd, Area: *f.ospfArea, Network: *f.ospfNetwork, Password: *f.ospfKey}
 		c.Interfaces = append(c.Interfaces, nf)
 		changed = true
 	}
@@ -61,34 +63,34 @@ func runOSPF(sock string, f *cliFlags) {
 			kept = append(kept, i)
 		}
 		if !found {
-			fatalf("there is no OSPF interface %s (see --ospf)", *f.ospfIfDel)
+			core.Fatalf("there is no OSPF interface %s (see --ospf)", *f.ospfIfDel)
 		}
 		c.Interfaces, changed = kept, true
 	}
 	if changed {
-		decode(op(sock, "ospf.set", c), &st)
+		core.Decode(core.Op(sock, "ospf.set", c), &st)
 	}
 	switch {
 	case *f.ospfDisable && *f.ospfEnable:
-		fatalf("--ospf-disable and --ospf-enable cannot be used together")
+		core.Fatalf("--ospf-disable and --ospf-enable cannot be used together")
 	case *f.ospfDisable:
-		decode(op(sock, "ospf.operate", OSPFOperateArgs{Enabled: false}), &st)
+		core.Decode(core.Op(sock, "ospf.operate", core.OSPFOperateArgs{Enabled: false}), &st)
 	case *f.ospfEnable:
-		decode(op(sock, "ospf.operate", OSPFOperateArgs{Enabled: true}), &st)
+		core.Decode(core.Op(sock, "ospf.operate", core.OSPFOperateArgs{Enabled: true}), &st)
 	}
 	if *f.ospfIfDisable != "" && *f.ospfIfEnable != "" {
-		fatalf("--ospf-interface-disable and --ospf-interface-enable cannot be used together")
+		core.Fatalf("--ospf-interface-disable and --ospf-interface-enable cannot be used together")
 	}
 	if *f.ospfIfDisable != "" {
-		decode(op(sock, "ospf.operate", OSPFOperateArgs{Interface: *f.ospfIfDisable, Enabled: false}), &st)
+		core.Decode(core.Op(sock, "ospf.operate", core.OSPFOperateArgs{Interface: *f.ospfIfDisable, Enabled: false}), &st)
 	}
 	if *f.ospfIfEnable != "" {
-		decode(op(sock, "ospf.operate", OSPFOperateArgs{Interface: *f.ospfIfEnable, Enabled: true}), &st)
+		core.Decode(core.Op(sock, "ospf.operate", core.OSPFOperateArgs{Interface: *f.ospfIfEnable, Enabled: true}), &st)
 	}
 	printOSPF(st)
 }
 
-func printOSPF(st OSPFStatus) {
+func printOSPF(st core.OSPFStatus) {
 	c := st.Config
 	if st.Blocked != "" {
 		fmt.Println("OSPF is not available on this host:", st.Blocked)
@@ -103,7 +105,7 @@ func printOSPF(st OSPFStatus) {
 		fmt.Println("  Set it up with: netdir --ospf-router-id 192.0.2.10 --ospf-interface-add eth0")
 		return
 	}
-	h, d := c.timers()
+	h, d := c.Timers()
 	fmt.Printf("OSPF is on: router id %s, hello %d s, dead %d s, BFD on every interface (OSPFv2 for IPv4, OSPFv3 for IPv6)\n", c.RouterID, h, d)
 	if c.Metric > 0 {
 		fmt.Printf("  Metric of the announced addresses: %d\n", c.Metric)
@@ -120,7 +122,7 @@ func printOSPF(st OSPFStatus) {
 		if a.Up {
 			fmt.Printf("  announced  %s\n", a.Addr)
 		} else {
-			fmt.Printf("  withdrawn  %s  (%s)\n", a.Addr, orDefault(a.Reason, "not held"))
+			fmt.Printf("  withdrawn  %s  (%s)\n", a.Addr, core.OrDefault(a.Reason, "not held"))
 		}
 	}
 	for _, i := range c.Interfaces {

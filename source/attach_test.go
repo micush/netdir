@@ -1,10 +1,14 @@
 package main
 
+import (
+	"netdir/internal/core"
+)
+
 // attachDevices puts every device of the inventory on one gateway: a device on no gateway reads as disabled (config.go,
 // effectiveDevices), and most tests want their devices contacted.
-func attachDevices(dc *DaemonConfig) {
+func attachDevices(dc *core.DaemonConfig) {
 	if len(dc.Groups) == 0 {
-		dc.Groups = []GroupConfig{defaultGroup()}
+		dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 	}
 	have := map[string]bool{}
 	for _, n := range dc.Groups[0].Devices {

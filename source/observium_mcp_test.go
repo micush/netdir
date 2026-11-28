@@ -45,12 +45,12 @@ func TestMCPObserviumShowDevice(t *testing.T) {
 	host, port, _ := net.SplitHostPort(obs.Listener.Addr().String())
 	p, _ := strconv.Atoi(port)
 	e, post := mcpEnv(t, "127.0.0.1")
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.DeviceCredentials = []device.Credential{{Name: "obskey", Token: "OBSTOKEN"}}
-	sup.dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium", Address: host, Port: p, Credential: "obskey", Insecure: true}}
-	attachDevices(sup.dc)
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.DeviceCredentials = []device.Credential{{Name: "obskey", Token: "OBSTOKEN"}}
+	sup.Dc.Settings.Devices = []device.Device{{Name: "obs", Platform: "observium", Address: host, Port: p, Credential: "obskey", Insecure: true}}
+	attachDevices(sup.Dc)
+	sup.Mu.Unlock()
 
 	_, m := post(mcpCall("device_show", `{"target":"obs","command":"show device ipam2"}`))
 	txt, isErr := toolResult(t, m)

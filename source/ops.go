@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // Op is the single entry point the CLI uses (through the status socket) for
@@ -46,67 +48,67 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return m.alertsOp(cmd, raw, actor)
 	}
 	var a struct {
-		ID       string     `json:"id"`
-		A        string     `json:"a"`
-		B        string     `json:"b"`
-		Note     string     `json:"note"`
-		Config   string     `json:"config"`
-		CertPEM  string     `json:"cert_pem"`
-		KeyPEM   string     `json:"key_pem"`
-		CN       string     `json:"cn"`
-		DNS      []string   `json:"dns"`
-		IPs      []string   `json:"ips"`
-		Code     string     `json:"code"`
-		Addr     string     `json:"addr"`
-		Nodes    []string   `json:"nodes"`
-		Force    bool       `json:"force"`
-		Enabled  bool       `json:"enabled"`
-		Repo     string     `json:"repo"`
-		DataB64  string     `json:"data"`
-		Limit    int        `json:"limit"`
-		Hostname string     `json:"hostname"`
-		LogLevel string     `json:"level"`
-		LogText  string     `json:"q"`
-		LogSince string     `json:"since"`
-		LogN     string     `json:"n"`
-		QFrom    string     `json:"from"`
-		QTo      string     `json:"to"`
-		QOutcome string     `json:"outcome"`
-		QClient  string     `json:"client"`
-		NetKind  string     `json:"kind"`
-		PCount   string     `json:"count"`  // nettool: pings
-		PSize    string     `json:"size"`   // nettool: payload bytes
-		PDF      string     `json:"df"`     // nettool: do not fragment
-		PFam     string     `json:"family"` // nettool, portcheck, tlscheck: 4 or 6
-		PPorts   string     `json:"ports"`
-		PPort    string     `json:"port"`
-		PSNI     string     `json:"sni"`
-		PMAC     string     `json:"mac"`
-		PBcast   string     `json:"broadcast"`
-		PIP      string     `json:"ip"`
-		QType    string     `json:"type"`
-		QMethod  string     `json:"method"`
-		QFollow  string     `json:"follow"`
-		QInsec   string     `json:"insecure"`
-		QServer  string     `json:"server"`
-		QCMatch  string     `json:"cmatch"`
-		QGW      string     `json:"gw"` // host.cluster: only the nodes of this gateway (group number)
-		QSMatch  string     `json:"smatch"`
-		Lookup   string     `json:"lookup"`
-		Paused   bool       `json:"paused"`
-		Name     string     `json:"name"`
-		User     string     `json:"username"`
-		Password string     `json:"password"`
-		Expires  int64      `json:"expires"`
-		ReadOnly bool       `json:"read_only"`
-		Iface    string     `json:"iface"`
-		Filter   string     `json:"filter"`
-		Seconds  int        `json:"seconds"`
-		Group    int        `json:"group"`
-		Task     *SchedTask `json:"task"`
-		All      bool       `json:"all"`       // schedule.run: on every node of the task
-		Queue    bool       `json:"queue"`     // schedule.run: wait for the running job instead of refusing
-		DelaySec int        `json:"delay_sec"` // schedule.run with queue: not before this many seconds
+		ID       string          `json:"id"`
+		A        string          `json:"a"`
+		B        string          `json:"b"`
+		Note     string          `json:"note"`
+		Config   string          `json:"config"`
+		CertPEM  string          `json:"cert_pem"`
+		KeyPEM   string          `json:"key_pem"`
+		CN       string          `json:"cn"`
+		DNS      []string        `json:"dns"`
+		IPs      []string        `json:"ips"`
+		Code     string          `json:"code"`
+		Addr     string          `json:"addr"`
+		Nodes    []string        `json:"nodes"`
+		Force    bool            `json:"force"`
+		Enabled  bool            `json:"enabled"`
+		Repo     string          `json:"repo"`
+		DataB64  string          `json:"data"`
+		Limit    int             `json:"limit"`
+		Hostname string          `json:"hostname"`
+		LogLevel string          `json:"level"`
+		LogText  string          `json:"q"`
+		LogSince string          `json:"since"`
+		LogN     string          `json:"n"`
+		QFrom    string          `json:"from"`
+		QTo      string          `json:"to"`
+		QOutcome string          `json:"outcome"`
+		QClient  string          `json:"client"`
+		NetKind  string          `json:"kind"`
+		PCount   string          `json:"count"`  // nettool: pings
+		PSize    string          `json:"size"`   // nettool: payload bytes
+		PDF      string          `json:"df"`     // nettool: do not fragment
+		PFam     string          `json:"family"` // nettool, portcheck, tlscheck: 4 or 6
+		PPorts   string          `json:"ports"`
+		PPort    string          `json:"port"`
+		PSNI     string          `json:"sni"`
+		PMAC     string          `json:"mac"`
+		PBcast   string          `json:"broadcast"`
+		PIP      string          `json:"ip"`
+		QType    string          `json:"type"`
+		QMethod  string          `json:"method"`
+		QFollow  string          `json:"follow"`
+		QInsec   string          `json:"insecure"`
+		QServer  string          `json:"server"`
+		QCMatch  string          `json:"cmatch"`
+		QGW      string          `json:"gw"` // host.cluster: only the nodes of this gateway (group number)
+		QSMatch  string          `json:"smatch"`
+		Lookup   string          `json:"lookup"`
+		Paused   bool            `json:"paused"`
+		Name     string          `json:"name"`
+		User     string          `json:"username"`
+		Password string          `json:"password"`
+		Expires  int64           `json:"expires"`
+		ReadOnly bool            `json:"read_only"`
+		Iface    string          `json:"iface"`
+		Filter   string          `json:"filter"`
+		Seconds  int             `json:"seconds"`
+		Group    int             `json:"group"`
+		Task     *core.SchedTask `json:"task"`
+		All      bool            `json:"all"`       // schedule.run: on every node of the task
+		Queue    bool            `json:"queue"`     // schedule.run: wait for the running job instead of refusing
+		DelaySec int             `json:"delay_sec"` // schedule.run with queue: not before this many seconds
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -158,7 +160,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return snmpStatus(dc.snmpSettings()), nil
+		return core.SnmpStatus(dc.SnmpSettings()), nil
 
 	// LLDP (Configure ▸ Settings ▸ General ▸ Neighbor discovery)
 	case "lldp.status":
@@ -166,7 +168,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return lldpStatus(dc.Settings.LLDP), nil
+		return core.LldpStatus(dc.Settings.LLDP), nil
 	case "lldp.set":
 		if err := m.LLDPSet(a.Enabled, actor); err != nil {
 			return nil, err
@@ -230,7 +232,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "bgp.status":
 		return m.BGPStatus()
 	case "bgp.set":
-		var c BGPConfig
+		var c core.BGPConfig
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -239,7 +241,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}
 		return m.BGPStatus()
 	case "bgp.operate":
-		var o BGPOperateArgs
+		var o core.BGPOperateArgs
 		if err := json.Unmarshal(raw, &o); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -251,7 +253,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "ospf.status":
 		return m.OSPFStatus()
 	case "ospf.set":
-		var c OSPFConfig
+		var c core.OSPFConfig
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -260,7 +262,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}
 		return m.OSPFStatus()
 	case "ospf.operate":
-		var o OSPFOperateArgs
+		var o core.OSPFOperateArgs
 		if err := json.Unmarshal(raw, &o); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -272,7 +274,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "dnsreg.status":
 		return m.DNSRegState()
 	case "dnsreg.set":
-		var c DNSRegConfig
+		var c core.DNSRegConfig
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -286,7 +288,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "syslog.status":
 		return m.SyslogStatus()
 	case "syslog.set":
-		var c SyslogConfig
+		var c core.SyslogConfig
 		if err := json.Unmarshal(raw, &c); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -295,21 +297,21 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}
 		return m.SyslogStatus()
 	case "syslog.test":
-		st, err := sysSink.SendTest(actor)
+		st, err := core.SysSink.SendTest(actor)
 		if err != nil {
 			return nil, err
 		}
 		return st, nil
 	// log
 	case "log.read", "log.view":
-		q, err := logQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)
+		q, err := core.LogQueryFromArgs(a.LogLevel, a.LogText, a.LogSince, a.LogN)
 		if err != nil {
 			return nil, err
 		}
-		if cmd == "log.view" && (q.Limit == 0 || q.Limit > logReadMax) {
-			q.Limit = logReadMax // the GUI never gets more than this in one reply
+		if cmd == "log.view" && (q.Limit == 0 || q.Limit > core.LogReadMax) {
+			q.Limit = core.LogReadMax // the GUI never gets more than this in one reply
 		}
-		return ReadLog(q)
+		return core.ReadLog(q)
 	// packet capture: this node's Capture page, a timed capture (also what each node runs for the cluster-wide one), and
 	// the capture on every node at once
 	case "capture.interfaces":
@@ -324,7 +326,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return map[string]any{"cleared": true}, nil
 	case "capture.packets":
 		since, _ := strconv.ParseInt(a.LogSince, 10, 64)
-		return m.capture.since(since, 3000), nil
+		return m.capture.Since(since, 3000), nil
 	case "capture.run":
 		return m.CaptureRun(context.Background(), a.Iface, a.Filter, a.Seconds, actor)
 	case "capture.job.start":
@@ -350,31 +352,31 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return map[string]any{"none": true}, nil
 	// nmap of a client
 	case "scan.start":
-		return scanStartPorts(a.QClient, a.PPorts, actor)
+		return core.ScanStartPorts(a.QClient, a.PPorts, actor)
 	case "nettool.start":
-		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
+		o, err := core.NetOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
 		if err != nil {
 			return nil, err
 		}
-		return netToolStartOpts(a.NetKind, a.QClient, actor, o)
+		return core.NetToolStartOpts(a.NetKind, a.QClient, actor, o)
 	case "scan.get":
-		return scanGetPorts(a.QClient, a.PPorts)
+		return core.ScanGetPorts(a.QClient, a.PPorts)
 	case "nettool.get":
-		o, err := netOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
+		o, err := core.NetOptsParse(a.NetKind, a.PCount, a.PSize, a.PDF, a.PFam)
 		if err != nil {
 			return nil, err
 		}
-		return netToolGetOpts(a.NetKind, a.QClient, o)
+		return core.NetToolGetOpts(a.NetKind, a.QClient, o)
 	case "portcheck.get":
-		return portCheck(a.QClient, a.PPorts, a.PFam)
+		return core.PortCheck(a.QClient, a.PPorts, a.PFam)
 	case "tlscheck.get":
-		return tlsCheck(a.QClient, a.PPort, a.PSNI, a.PFam)
+		return core.TlsCheck(a.QClient, a.PPort, a.PSNI, a.PFam)
 	case "arp.get":
-		return arpLookup(a.PIP)
+		return core.ArpLookup(a.PIP)
 	case "wake.send":
-		return wakeSend(a.PMAC, a.PBcast, actor)
+		return core.WakeSend(a.PMAC, a.PBcast, actor)
 	case "host.cluster":
-		from, to, err := hostRange(a.QFrom, a.QTo)
+		from, to, err := core.HostRange(a.QFrom, a.QTo)
 		if err != nil {
 			return nil, err
 		}
@@ -387,23 +389,23 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		return m.clusterHostGW(context.Background(), actor, from, to, gid)
 	// host statistics: CPU, memory, disk, network
 	case "host.get":
-		from, to, err := hostRange(a.QFrom, a.QTo)
+		from, to, err := core.HostRange(a.QFrom, a.QTo)
 		if err != nil {
 			return nil, err
 		}
-		return hoststats.Query(from, to), nil
+		return core.Hoststats.Query(from, to), nil
 	// whois of a domain (asked of the registry from this node, only when requested)
 	case "whois.get":
-		return whoisWithAddrs(a.Lookup)
+		return core.WhoisWithAddrs(a.Lookup)
 	// dig of a name, run on this node
 	case "dig.get":
-		return digRun(a.Name, a.QType, a.QServer)
+		return core.DigRun(a.Name, a.QType, a.QServer)
 	// curl of a URL, run on this node
 	case "curl.get":
-		return curlRun(a.Lookup, a.QMethod, a.QFollow == "1" || a.QFollow == "true", a.QInsec == "1" || a.QInsec == "true")
+		return core.CurlRun(a.Lookup, a.QMethod, a.QFollow == "1" || a.QFollow == "true", a.QInsec == "1" || a.QInsec == "true")
 	// a name for an address (reverse lookup) or an address for a name
 	case "dns.lookup.full":
-		return lookupFull(a.Lookup)
+		return core.QueryFull(a.Lookup)
 	case "schedule.status":
 		return m.sched.Status(), nil
 	case "schedule.set":
@@ -431,7 +433,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 		}
 		return map[string]any{"started": true}, nil
 	case "host.lookup":
-		return hostLookup(a.Lookup)
+		return core.HostLookup(a.Lookup)
 	// pause the whole node
 	case "node.status":
 		return m.NodePauseStatus()
@@ -479,7 +481,7 @@ func (m *Mgmt) Op(cmd string, raw json.RawMessage, actor string) (any, error) {
 	case "power.status":
 		return m.PowerStatus(), nil
 	case "power.do":
-		var r PowerReq
+		var r core.PowerReq
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return nil, fmt.Errorf("bad arguments: %w", err)
 		}
@@ -522,7 +524,7 @@ func resolveNodes(m *Mgmt, in []string) []string {
 				out = append(out, p.Addr)
 			}
 		case "self", "this":
-			out = append(out, m.cl.selfAddrForEvents())
+			out = append(out, m.cl.SelfAddrForEvents())
 		default:
 			if n = strings.TrimSpace(n); n != "" {
 				out = append(out, n)

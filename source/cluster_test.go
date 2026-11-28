@@ -8,13 +8,17 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"netdir/device"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"netdir/device"
+	"netdir/internal/cluster"
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 type tnode struct {
@@ -39,12 +43,12 @@ func newTNode(t *testing.T, name string) *tnode {
 	t.Helper()
 	d := t.TempDir()
 	n := &tnode{t: t, name: name, dir: d, conf: filepath.Join(d, "etc", "netdir.conf"), addr: freeAddr(t)}
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Groups[0].GroupID = 1
 	dc.Cluster.Listen, dc.Cluster.Self, dc.Cluster.SyncIntervalSec = n.addr, n.addr, 1
 	dc.Groups[0].Interface = "lo"
 	dc.Groups[0].Priority = 100
-	if err := dc.save(n.conf); err != nil {
+	if err := dc.Save(n.conf); err != nil {
 		t.Fatal(err)
 	}
 	mg, err := NewMgmt(n.conf, filepath.Join(d, "state"), dc)
@@ -53,7 +57,7 @@ func newTNode(t *testing.T, name string) *tnode {
 	}
 	n.mg = mg
 	mg.reloadFn = func() error {
-		nu, err := loadConfig(n.conf)
+		nu, err := core.LoadConfig(n.conf)
 		if err != nil {
 			return err
 		}
@@ -80,8 +84,8 @@ func newTNode(t *testing.T, name string) *tnode {
 	return n
 }
 
-func (n *tnode) cfg() *DaemonConfig {
-	dc, err := loadConfig(n.conf)
+func (n *tnode) cfg() *core.DaemonConfig {
+	dc, err := core.LoadConfig(n.conf)
 	if err != nil {
 		n.t.Fatal(err)
 	}
@@ -130,13 +134,13 @@ func (n *tnode) join2(t *testing.T, via *tnode) { t.Helper(); via.join(n); via.s
 func TestClusterAuthRejections(t *testing.T) {
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	// wrong token
-	bogus := joinCode{Token: "nope", Fp: a.mg.cl.node.Fingerprint(), Addrs: []string{a.addr}}
+	bogus := cluster.JoinCode{Token: "nope", Fp: a.mg.cl.Node.Fingerprint(), Addrs: []string{a.addr}}
 	if err := b.mg.cl.Join(context.Background(), encodeJoinCode(bogus), "t"); err == nil || !strings.Contains(err.Error(), "invalid or expired") {
 		t.Fatalf("bad token: %v", err)
 	}
 	// wrong pinned fingerprint
 	code, _, _ := a.mg.cl.MintJoinCode("t")
-	jc, _ := decodeJoinCode(code)
+	jc, _ := cluster.DecodeJoinCode(code)
 	jc.Fp = strings.Repeat("ab", 32)
 	if err := b.mg.cl.Join(context.Background(), encodeJoinCode(jc), "t"); err == nil || !strings.Contains(err.Error(), "pinned") {
 		t.Fatalf("wrong fingerprint must be refused: %v", err)
@@ -152,30 +156,30 @@ func TestClusterAuthRejections(t *testing.T) {
 	}
 	// an outsider with the right fingerprint but no secret is refused
 	outsider := newTNode(t, "X")
-	self := outsider.mg.cl.node.Self()
-	pa := a.mg.cl.node.Self()
-	err := outsider.mg.cl.call(context.Background(), pa, "GET", "/cluster/status", nil, nil, 3*time.Second)
+	self := outsider.mg.cl.Node.Self()
+	pa := a.mg.cl.Node.Self()
+	err := outsider.mg.cl.Call(context.Background(), pa, "GET", "/cluster/status", nil, nil, 3*time.Second)
 	if err == nil {
 		t.Fatalf("a node without the cluster secret must be refused (as %s)", self.Addr)
 	}
-	if pe, ok := err.(*peerError); !ok || pe.Status != 401 {
+	if pe, ok := err.(*cluster.PeerError); !ok || pe.Status != 401 {
 		t.Fatalf("want 401, got %v", err)
 	}
 	if hasPeer(a, outsider.addr) {
 		t.Fatal("an unauthenticated caller must not be learned as a peer")
 	}
 	// garbage join code
-	if _, err := decodeJoinCode("netdir-join-v1:!!!"); err == nil {
+	if _, err := cluster.DecodeJoinCode("netdir-join-v1:!!!"); err == nil {
 		t.Error("damaged code")
 	}
-	if _, err := decodeJoinCode("hello"); err == nil {
+	if _, err := cluster.DecodeJoinCode("hello"); err == nil {
 		t.Error("foreign code")
 	}
 }
 
-func encodeJoinCode(jc joinCode) string {
+func encodeJoinCode(jc cluster.JoinCode) string {
 	b, _ := jsonMarshal(jc)
-	return joinCodePrefix + b64url(b)
+	return cluster.JoinCodePrefix + b64url(b)
 }
 
 func TestClusterCertificateReplication(t *testing.T) {
@@ -190,7 +194,7 @@ func TestClusterCertificateReplication(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.sync()
-	if s := b.mg.certs.Status(); s.Source != certSourceCluster || s.Fingerprint != a.mg.certs.Status().Fingerprint {
+	if s := b.mg.certs.Status(); s.Source != core.CertSourceCluster || s.Fingerprint != a.mg.certs.Status().Fingerprint {
 		t.Fatalf("B must serve A's certificate: %+v", s)
 	}
 	// installing on the replica goes through the primary
@@ -202,23 +206,23 @@ func TestClusterCertificateReplication(t *testing.T) {
 	if a.mg.certs.Status().Fingerprint != b.mg.certs.Status().Fingerprint {
 		t.Fatal("replica install must end up on both nodes")
 	}
-	if a.mg.certs.Status().Source != certSourceInstalled {
+	if a.mg.certs.Status().Source != core.CertSourceInstalled {
 		t.Fatalf("primary holds it as installed: %+v", a.mg.certs.Status())
 	}
 	if _, err := b.mg.TLSRevert("bob"); err != nil {
 		t.Fatal(err)
 	}
-	if a.mg.certs.Status().Source != certSourceSelfSigned || b.mg.certs.Status().Source != certSourceSelfSigned {
+	if a.mg.certs.Status().Source != core.CertSourceSelfSigned || b.mg.certs.Status().Source != core.CertSourceSelfSigned {
 		t.Fatal("revert must reach both nodes")
 	}
 }
 
 func fakeSourceTarball(t *testing.T, ver string) []byte {
 	t.Helper()
-	files := []srcFile{
-		{"netdir/source/go.mod", []byte("module netdir\n\ngo 1.24\n"), 0o644},
-		{"netdir/source/main.go", []byte("package main\nfunc main(){}\n"), 0o644},
-		{"netdir/source/VERSION", []byte(ver + "\n"), 0o644},
+	files := []core.SrcFile{
+		{Name: "netdir/source/go.mod", Data: []byte("module netdir\n\ngo 1.24\n"), Mode: 0o644},
+		{Name: "netdir/source/main.go", Data: []byte("package main\nfunc main(){}\n"), Mode: 0o644},
+		{Name: "netdir/source/VERSION", Data: []byte(ver + "\n"), Mode: 0o644},
 	}
 	return makeTgz(t, files)
 }
@@ -232,7 +236,7 @@ func TestClusterUpdateIntentAndSourceDistribution(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.sync()
-	running := version()
+	running := core.Version()
 	next := fmt.Sprintf("%d", mustInt(running)+1)
 
 	if _, err := a.mg.UpdateUpload(fakeSourceTarball(t, next), "alice"); err != nil {
@@ -245,29 +249,29 @@ func TestClusterUpdateIntentAndSourceDistribution(t *testing.T) {
 	if err := b.mg.UpdatePush([]string{b.addr}, "bob"); err != nil {
 		t.Fatal(err)
 	}
-	if !a.mg.upd.Intent().wants(b.addr) {
+	if !a.mg.upd.Intent().Wants(b.addr) {
 		t.Fatal("the primary must hold the queued intent")
 	}
 	b.sync()
-	if !b.mg.upd.Intent().wants(b.addr) {
+	if !b.mg.upd.Intent().Wants(b.addr) {
 		t.Fatal("the intent must replicate to B")
 	}
 	// B sees that A has newer source and pulls it
-	p, ver, ok := b.mg.cl.bestSourcePeer(running)
+	p, ver, ok := b.mg.cl.BestSourcePeer(running)
 	if !ok || ver != next || p.Addr != a.addr {
 		t.Fatalf("bestSourcePeer: %v %v %v", p, ver, ok)
 	}
 	// before pulling, B still counts A's newer source as available, so its
 	// queue entry must not be treated as satisfied (it was dropped once)
-	if !versionGreater(b.mg.bestKnownSource(running), running) {
+	if !core.VersionGreater(b.mg.bestKnownSource(running), running) {
 		t.Fatal("B must see A's newer source before pulling it")
 	}
-	got, err := b.mg.cl.pullSource(context.Background(), p)
+	got, err := b.mg.cl.PullSource(context.Background(), p)
 	if err != nil || got != next || b.mg.upd.SourceVersion() != next {
 		t.Fatalf("pull: %v %v", got, err)
 	}
 	// stagger: with A not wanting the update and B wanting it, nobody waits
-	if b.mg.cl.shouldWaitForOthers(next, b.mg.upd.Intent()) {
+	if b.mg.cl.ShouldWaitForOthers(next, b.mg.upd.Intent()) {
 		t.Fatal("B should not wait when nobody else is updating")
 	}
 	// auto-all, and cancel
@@ -293,26 +297,26 @@ func TestClusterUpdateIntentAndSourceDistribution(t *testing.T) {
 func TestClusterPeerAddressFallback(t *testing.T) {
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	b.join(a)
-	ap := a.mg.cl.node.Self()
-	dead := ClusterPeer{Addr: "127.0.0.1:1", Fp: ap.Fp, NodeID: ap.NodeID, Alts: []string{"127.0.0.1:2", a.addr}}
-	var msg PeerStatusMsg
-	if err := b.mg.cl.call(context.Background(), dead, "GET", "/cluster/status", nil, &msg, 20*time.Second); err != nil {
+	ap := a.mg.cl.Node.Self()
+	dead := core.ClusterPeer{Addr: "127.0.0.1:1", Fp: ap.Fp, NodeID: ap.NodeID, Alts: []string{"127.0.0.1:2", a.addr}}
+	var msg cluster.PeerStatusMsg
+	if err := b.mg.cl.Call(context.Background(), dead, "GET", "/cluster/status", nil, &msg, 20*time.Second); err != nil {
 		t.Fatalf("a peer with a working alternative must be reachable: %v", err)
 	}
-	if got := b.mg.cl.addrsFor(dead)[0]; got != a.addr {
+	if got := b.mg.cl.AddrsFor(dead)[0]; got != a.addr {
 		t.Fatalf("the address that worked must be tried first next time, got %s", got)
 	}
 	// nothing works -> one error naming every address
-	none := ClusterPeer{Addr: "127.0.0.1:3", Fp: ap.Fp, NodeID: ap.NodeID, Alts: []string{"127.0.0.1:2"}}
-	err := b.mg.cl.call(context.Background(), none, "GET", "/cluster/status", nil, &msg, 5*time.Second)
+	none := core.ClusterPeer{Addr: "127.0.0.1:3", Fp: ap.Fp, NodeID: ap.NodeID, Alts: []string{"127.0.0.1:2"}}
+	err := b.mg.cl.Call(context.Background(), none, "GET", "/cluster/status", nil, &msg, 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:3") || !strings.Contains(err.Error(), "127.0.0.1:2") {
 		t.Fatalf("the error must name every address tried: %v", err)
 	}
 	// the join code lists name and addresses, and the node advertises alternatives
-	if alts := a.mg.cl.node.Self().Alts; len(alts) == 0 {
+	if alts := a.mg.cl.Node.Self().Alts; len(alts) == 0 {
 		t.Log("no non-loopback interface addresses in this sandbox; alternatives list is empty")
 	}
-	jc, err := decodeJoinCode(mustCode(t, a))
+	jc, err := cluster.DecodeJoinCode(mustCode(t, a))
 	if err != nil || len(jc.Addrs) < 1 || jc.Addrs[0] != a.addr {
 		t.Fatalf("join code addresses: %+v %v", jc, err)
 	}
@@ -327,120 +331,28 @@ func mustCode(t *testing.T, n *tnode) string {
 	return code
 }
 
-func TestSafeToTakeDown(t *testing.T) {
-	serving := func(ids ...int) map[int]bool {
-		m := map[int]bool{}
-		for _, id := range ids {
-			m[id] = true
-		}
-		return m
-	}
-	mine := []GwState{{GroupID: 1, Serving: true}, {GroupID: 2, Serving: true}}
-	cases := []struct {
-		name  string
-		mine  []GwState
-		peers []peerGateways
-		ok    bool
-	}{
-		{"another member serves everything", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(1, 2)}}, true},
-		{"split between two members", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(1)}, {Addr: "c", Known: true, Serving: serving(2)}}, true},
-		{"the only other member is still recovering", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving()}}, false},
-		{"one gateway would be left unserved", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(1)}}, false},
-		{"no other member is reachable", mine, nil, false},
-		{"an older node cannot say: assumed fine", mine, []peerGateways{{Addr: "b", Known: false}}, true},
-		{"this node serves nothing: nothing to lose", []GwState{{GroupID: 1, Serving: false}}, nil, true},
-		{"no gateways at all", nil, nil, true},
-		{"the only other member is on another subnet and can never cover it", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(), Offnet: serving(1, 2)}}, true},
-		{"one member is on another subnet, another is just recovering", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(), Offnet: serving(1, 2)}, {Addr: "c", Known: true, Serving: serving()}}, false},
-		{"another subnet, but one gateway could be covered", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(), Offnet: serving(1)}}, false},
-		{"the other member is unreachable and may come back", mine, []peerGateways{{Addr: "b", Down: true}}, false},
-		{"the other member only just came back", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(1, 2), Fresh: serving(1, 2)}}, false},
-		{"one settled member is enough", mine, []peerGateways{{Addr: "b", Known: true, Serving: serving(1, 2), Fresh: serving(1, 2)}, {Addr: "c", Known: true, Serving: serving(1, 2)}}, true},
-	}
-	for _, c := range cases {
-		if ok, why := safeToTakeDown(c.mine, c.peers); ok != c.ok || (!ok && why == "") {
-			t.Errorf("%s: got %v %q, want %v", c.name, ok, why, c.ok)
-		}
-	}
-}
-
-// Two of three nodes paused: the one serving node cannot go (nothing covers it),
-// so a paused node must not wait for it even though it sorts earlier.
-func TestHeldMemberDoesNotBlockPausedOnes(t *testing.T) {
-	srv := func(ids ...int) map[int]bool {
-		m := map[int]bool{}
-		for _, id := range ids {
-			m[id] = true
-		}
-		return m
-	}
-	active := []GwState{{GroupID: 1, Serving: true}}
-	members := []peerGateways{
-		{Addr: "a", Known: true, Serving: srv(1)}, // the only one serving
-		{Addr: "b", Known: true, Serving: srv()},  // paused
-		{Addr: "c", Known: true, Serving: srv()},  // paused
-	}
-	if !heldBySafety("a", active, members) {
-		t.Fatal("the only serving member must count as held back")
-	}
-	if heldBySafety("b", nil, members) {
-		t.Fatal("a paused member serves nothing; it is never held back")
-	}
-	// once a paused member is back and settled, the serving one is no longer held
-	members[1].Serving = srv(1)
-	if heldBySafety("a", active, members) {
-		t.Fatal("with a settled second server the first is free to go")
-	}
-	// an older node cannot report gateways: never treated as held
-	if heldBySafety("a", nil, members) {
-		t.Fatal("no gateway report means not held")
-	}
-}
-
-func TestGatewayStates(t *testing.T) {
-	g1, g2, g3 := defaultGroup(), defaultGroup(), defaultGroup()
-	g2.GroupID, g2.VIP4, g2.VIP6 = 2, "10.2.0.1/24", "2001:db8::1/64"
-	g3.GroupID, g3.VIP4, g3.Paused = 3, "10.3.0.1/24", true
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{g1, g2, g3}
-	rows := []SnapshotRow{
-		{GroupID: 1, AF: "v4", Local: true, State: "forward", ServiceUp: true},
-		{GroupID: 2, AF: "v4", Local: true, State: "active"},
-		{GroupID: 2, AF: "v6", Local: true, State: "speak"}, // v6 not yet elected
-		{GroupID: 1, AF: "v4", Local: false, State: "active"},
-	}
-	got := gatewayStates(dc, rows)
-	if len(got) != 2 || got[0].GroupID != 1 || !got[0].Serving || got[1].GroupID != 2 || got[1].Serving {
-		t.Fatalf("gateway states (paused left out, dual-stack needs both, NTP must be up): %+v", got)
-	}
-	rows[0].ServiceUp = false
-	if gatewayStates(dc, rows)[0].Serving {
-		t.Fatal("a gateway whose DNS listener is down is not serving")
-	}
-}
-
 // A gateway counts as cover for a neighbour only after it has been served for
 // servingSettle without a break.
 func TestLocalGatewaysFreshThenSettled(t *testing.T) {
-	old := servingSettle
-	servingSettle = 60 * time.Millisecond
-	defer func() { servingSettle = old }()
+	old := cluster.ServingSettle
+	cluster.ServingSettle = 60 * time.Millisecond
+	defer func() { cluster.ServingSettle = old }()
 	m := &Mgmt{}
 	up := true
-	m.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: up}} }
-	if g := m.localGateways(); !g[0].Serving || !g[0].Fresh {
+	m.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: up}} }
+	if g := m.LocalGateways(); !g[0].Serving || !g[0].Fresh {
 		t.Fatalf("just started serving must be fresh: %+v", g)
 	}
 	time.Sleep(90 * time.Millisecond)
-	if g := m.localGateways(); !g[0].Serving || g[0].Fresh {
+	if g := m.LocalGateways(); !g[0].Serving || g[0].Fresh {
 		t.Fatalf("settled: %+v", g)
 	}
 	up = false
-	if g := m.localGateways(); g[0].Serving || g[0].Fresh {
+	if g := m.LocalGateways(); g[0].Serving || g[0].Fresh {
 		t.Fatalf("not serving: %+v", g)
 	}
 	up = true
-	if g := m.localGateways(); !g[0].Fresh {
+	if g := m.LocalGateways(); !g[0].Fresh {
 		t.Fatalf("a break must restart the clock: %+v", g)
 	}
 }
@@ -457,11 +369,11 @@ func TestRollingUpdateWithPausedNodes(t *testing.T) {
 	for _, n := range ns {
 		n := n
 		serving := n == active
-		n.mg.gwFn = func() []GwState {
+		n.mg.gwFn = func() []core.GwState {
 			if !serving {
-				return []GwState{} // paused: no gateways reported
+				return []core.GwState{} // paused: no gateways reported
 			}
-			return []GwState{{GroupID: 1, Serving: true}}
+			return []core.GwState{{GroupID: 1, Serving: true}}
 		}
 	}
 	for i := 0; i < 2; i++ {
@@ -483,13 +395,13 @@ func TestRollingUpdateWithPausedNodes(t *testing.T) {
 			n.sync()
 		}
 	}
-	time.Sleep(servingSettle + 200*time.Millisecond) // the serving node's cover is settled
-	next := fmt.Sprintf("%d", mustInt(version())+1)
+	time.Sleep(cluster.ServingSettle + 200*time.Millisecond) // the serving node's cover is settled
+	next := fmt.Sprintf("%d", mustInt(core.Version())+1)
 	// the first paused node goes at once; the second still takes its turn after it
-	if ns[1].mg.cl.shouldWaitForOthers(next, ns[1].mg.upd.Intent()) {
+	if ns[1].mg.cl.ShouldWaitForOthers(next, ns[1].mg.upd.Intent()) {
 		t.Fatalf("paused node %s must not wait for the serving node that cannot go", ns[1].name)
 	}
-	if !ns[2].mg.cl.shouldWaitForOthers(next, ns[2].mg.upd.Intent()) {
+	if !ns[2].mg.cl.ShouldWaitForOthers(next, ns[2].mg.upd.Intent()) {
 		t.Fatalf("paused node %s must still wait its turn behind %s", ns[2].name, ns[1].name)
 	}
 	for _, n := range ns[1:] {
@@ -505,23 +417,23 @@ func TestRollingUpdateWithPausedNodes(t *testing.T) {
 // The Topology drawing's cluster nodes: this node first with the gateway's own colour, the others from what they report,
 // and a node that stops answering turns red; one node alone is drawn too: just this node.
 func TestCanvasClusterNodes(t *testing.T) {
-	failDelay = 0
+	web.FailDelay = 0
 	a, b := newTNode(t, "A"), newTNode(t, "B")
-	if got := a.mg.cl.canvasNodes(1, "ok", "fine", false); len(got) != 1 || !got[0].Self || got[0].Status != "ok" || got[0].Gw != "ok" || got[0].Name == "" {
+	if got := a.mg.cl.CanvasNodes(1, "ok", "fine", false); len(got) != 1 || !got[0].Self || got[0].Status != "ok" || got[0].Gw != "ok" || got[0].Name == "" {
 		t.Fatalf("a lone node is drawn as just itself, serving: %+v", got)
 	}
-	var none *Cluster // no cluster at all: still this node
-	if got := none.canvasNodes(1, "warn", "no server", false); len(got) != 1 || !got[0].Self || got[0].Gw != "degraded" {
+	var none *cluster.Cluster // no cluster at all: still this node
+	if got := none.CanvasNodes(1, "warn", "no server", false); len(got) != 1 || !got[0].Self || got[0].Gw != "degraded" {
 		t.Fatalf("no cluster: %+v", got)
 	}
 	a.join2(t, b)
-	a.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
-	b.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
+	a.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
+	b.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
 	paused := false
 	b.mg.pausedFn = func() bool { return paused }
 	a.sync()
 	b.sync()
-	ns := a.mg.cl.canvasNodes(1, "warn", "one address down", false)
+	ns := a.mg.cl.CanvasNodes(1, "warn", "one address down", false)
 	if len(ns) != 2 || !ns[0].Self || ns[0].Status != "warn" || ns[0].Label != "degraded" || ns[0].Detail != "one address down" {
 		t.Fatalf("self: %+v", ns)
 	}
@@ -529,29 +441,29 @@ func TestCanvasClusterNodes(t *testing.T) {
 		t.Fatalf("peer: %+v", ns[1])
 	}
 	// a gateway B does not run (paused or absent) and a node B that is paused
-	if n := a.mg.cl.canvasNodes(2, "ok", "", false)[1]; n.Status != "paused" || n.Label != "not serving" {
+	if n := a.mg.cl.CanvasNodes(2, "ok", "", false)[1]; n.Status != "paused" || n.Label != "not serving" {
 		t.Fatalf("gateway not on the peer: %+v", n)
 	}
-	b.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: false}} }
+	b.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: false}} }
 	a.sync()
-	if n := a.mg.cl.canvasNodes(1, "ok", "", false)[1]; n.Status != "warn" || n.Label != "not serving" {
+	if n := a.mg.cl.CanvasNodes(1, "ok", "", false)[1]; n.Status != "warn" || n.Label != "not serving" {
 		t.Fatalf("up but not serving: %+v", n)
 	}
 	paused = true
 	a.sync()
-	if n := a.mg.cl.canvasNodes(1, "ok", "", false)[1]; n.Status != "paused" || n.Label != "paused" || !n.Paused {
+	if n := a.mg.cl.CanvasNodes(1, "ok", "", false)[1]; n.Status != "paused" || n.Label != "paused" || !n.Paused {
 		t.Fatalf("paused node: %+v", n)
 	}
-	if n := a.mg.cl.canvasNodes(2, "ok", "", false)[1]; n.Status != "paused" || n.Paused != true {
+	if n := a.mg.cl.CanvasNodes(2, "ok", "", false)[1]; n.Status != "paused" || n.Paused != true {
 		t.Fatalf("paused node, other gateway: %+v", n)
 	}
-	if n := a.mg.cl.canvasNodes(1, "paused", "p", true)[0]; !n.Paused || n.Label != "paused" {
+	if n := a.mg.cl.CanvasNodes(1, "paused", "p", true)[0]; !n.Paused || n.Label != "paused" {
 		t.Fatalf("this node paused: %+v", n)
 	}
 	// B goes away
 	b.mg.cl.Stop()
 	a.sync()
-	n := a.mg.cl.canvasNodes(1, "ok", "", false)[1]
+	n := a.mg.cl.CanvasNodes(1, "ok", "", false)[1]
 	if n.Status != "bad" || n.Label != "not answering" || n.Reachable || n.LastSeen == 0 {
 		t.Fatalf("unreachable node: %+v", n)
 	}
@@ -559,11 +471,11 @@ func TestCanvasClusterNodes(t *testing.T) {
 
 // The picture the GUI and the CLI get carries the nodes; a daemon alone carries just itself.
 func TestMarkNodesOnCanvas(t *testing.T) {
-	failDelay = 0
-	(&StatusServer{}).markNodes([]CanvasGateway{{GroupID: 1}}) // no management at all: no panic
+	web.FailDelay = 0
+	(&StatusServer{}).markNodes([]core.CanvasGateway{{GroupID: 1}}) // no management at all: no panic
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	s := &StatusServer{mg: a.mg}
-	gs := []CanvasGateway{{GroupID: 1, Status: "ok", Detail: "up"}}
+	gs := []core.CanvasGateway{{GroupID: 1, Status: "ok", Detail: "up"}}
 	s.markNodes(gs)
 	if len(gs[0].Nodes) != 1 || !gs[0].Nodes[0].Self || gs[0].ClusterStatus != "ok" {
 		t.Fatalf("a lone node: %+v (%q)", gs[0].Nodes, gs[0].ClusterStatus)
@@ -583,28 +495,28 @@ func TestMarkNodesOnCanvas(t *testing.T) {
 // A node whose CPU, memory or disk is over 85% is red on the drawing until all are back under it: this node from its own
 // reading, another from what it reports; one that stops answering stays "not answering".
 func TestCanvasNodeYellowWhenStrained(t *testing.T) {
-	failDelay = 0
-	old := hostLoadFn
-	t.Cleanup(func() { hostLoadFn = old })
-	load := HostLoad{CPU: 10, Mem: 40, Disk: 50, DiskMount: "/"}
-	hostLoadFn = func() (HostLoad, bool) { return load, true }
+	web.FailDelay = 0
+	old := core.HostLoadFn
+	t.Cleanup(func() { core.HostLoadFn = old })
+	load := core.HostLoad{CPU: 10, Mem: 40, Disk: 50, DiskMount: "/"}
+	core.HostLoadFn = func() (core.HostLoad, bool) { return load, true }
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	a.join2(t, b)
-	a.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
+	a.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
 	b.mg.gwFn = a.mg.gwFn
 	a.sync()
 	b.sync()
-	get := func() []CanvasNode { return a.mg.cl.canvasNodes(1, "ok", "fine", false) }
+	get := func() []core.CanvasNode { return a.mg.cl.CanvasNodes(1, "ok", "fine", false) }
 	ns := get()
 	if ns[0].Status != "ok" || ns[1].Status != "ok" || len(ns[0].Strain)+len(ns[1].Strain) != 0 || ns[0].Host == nil || ns[1].Host == nil || ns[1].Host.Disk != 50 {
 		t.Fatalf("a quiet cluster: %+v", ns)
 	}
-	load = HostLoad{CPU: 85, Mem: 85, Disk: 85, DiskMount: "/"} // exactly 85% is not over
+	load = core.HostLoad{CPU: 85, Mem: 85, Disk: 85, DiskMount: "/"} // exactly 85% is not over
 	a.sync()
 	if ns := get(); ns[0].Status != "ok" || ns[1].Status != "ok" {
 		t.Fatalf("85%% is not over: %+v", ns)
 	}
-	load = HostLoad{CPU: 91, Mem: 40, Disk: 88, DiskMount: "/var"}
+	load = core.HostLoad{CPU: 91, Mem: 40, Disk: 88, DiskMount: "/var"}
 	a.sync()
 	ns = get()
 	for i, n := range ns {
@@ -621,13 +533,13 @@ func TestCanvasNodeYellowWhenStrained(t *testing.T) {
 	if n := get()[1]; n.Status != "warn" || !n.Paused {
 		t.Fatalf("paused and over the limit: %+v", n)
 	}
-	load = HostLoad{CPU: 20, Mem: 40, Disk: 50, DiskMount: "/"}
+	load = core.HostLoad{CPU: 20, Mem: 40, Disk: 50, DiskMount: "/"}
 	a.sync()
 	if ns := get(); ns[0].Status != "ok" || ns[1].Status != "paused" || len(ns[0].Strain) != 0 {
 		t.Fatalf("back under the limit: %+v", ns)
 	}
 	// unreachable stays "not answering", whatever it last reported
-	load = HostLoad{CPU: 99, Mem: 99, Disk: 99, DiskMount: "/"}
+	load = core.HostLoad{CPU: 99, Mem: 99, Disk: 99, DiskMount: "/"}
 	a.sync()
 	b.mg.cl.Stop()
 	a.sync()
@@ -639,11 +551,11 @@ func TestCanvasNodeYellowWhenStrained(t *testing.T) {
 // The Upgrade page pages through the whole history, so the status carries every event kept, newest first.
 func TestUpdateStatusCarriesWholeHistory(t *testing.T) {
 	a := newTNode(t, "A")
-	a.mg.upd.mu.Lock()
+	a.mg.upd.Mu.Lock()
 	for i := 0; i < 130; i++ {
-		a.mg.upd.addEventLocked(UpdateEvent{Kind: "applied", To: fmt.Sprint(i)})
+		a.mg.upd.AddEventLocked(core.UpdateEvent{Kind: "applied", To: fmt.Sprint(i)})
 	}
-	a.mg.upd.mu.Unlock()
+	a.mg.upd.Mu.Unlock()
 	h := a.mg.UpdateStatus().History
 	if len(h) != 130 || h[0].To != "129" || h[129].To != "0" {
 		t.Fatalf("status history: %d events, first %q", len(h), h[0].To)
@@ -652,22 +564,24 @@ func TestUpdateStatusCarriesWholeHistory(t *testing.T) {
 
 // A peer that serves but sees its own DNS servers failing is drawn degraded, like this node's own shape would be.
 func TestCanvasPeerShowsItsOwnHealth(t *testing.T) {
-	failDelay = 0
+	web.FailDelay = 0
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	a.join2(t, b)
-	a.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
+	a.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
 	health, why := "warn", "running, but some DNS servers are down"
-	b.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true, Health: health, HealthWhy: why}} }
+	b.mg.gwFn = func() []core.GwState {
+		return []core.GwState{{GroupID: 1, Serving: true, Health: health, HealthWhy: why}}
+	}
 	a.sync()
 	b.sync()
-	peer := func() CanvasNode {
-		for _, n := range a.mg.cl.canvasNodes(1, "ok", "fine", false) {
+	peer := func() core.CanvasNode {
+		for _, n := range a.mg.cl.CanvasNodes(1, "ok", "fine", false) {
 			if !n.Self {
 				return n
 			}
 		}
 		t.Fatal("no peer node")
-		return CanvasNode{}
+		return core.CanvasNode{}
 	}
 	if n := peer(); n.Status != "warn" || n.Label != "degraded" || !strings.Contains(n.Detail, "some DNS servers are down") {
 		t.Fatalf("degraded peer: %+v", n)
@@ -687,8 +601,8 @@ func TestCanvasPeerShowsItsOwnHealth(t *testing.T) {
 // This node's own entry says the same words as the other nodes' when it is healthy, and its own reason when it is not.
 func TestCanvasSelfNodeSaysWhatThePeersSay(t *testing.T) {
 	a, _ := twoNodeCluster(t)
-	self := func(status, detail string, paused bool) CanvasNode {
-		return a.mg.cl.canvasNodes(1, status, detail, paused)[0]
+	self := func(status, detail string, paused bool) core.CanvasNode {
+		return a.mg.cl.CanvasNodes(1, status, detail, paused)[0]
 	}
 	if n := self("ok", "IPv4: running and answering; IPv6: running and answering", false); !n.Self || n.Detail != "Serving this gateway" || n.Status != "ok" || n.Label != "serving" {
 		t.Fatalf("healthy: %+v", n)
@@ -717,10 +631,10 @@ func TestCanvasSelfNodeSaysWhatThePeersSay(t *testing.T) {
 // A node that is the only member has nobody to cover its gateways, so the "keep every gateway served" rule must not hold
 // its update back for ever; once another member is known the rule applies again.
 func TestUpdateSafeForTheOnlyMember(t *testing.T) {
-	failDelay = 0
+	web.FailDelay = 0
 	a, b := newTNode(t, "A"), newTNode(t, "B")
-	a.mg.gwFn = func() []GwState { return []GwState{{GroupID: 1, Serving: true}} }
-	b.mg.gwFn = func() []GwState { return []GwState{} }
+	a.mg.gwFn = func() []core.GwState { return []core.GwState{{GroupID: 1, Serving: true}} }
+	b.mg.gwFn = func() []core.GwState { return []core.GwState{} }
 	if ok, why := a.mg.updateSafeToApply(); !ok {
 		t.Fatalf("the only member serving a gateway was held back from updating: %q", why)
 	}
@@ -752,60 +666,6 @@ func TestUpdateSafeForTheOnlyMember(t *testing.T) {
 	}
 }
 
-// A gateway paused on every node reads "paused" on every node that answers, not "not serving".
-func TestLabelPausedAll(t *testing.T) {
-	nodes := []CanvasNode{
-		{Self: true, Reachable: true, Status: "paused", Label: "paused", Gw: "paused"},
-		{Reachable: true, Status: "paused", Label: "not serving", Gw: "paused", Detail: "This gateway is paused or not set up on that node"},
-		{Reachable: true, Status: "warn", Label: "not serving", Gw: "notserving", Detail: "That node is up but is not serving this gateway (yet)"},
-		{Reachable: false, Status: "bad", Label: "not answering", Gw: "down"},
-		{Reachable: true, Excluded: true, Status: "paused", Label: "removed", Gw: "removed"},
-		{Reachable: true, Status: "paused", Label: "paused", Gw: "paused", Paused: true, Detail: "This node is paused"},
-		{Reachable: true, Status: "warn", Label: "disk 91%", Gw: "paused", Detail: "Over 85%: disk 91%. This gateway is paused or not set up on that node"},
-	}
-	labelPausedAll(nodes)
-	if nodes[1].Label != "paused" || nodes[1].Status != "paused" || !strings.Contains(nodes[1].Detail, "all nodes") {
-		t.Fatalf("a node that answers: %+v", nodes[1])
-	}
-	if nodes[0].Label != "paused" || nodes[2].Label != "not serving" || nodes[3].Label != "not answering" || nodes[4].Label != "removed" || nodes[5].Detail != "This node is paused" {
-		t.Fatalf("the others must keep their words: %+v", nodes)
-	}
-	if nodes[6].Label != "disk 91%" || !strings.Contains(nodes[6].Detail, "Over 85%") || !strings.Contains(nodes[6].Detail, "all nodes") {
-		t.Fatalf("a node that is also over the load limit keeps its warning: %+v", nodes[6])
-	}
-}
-
-func TestPickSuccessor(t *testing.T) {
-	pv := func(addr string, rev uint64, ver string, mods ...func(*PeerView)) PeerView {
-		p := PeerView{Addr: addr, Reachable: true, SharedRev: rev, Version: ver}
-		for _, m := range mods {
-			m(&p)
-		}
-		return p
-	}
-	self := pv("10.0.0.1", 9, "5", func(p *PeerView) { p.Self = true; p.IsPrimary = true })
-	if got := pickSuccessor([]PeerView{self}, "5"); got != "" {
-		t.Fatalf("alone: %q", got)
-	}
-	// the newest settings win
-	if got := pickSuccessor([]PeerView{self, pv("10.0.0.2", 7, "5"), pv("10.0.0.3", 9, "5")}, "5"); got != "10.0.0.3" {
-		t.Fatalf("newest revision: %q", got)
-	}
-	// down, updating or failed members are skipped
-	got := pickSuccessor([]PeerView{self,
-		pv("10.0.0.2", 9, "5", func(p *PeerView) { p.Reachable = false }),
-		pv("10.0.0.3", 9, "5", func(p *PeerView) { p.Updating = true }),
-		pv("10.0.0.4", 9, "5", func(p *PeerView) { p.UpdateFailed = "x" }),
-		pv("10.0.0.5", 3, "5")}, "5")
-	if got != "10.0.0.5" {
-		t.Fatalf("skipping unavailable members: %q", got)
-	}
-	// a tie goes to the same version, then the lowest address
-	if got := pickSuccessor([]PeerView{self, pv("10.0.0.2", 9, "4"), pv("10.0.0.3", 9, "5"), pv("10.0.0.4", 9, "5")}, "5"); got != "10.0.0.3" {
-		t.Fatalf("tie: %q", got)
-	}
-}
-
 // A primary that is shut down on purpose gives the role to a replica and comes back as a replica.
 func TestHandOverPrimary(t *testing.T) {
 	a, b := newTNode(t, "A"), newTNode(t, "B")
@@ -814,16 +674,16 @@ func TestHandOverPrimary(t *testing.T) {
 		a.sync()
 		b.sync()
 	}
-	before := a.mg.cl.node.Snapshot()
-	if before.Role != RolePrimary {
+	before := a.mg.cl.Node.Snapshot()
+	if before.Role != core.RolePrimary {
 		t.Fatalf("A is %s", before.Role)
 	}
 	to, err := a.mg.cl.HandOverPrimary("test", "a test")
 	if err != nil || to != b.addr {
 		t.Fatalf("hand over: %q %v", to, err)
 	}
-	as, bs := a.mg.cl.node.Snapshot(), b.mg.cl.node.Snapshot()
-	if as.Role != RoleReplica || bs.Role != RolePrimary || as.Epoch != before.Epoch+1 || bs.Epoch != as.Epoch || as.PrimaryAddr != b.addr {
+	as, bs := a.mg.cl.Node.Snapshot(), b.mg.cl.Node.Snapshot()
+	if as.Role != cluster.RoleReplica || bs.Role != core.RolePrimary || as.Epoch != before.Epoch+1 || bs.Epoch != as.Epoch || as.PrimaryAddr != b.addr {
 		t.Fatalf("after: A %s epoch %d primary %s; B %s epoch %d", as.Role, as.Epoch, as.PrimaryAddr, bs.Role, bs.Epoch)
 	}
 	// the new primary has no one to give it to except the old one, which is a replica now: handing over again from B works the same
@@ -856,7 +716,7 @@ func TestClusterDeletePeerLeavesNothing(t *testing.T) {
 		}
 	}
 	c.mg.cl.SyncOnce(context.Background())
-	if s := c.mg.cl.Snapshot(); s.Role != RolePrimary || len(s.Peers) != 0 {
+	if s := c.mg.cl.Snapshot(); s.Role != core.RolePrimary || len(s.Peers) != 0 {
 		t.Fatalf("a deleted node that is still running must reset to a single-node cluster: %+v", s)
 	}
 	if err := a.mg.cl.DeletePeer(c.addr, "admin"); err == nil {
@@ -882,7 +742,7 @@ func TestClusterDeletePeerLeavesNothing(t *testing.T) {
 // any member offers, and joining is not a decision to upgrade the others.
 func TestJoiningNodeDoesNotOfferItsSource(t *testing.T) {
 	a, b := newTNode(t, "A"), newTNode(t, "B")
-	running := version()
+	running := core.Version()
 	next := fmt.Sprintf("%d", mustInt(running)+1)
 	if _, err := b.mg.upd.ExtractSource(fakeSourceTarball(t, next)); err != nil { // staged on B before it joins
 		t.Fatal(err)
@@ -894,10 +754,10 @@ func TestJoiningNodeDoesNotOfferItsSource(t *testing.T) {
 	if v := b.mg.upd.OfferedSource(); v != "" {
 		t.Fatalf("a node that just joined offers v%s", v)
 	}
-	if p, v, ok := a.mg.cl.bestSourcePeer(running); ok {
+	if p, v, ok := a.mg.cl.BestSourcePeer(running); ok {
 		t.Fatalf("A would pull v%s from %s", v, p.Addr)
 	}
-	if _, err := a.mg.cl.pullSource(context.Background(), ClusterPeer{Addr: b.addr, Fp: b.mg.cl.node.Fingerprint()}); err == nil {
+	if _, err := a.mg.cl.PullSource(context.Background(), core.ClusterPeer{Addr: b.addr, Fp: b.mg.cl.Node.Fingerprint()}); err == nil {
 		t.Fatal("B served its source although it is held")
 	}
 	// an administrator stages a release on B on purpose: now it is offered
@@ -905,50 +765,27 @@ func TestJoiningNodeDoesNotOfferItsSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	if p, v, ok := a.mg.cl.bestSourcePeer(running); !ok || v != next || p.Addr != b.addr {
+	if p, v, ok := a.mg.cl.BestSourcePeer(running); !ok || v != next || p.Addr != b.addr {
 		t.Fatalf("after an upload on B: %v %v %v", p, v, ok)
 	}
 }
 
-func TestUpdaterHoldsSource(t *testing.T) {
-	u := newTestUpdater(t)
-	u.HoldSource() // nothing staged: nothing to hold
-	if _, err := u.ExtractSource(makeTgz(t, good("9"))); err != nil {
-		t.Fatal(err)
-	}
-	if u.OfferedSource() != "9" {
-		t.Fatal("a staged source is offered")
-	}
-	u.HoldSource()
-	if u.OfferedSource() != "" || u.SourceVersion() != "9" {
-		t.Fatal("a held source is not offered but is still there")
-	}
-	if _, err := u.ExtractSource(makeTgz(t, good("10"))); err != nil || u.OfferedSource() != "10" {
-		t.Fatal("something newer staged later is offered")
-	}
-	u.HoldSource()
-	u.ReleaseSource()
-	if u.OfferedSource() != "10" {
-		t.Fatal("released")
-	}
-}
-
 func TestClusterJoinSyncPromote(t *testing.T) {
-	failDelay = 0
+	web.FailDelay = 0
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 
-	if s := a.mg.cl.Snapshot(); s.Role != RolePrimary || s.Epoch != 1 {
+	if s := a.mg.cl.Snapshot(); s.Role != core.RolePrimary || s.Epoch != 1 {
 		t.Fatalf("a fresh node is a primary at epoch 1: %+v", s)
 	}
 	// seed distinct local settings
 	bc := b.cfg()
 	bc.Groups[0].Priority = 50
 	bc.Groups[0].Interface = "lo"
-	bc.save(b.conf)
+	bc.Save(b.conf)
 	b.mg.reloadFn()
 
 	a.join2(t, b)
-	if s := b.mg.cl.Snapshot(); s.Role != RoleReplica || s.PrimaryAddr != a.addr {
+	if s := b.mg.cl.Snapshot(); s.Role != cluster.RoleReplica || s.PrimaryAddr != a.addr {
 		t.Fatalf("B must be a replica of A: %+v", s)
 	}
 	if !hasPeer(a, b.addr) {
@@ -956,7 +793,7 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 	}
 	// a node that already belongs to a cluster can't join another
 	code, _, _ := a.mg.cl.MintJoinCode("t")
-	if err := b.mg.cl.Join(context.Background(), code, "t"); err != ErrNotJoinable {
+	if err := b.mg.cl.Join(context.Background(), code, "t"); err != cluster.ErrNotJoinable {
 		t.Fatalf("second join: %v", err)
 	}
 
@@ -996,7 +833,7 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 	}
 	// a replica whose copy is behind the primary's (an import made on the primary, not yet synced) must not overwrite it: the primary
 	// checks the page's base too
-	stale := configBase(b.cfg())
+	stale := core.ConfigBase(b.cfg())
 	pc := a.cfg()
 	pc.Groups[0].HelloMS = 450
 	if err := a.mg.PutConfig(pc, "carol", "import"); err != nil {
@@ -1004,7 +841,7 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 	}
 	bc = b.cfg()
 	bc.Groups[0].HelloMS = 500
-	if err := b.mg.PutConfigBase(bc, "bob", "", stale); !errors.Is(err, ErrConfigChanged) {
+	if err := b.mg.PutConfigBase(bc, "bob", "", stale); !errors.Is(err, core.ErrConfigChanged) {
 		t.Fatalf("a replica's save over a newer primary: %v", err)
 	}
 	if a.cfg().Groups[0].HelloMS != 450 {
@@ -1018,14 +855,14 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 			bc.Settings.Devices = append(bc.Settings.Devices, device.Device{Name: n, Platform: "tools", Address: "localhost", Disabled: true})
 			attachDevices(bc)
 		}
-		if err := b.mg.PutConfigBase(bc, "bob", "import", configBase(b.cfg())); err != nil {
+		if err := b.mg.PutConfigBase(bc, "bob", "import", core.ConfigBase(b.cfg())); err != nil {
 			t.Fatal(err)
 		}
 		a.sync()
 		b.sync()
 		bc = b.cfg()
 		bc.Groups[0].Devices = []string{"imp1"}
-		if err := b.mg.PutConfigBase(bc, "bob", "Topology", configBase(b.cfg())); err != nil {
+		if err := b.mg.PutConfigBase(bc, "bob", "Topology", core.ConfigBase(b.cfg())); err != nil {
 			t.Fatal(err)
 		}
 		a.sync()
@@ -1075,11 +912,11 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 			t.Errorf("%s: want epoch 2 / primary B, got %+v", n.name, s)
 		}
 	}
-	if a.mg.cl.Snapshot().Role != RoleReplica || b.mg.cl.Snapshot().Role != RolePrimary {
+	if a.mg.cl.Snapshot().Role != cluster.RoleReplica || b.mg.cl.Snapshot().Role != core.RolePrimary {
 		t.Error("roles after promotion")
 	}
 	// stale announce is rejected
-	if err := a.mg.cl.node.CheckEpoch(1); err != ErrStaleEpoch {
+	if err := a.mg.cl.Node.CheckEpoch(1); err != cluster.ErrStaleEpoch {
 		t.Errorf("stale epoch: %v", err)
 	}
 
@@ -1091,7 +928,7 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 		t.Fatal("removed peer still listed")
 	}
 	c.mg.cl.SyncOnce(context.Background())
-	if s := c.mg.cl.Snapshot(); s.Role != RolePrimary || len(s.Peers) != 0 || s.Epoch != 1 {
+	if s := c.mg.cl.Snapshot(); s.Role != core.RolePrimary || len(s.Peers) != 0 || s.Epoch != 1 {
 		t.Fatalf("removed node must reset to a single-node cluster: %+v", s)
 	}
 	b.sync()
@@ -1102,9 +939,9 @@ func TestClusterJoinSyncPromote(t *testing.T) {
 
 // An update moves the primary role away from the node that had it, and it goes back there when the update is over.
 func TestPrimaryReturnsHomeAfterUpdate(t *testing.T) {
-	old := primaryReturnAfter
-	primaryReturnAfter = 0
-	defer func() { primaryReturnAfter = old }()
+	old := cluster.PrimaryReturnAfter
+	cluster.PrimaryReturnAfter = 0
+	defer func() { cluster.PrimaryReturnAfter = old }()
 	a, b := newTNode(t, "A"), newTNode(t, "B")
 	b.join(a)
 	for i := 0; i < 2; i++ {
@@ -1114,10 +951,10 @@ func TestPrimaryReturnsHomeAfterUpdate(t *testing.T) {
 	if to, err := a.mg.cl.HandOverPrimaryForUpdate("test", "an update"); err != nil || to != b.addr {
 		t.Fatalf("hand over: %q %v", to, err)
 	}
-	if h := b.mg.cl.primaryHome(); h != a.addr {
+	if h := b.mg.cl.PrimaryHome(); h != a.addr {
 		t.Fatalf("B's home for the role is %q, want A %q", h, a.addr)
 	}
-	if h := a.mg.cl.primaryHome(); h != "" {
+	if h := a.mg.cl.PrimaryHome(); h != "" {
 		t.Fatalf("A kept a home after giving the role away: %q", h)
 	}
 	for i := 0; i < 2; i++ {
@@ -1127,16 +964,16 @@ func TestPrimaryReturnsHomeAfterUpdate(t *testing.T) {
 	// still queued: the role stays
 	b.mg.upd.Push([]string{b.addr}, "test")
 	b.mg.returnPrimaryHome()
-	if b.mg.cl.node.Snapshot().Role != RolePrimary {
+	if b.mg.cl.Node.Snapshot().Role != core.RolePrimary {
 		t.Fatal("the role went back while an update was still queued")
 	}
 	b.mg.upd.Cancel([]string{b.addr}, "test")
 	b.mg.returnPrimaryHome()
-	as, bs := a.mg.cl.node.Snapshot(), b.mg.cl.node.Snapshot()
-	if as.Role != RolePrimary || bs.Role != RoleReplica || bs.PrimaryAddr != a.addr {
+	as, bs := a.mg.cl.Node.Snapshot(), b.mg.cl.Node.Snapshot()
+	if as.Role != core.RolePrimary || bs.Role != cluster.RoleReplica || bs.PrimaryAddr != a.addr {
 		t.Fatalf("after the update: A %s, B %s (primary %s)", as.Role, bs.Role, bs.PrimaryAddr)
 	}
-	if a.mg.cl.primaryHome() != "" || b.mg.cl.primaryHome() != "" {
+	if a.mg.cl.PrimaryHome() != "" || b.mg.cl.PrimaryHome() != "" {
 		t.Fatal("a home is left after the role went back")
 	}
 	// a plain hand over (a restart, not an update) leaves the role where it lands
@@ -1144,66 +981,23 @@ func TestPrimaryReturnsHomeAfterUpdate(t *testing.T) {
 		t.Fatalf("hand over: %q", to)
 	}
 	b.mg.returnPrimaryHome()
-	if b.mg.cl.node.Snapshot().Role != RolePrimary {
+	if b.mg.cl.Node.Snapshot().Role != core.RolePrimary {
 		t.Fatal("the role went back after a plain restart")
 	}
 	// a promotion by hand drops the home
-	if err := os.WriteFile(b.mg.cl.homePath(), []byte(a.addr+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(b.mg.cl.HomePath(), []byte(a.addr+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.mg.cl.Promote("admin"); err != nil || b.mg.cl.primaryHome() != "" {
-		t.Fatalf("promote kept the home: %q %v", b.mg.cl.primaryHome(), err)
-	}
-}
-
-func TestPrimaryReturnTarget(t *testing.T) {
-	pv := func(addr string, mods ...func(*PeerView)) PeerView {
-		p := PeerView{Addr: addr, Reachable: true, Version: "2"}
-		for _, m := range mods {
-			m(&p)
-		}
-		return p
-	}
-	self := pv("10.0.0.2", func(p *PeerView) { p.Self = true; p.IsPrimary = true })
-	for _, tc := range []struct {
-		name        string
-		peers       []PeerView
-		intent      UpdateIntent
-		busy        bool
-		ready, drop bool
-	}{
-		{"all done", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3")}, UpdateIntent{}, false, true, false},
-		{"home gone", []PeerView{self, pv("10.0.0.3")}, UpdateIntent{}, false, false, true},
-		{"home failed", []PeerView{self, pv("10.0.0.1", func(p *PeerView) { p.UpdateFailed = "x" })}, UpdateIntent{}, false, false, true},
-		{"home down", []PeerView{self, pv("10.0.0.1", func(p *PeerView) { p.Reachable = false })}, UpdateIntent{}, false, false, false},
-		{"queued", []PeerView{self, pv("10.0.0.1")}, UpdateIntent{Pending: []string{"10.0.0.3"}}, false, false, false},
-		{"another node updating", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Updating = true })}, UpdateIntent{}, false, false, false},
-		{"another node restarting", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Restarting = true; p.Reachable = false })}, UpdateIntent{}, false, false, false},
-		{"this node busy", []PeerView{self, pv("10.0.0.1")}, UpdateIntent{}, true, false, false},
-		{"auto, one on the old version", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1" })}, UpdateIntent{AutoAll: true}, false, false, false},
-		{"auto, the old version failed", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1"; p.UpdateFailed = "x" })}, UpdateIntent{AutoAll: true}, false, true, false},
-		{"not queued, on another version", []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.Version = "1" })}, UpdateIntent{}, false, true, false},
-	} {
-		ready, drop, why := primaryReturnTarget(tc.peers, "10.0.0.1", tc.intent, tc.busy)
-		if ready != tc.ready || drop != tc.drop {
-			t.Errorf("%s: ready=%v drop=%v (%s), want %v %v", tc.name, ready, drop, why, tc.ready, tc.drop)
-		}
-	}
-	// the home is preferred when it can take the role
-	peers := []PeerView{self, pv("10.0.0.1"), pv("10.0.0.3", func(p *PeerView) { p.SharedRev = 9 })}
-	if got := pickSuccessorPrefer(peers, "2", "10.0.0.1"); got != "10.0.0.1" {
-		t.Errorf("home not preferred: %q", got)
-	}
-	if got := pickSuccessorPrefer(peers, "2", "10.0.0.9"); got != "10.0.0.3" {
-		t.Errorf("an unknown home changed the pick: %q", got)
+	if _, err := b.mg.cl.Promote("admin"); err != nil || b.mg.cl.PrimaryHome() != "" {
+		t.Fatalf("promote kept the home: %q %v", b.mg.cl.PrimaryHome(), err)
 	}
 }
 
 // In a rolling update the role moves on from node to node, and still ends up at the node that had it first.
 func TestPrimaryHomeSurvivesARollingUpdate(t *testing.T) {
-	old := primaryReturnAfter
-	primaryReturnAfter = 0
-	defer func() { primaryReturnAfter = old }()
+	old := cluster.PrimaryReturnAfter
+	cluster.PrimaryReturnAfter = 0
+	defer func() { cluster.PrimaryReturnAfter = old }()
 	a, b, c := newTNode(t, "A"), newTNode(t, "B"), newTNode(t, "C")
 	b.join(a)
 	c.join(a)
@@ -1230,12 +1024,12 @@ func TestPrimaryHomeSurvivesARollingUpdate(t *testing.T) {
 	}
 	syncAll()
 	y := byAddr[second]
-	if y.mg.cl.node.Snapshot().Role != RolePrimary || y.mg.cl.primaryHome() != a.addr {
-		t.Fatalf("after two hand overs %s is %s with home %q, want primary with home %s", second, y.mg.cl.node.Snapshot().Role, y.mg.cl.primaryHome(), a.addr)
+	if y.mg.cl.Node.Snapshot().Role != core.RolePrimary || y.mg.cl.PrimaryHome() != a.addr {
+		t.Fatalf("after two hand overs %s is %s with home %q, want primary with home %s", second, y.mg.cl.Node.Snapshot().Role, y.mg.cl.PrimaryHome(), a.addr)
 	}
 	y.mg.returnPrimaryHome()
 	syncAll()
-	if a.mg.cl.node.Snapshot().Role != RolePrimary {
-		t.Fatalf("the role did not end at A: A is %s", a.mg.cl.node.Snapshot().Role)
+	if a.mg.cl.Node.Snapshot().Role != core.RolePrimary {
+		t.Fatalf("the role did not end at A: A is %s", a.mg.cl.Node.Snapshot().Role)
 	}
 }

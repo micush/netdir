@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
 
 // changeAnswer is what POST /api/devices/change and the device.change op answer.
@@ -27,11 +28,11 @@ type changeAnswer struct {
 // then asks (unless --yes) and makes the change.  The exit status is 1 when any device failed.
 func runDeviceChange(sock, text, target string, dry, yes, save bool) {
 	if strings.TrimSpace(target) == "" {
-		fatalf(`--device-change needs --target: a device name, tag:TAG, platform:PLATFORM, gateway:N or "all"`)
+		core.Fatalf(`--device-change needs --target: a device name, tag:TAG, platform:PLATFORM, gateway:N or "all"`)
 	}
 	args := map[string]any{"target": target, "text": text, "dry_run": true}
 	var plan changeAnswer
-	decode(op(sock, "device.change", args), &plan)
+	core.Decode(core.Op(sock, "device.change", args), &plan)
 	printChange(plan)
 	if dry {
 		if plan.Failed > 0 {
@@ -46,7 +47,7 @@ func runDeviceChange(sock, text, target string, dry, yes, save bool) {
 		}
 	}
 	if plan.Failed == plan.Asked {
-		fatalf("nothing can be changed")
+		core.Fatalf("nothing can be changed")
 	}
 	if n == 0 {
 		fmt.Println("Nothing to change: every port is already as asked.")
@@ -56,7 +57,7 @@ func runDeviceChange(sock, text, target string, dry, yes, save bool) {
 	args["dry_run"] = false
 	args["save"] = save // only the real change saves; the plan never does
 	var done changeAnswer
-	decode(op(sock, "device.change", args), &done)
+	core.Decode(core.Op(sock, "device.change", args), &done)
 	fmt.Println()
 	printChange(done)
 	if done.Failed > 0 {

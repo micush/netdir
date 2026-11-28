@@ -9,6 +9,9 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 // parseExpiry reads "YYYY-MM-DD" (or "never") for --expires; it returns Unix
@@ -49,10 +52,10 @@ func readSecret(prompt string) string {
 func askNewPassword() string {
 	p := readSecret("New password: ")
 	if p == "" {
-		fatalf("a password is required")
+		core.Fatalf("a password is required")
 	}
 	if stdinIsTerminal() && readSecret("Again: ") != p {
-		fatalf("the two passwords differ")
+		core.Fatalf("the two passwords differ")
 	}
 	return p
 }
@@ -69,14 +72,14 @@ func runUsers(sock string, f *cliFlags) {
 	case *f.userAdd != "":
 		exp, err := parseExpiry(*f.expires)
 		if err != nil {
-			fatal(err)
+			core.Fatal(err)
 		}
 		pw := askNewPassword()
 		var r struct {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.add", map[string]any{"username": *f.userAdd, "password": pw, "expires": exp}), &r)
+		core.Decode(core.Op(sock, "users.add", map[string]any{"username": *f.userAdd, "password": pw, "expires": exp}), &r)
 		report(r.Message, r.Partial)
 	case *f.userPasswd != "":
 		pw := askNewPassword()
@@ -84,28 +87,28 @@ func runUsers(sock string, f *cliFlags) {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.password", map[string]any{"username": *f.userPasswd, "password": pw}), &r)
+		core.Decode(core.Op(sock, "users.password", map[string]any{"username": *f.userPasswd, "password": pw}), &r)
 		report(r.Message, r.Partial)
 	case *f.userExpiry != "":
 		if *f.expires == "" {
-			fatalf("--user-expiry NAME needs --expires YYYY-MM-DD, or --expires never")
+			core.Fatalf("--user-expiry NAME needs --expires YYYY-MM-DD, or --expires never")
 		}
 		exp, err := parseExpiry(*f.expires)
 		if err != nil {
-			fatal(err)
+			core.Fatal(err)
 		}
 		var r struct {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.expiry", map[string]any{"username": *f.userExpiry, "expires": exp}), &r)
+		core.Decode(core.Op(sock, "users.expiry", map[string]any{"username": *f.userExpiry, "expires": exp}), &r)
 		report(r.Message, r.Partial)
 	case *f.userGrant != "":
 		var r struct {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.grant", map[string]any{"username": *f.userGrant}), &r)
+		core.Decode(core.Op(sock, "users.grant", map[string]any{"username": *f.userGrant}), &r)
 		report(r.Message, r.Partial)
 	case *f.userRevoke != "":
 		askYes("Remove "+*f.userRevoke+" from the group? The account is kept.", *f.yes)
@@ -113,7 +116,7 @@ func runUsers(sock string, f *cliFlags) {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.revoke", map[string]any{"username": *f.userRevoke}), &r)
+		core.Decode(core.Op(sock, "users.revoke", map[string]any{"username": *f.userRevoke}), &r)
 		report(r.Message, r.Partial)
 	case *f.userDel != "":
 		askYes("Delete the account "+*f.userDel+"?", *f.yes)
@@ -121,11 +124,11 @@ func runUsers(sock string, f *cliFlags) {
 			Message string `json:"message"`
 			Partial bool   `json:"partial"`
 		}
-		decode(op(sock, "users.delete", map[string]any{"username": *f.userDel}), &r)
+		core.Decode(core.Op(sock, "users.delete", map[string]any{"username": *f.userDel}), &r)
 		report(r.Message, r.Partial)
 	default:
-		var v UsersView
-		decode(op(sock, "users.list", nil), &v)
+		var v web.UsersView
+		core.Decode(core.Op(sock, "users.list", nil), &v)
 		if len(v.Users) == 0 {
 			fmt.Printf("No account is a member of the %s group, so nobody can sign in to the web GUI.\nAdd one with --user-add NAME.\n", v.Group)
 			return
@@ -134,9 +137,9 @@ func runUsers(sock string, f *cliFlags) {
 		for _, u := range v.Users {
 			exp := "never expires"
 			if u.Expires > 0 {
-				exp = "expires " + userDate(u.Expires)
+				exp = "expires " + web.UserDate(u.Expires)
 				if u.Expired {
-					exp = "EXPIRED " + userDate(u.Expires)
+					exp = "EXPIRED " + web.UserDate(u.Expires)
 				}
 			}
 			fmt.Printf("  %-32s %s\n", u.Name, exp)

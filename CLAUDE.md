@@ -13,13 +13,41 @@ process below without being told to.
 
 1. **Do the requested work** (code, docs, config, whatever was asked).
 **Layout.** The tarball has `README.md` and `LICENSE` at the top, `docs/` (CHANGELOG.md), `source/` (the Go
-module: `go.mod`, every `*.go`, `webui/`, `testdata/`, `netdir.conf.example`, and `VERSION`,
-which must sit next to the Go files because `version.go` embeds it), `contrib/`, `install.sh`,
+module: `go.mod`, the `main` package's `*.go`, `internal/` (the other packages, see **Code layout**), `device/` (the device
+drivers), `tools/devprobe`, `webui/`, `testdata/`, `netdir.conf.example`, and `VERSION`, which must sit next to `embed.go`
+because it embeds it and `webui/`), `contrib/`, `install.sh`,
 `get.sh` (the `curl | bash` web installer: fetches the latest tag from GitHub and runs its `install.sh`; keep it working with the tag/layout rules here),
 `uninstall.sh`, `QUICKSTART.md` (a GUI-first getting-started guide; keep it true when the GUI changes) and this file. All Go commands below run in `source/`; paths in this
 file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is under
 `docs/`. The updater and installer expect `source/go.mod`, `source/main.go` and
 `source/VERSION` (a tree in the old layout is refused with a message saying so).
+
+**Code layout** (since v250). Packages, each importing only those before it: `internal/core` (configuration, the gateway
+engines, BGP, OSPF, SNMP, LLDP, the supervisor and its device checks, the network tools, certificates, backups, updates,
+captures, shared helpers such as `JsonError`/`WriteJSON`) < `internal/cluster` (the signed, pinned channel, join, election,
+shared settings, rolling updates) < `internal/devices` (between the daemon and the drivers: which node a device request goes
+to, reads, raw calls, changes, captures, troubleshooting, the devices a caller may use) < `internal/web` (management GUI,
+sign-in, MCP clients' OAuth sign-in, sessions, relay, the device pages' API) < `internal/mcp` (the MCP endpoint and the
+`device_*` and `net_*` tools) < `main` in `source/` (CLI, `Mgmt`, the status server, alerts, scheduler, captures across the cluster, and
+`embed.go`, which embeds `webui/` and `VERSION` and hands them to `web.WebFS`/`core.EmbeddedVersion`). The drivers stay the
+separate package `netdir/device`, which imports none of these. The package is `devices` (plural) so it is not confused with
+`device`. A lower package never imports a higher one; it reaches up through an interface the higher one fills in: the
+cluster through `ClusterHost` (`Mgmt`), the web server through `WebHost` (`Mgmt`) and `StatusHost` (the status server), and
+the device checks in `core` through `HealthCluster` (`core.HealthCl`, the node's `*cluster.Cluster`, set in `run`). The
+layers above give the cluster what they answer on the cluster port with `Cluster.SetRoutes` (each call adds to the earlier
+ones): `Mgmt` gives `/cluster/proxy`. MCP hooks itself onto the web server's `/mcp` (`newMCPListeners` calls
+`WebServer.SetMCP`). A file name in this document may be in `source/` or in `internal/<pkg>/`; one file's code can sit in
+more than one package under the same name. Tests live in the lowest package that has everything they use (each internal
+package's `embed_test.go` loads `VERSION` and `webui/` for its tests); the ones that need `Mgmt` stay in `source/`. The files
+in `source/` that hold only `package main` and an "Emptied in v250" comment are the old files whose code moved, kept so a
+tree copied over an older one still builds (see Notes).
+
+**The GUI's scripts** are `webui/app/`: `core.js` (state, the API, the drawing helpers, the shell, sign-in: what
+every page uses), one file per page (each adds its view to `VIEWS`; `devices.js` is the Devices page, `log.js` the daemon's
+own log), and `boot.js`. They are classic scripts that share one global scope (no modules, no bundler), loaded in order by
+`index.html` with `boot.js` last; a helper that more than one page uses belongs in `core.js`, one that a single page uses
+in that page's file. A new page is a new `webui/app/<page>.js` plus its `<script>` line in `index.html` before `boot.js`.
+`webui/app.js` is an emptied file kept for the same reason as the Go ones.
 
 2. **Build and test before packaging, not after.** From `source/` run
    `gofmt -l .` (must print nothing), `go build -o /dev/null .` (a bare `go build ./...`
@@ -52,9 +80,9 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
         `https://127.0.0.1:22161`: the member gets in; wrong password, a valid
         user outside the group, and root are all refused with the same
         message. Remove the test users/group afterwards.
-     3. **UI**: `node --check webui/app.js` at minimum. For real logic, write a
+     3. **UI**: `for f in webui/app/*.js; do node --check $f; done` at minimum. For real logic, write a
         throwaway jsdom smoke test in the scratchpad (not in the repo): mock
-        `fetch`, load the real `app.js` with `window.eval`, and drive the
+        `fetch`, load the scripts of `index.html` in order with `window.eval`, and drive the
         actual clicks/submits (login, tab polling, config save payload types,
         error display, 401 back to login). Look at the result in headless
         Chromium (`playwright-core` with `/opt/pw-browsers/chromium-*/chrome-linux/chrome`,
@@ -117,7 +145,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
      (`unshare -m`, `mount --bind etc2 /etc`), because on one host both would share one passwd file.
      Remove the test users, group and PAM file afterwards.
    - **Touched the node picker (`proxy.go`, `proxyPrefixes`, `LOCAL_API` in
-     `app.js`, `/cluster/proxy`)?** A new `/api/` route is relayable only if its
+     `webui/app/core.js`, `/cluster/proxy`)?** A new `/api/` route is relayable only if its
      prefix is in `proxyPrefixes` (everything but login/logout/session is), and
      `LOCAL_API` in the JS must match; the picker's own node list is the one call
      made with `api(..., true)` (always the login node). Live-check two
@@ -201,7 +229,7 @@ file such as `webui/` and `testdata/` are under `source/`, and the CHANGELOG is 
    `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...` so the stub path
    stays healthy.
 4. **Bump `VERSION`.** It's a single plain integer (no `v` prefix, no semver)
-   at `source/VERSION`, embedded into the binary (`version.go`,
+   at `source/VERSION`, embedded into the binary (`embed.go`, `version.go`,
    `netdir --version`). Increment it by exactly 1 (the numbering restarted at 1 for netdir). `TestVersionIsPlainInteger`
    fails if the file is malformed — fix the file, don't weaken the test.
 5. **Append a new entry to the top of `docs/CHANGELOG.md`**, immediately below the
@@ -225,7 +253,7 @@ README), so the version and changelog describe the final tree.
 
 ## Notes
 
-- **Never delete a file from the tree in a release.** Trees get copied over older ones, and a leftover old file that no longer compiles breaks the update (`go build failed`). Empty the file instead (`package main` and a comment) and keep it.
+- **Never delete a file from the tree in a release.** Trees get copied over older ones, and a leftover old file that no longer compiles breaks the update (`go build failed`). Empty the file instead (`package main`, or the package it was in, and a comment) and keep it.
 
 - **NO BANNERS. Ever.** Never add a banner, notice bar or status message line to the GUI: not for
   progress ("Scanning…"), not for success ("Saved", "finished"), not for info or warnings. State goes

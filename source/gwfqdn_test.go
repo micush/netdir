@@ -5,13 +5,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
 )
 
 // A gateway made on the Topology page carries its two names through the save, and they are there when the configuration is read back.
 func TestNewGatewayKeepsItsNames(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	b, _ := json.Marshal(defaultGroup())
+	b, _ := json.Marshal(core.DefaultGroup())
 	var g map[string]any
 	_ = json.Unmarshal(b, &g)
 	g["group_id"] = 137
@@ -39,7 +42,7 @@ func TestNewGatewayKeepsItsNames(t *testing.T) {
 	r := e.do("GET", "/api/config", nil, withAuth(e, false))
 	raw, _ := json.Marshal(r.body)
 	var back struct {
-		Config struct{ Groups []GroupConfig }
+		Config struct{ Groups []core.GroupConfig }
 	}
 	json.Unmarshal(raw, &back)
 	for _, x := range back.Config.Groups {
@@ -51,12 +54,12 @@ func TestNewGatewayKeepsItsNames(t *testing.T) {
 
 // The path a gateway made on a replica takes to the primary: shared document, over JSON, merged into a configuration without it.
 func TestNewGatewayNamesReachThePrimary(t *testing.T) {
-	dc := newDaemonConfig()
+	dc := core.NewDaemonConfig()
 	dc.Groups = nil
-	g := newGatewayGroup()
+	g := core.NewGatewayGroup()
 	g.GroupID, g.FQDN, g.AnycastFQDN = 137, "files.example.test", "any.example.test"
 	dc.Groups = append(dc.Groups, g)
-	raw, err := json.Marshal(adminSharedConfig{Shared: sharedOf(dc), Seeds: seedsOf(dc)})
+	raw, err := json.Marshal(adminSharedConfig{Shared: core.SharedOf(dc), Seeds: cluster.SeedsOf(dc)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,9 +67,9 @@ func TestNewGatewayNamesReachThePrimary(t *testing.T) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		t.Fatal(err)
 	}
-	cur := newDaemonConfig()
+	cur := core.NewDaemonConfig()
 	cur.Groups = nil
-	if _, err := mergeShared(cur, p.Shared, p.Seeds); err != nil {
+	if _, err := cluster.MergeShared(cur, p.Shared, p.Seeds); err != nil {
 		t.Fatal(err)
 	}
 	for _, x := range cur.Groups {
@@ -78,11 +81,11 @@ func TestNewGatewayNamesReachThePrimary(t *testing.T) {
 
 // A node that does not know the names would drop them when settings are shared: setting them is refused, naming the node.
 func TestGatewayNamesRefusedWhileAnOldNodeIsInTheCluster(t *testing.T) {
-	cur := newDaemonConfig()
-	next := newDaemonConfig()
+	cur := core.NewDaemonConfig()
+	next := core.NewDaemonConfig()
 	next.Groups[0].FQDN = "files.example.test"
 	old, newer := strconv.Itoa(gatewayNamesFromVersion-1), strconv.Itoa(gatewayNamesFromVersion)
-	peers := []PeerView{{Self: true, Version: strconv.Itoa(gatewayNamesFromVersion + 2)}, {Addr: "10.0.0.2:4451", Hostname: "netdir1", Version: old}}
+	peers := []core.PeerView{{Self: true, Version: strconv.Itoa(gatewayNamesFromVersion + 2)}, {Addr: "10.0.0.2:4451", Hostname: "netdir1", Version: old}}
 	if err := gatewayNamesNeedNewNodes(cur, next, peers); err == nil || !strings.Contains(err.Error(), "netdir1") {
 		t.Fatalf("an old node did not stop it: %v", err)
 	}
@@ -96,7 +99,7 @@ func TestGatewayNamesRefusedWhileAnOldNodeIsInTheCluster(t *testing.T) {
 	if err := gatewayNamesNeedNewNodes(cur, next, peers); err != nil {
 		t.Fatalf("an unchanged name blocked a save: %v", err)
 	}
-	if err := gatewayNamesNeedNewNodes(nil, newDaemonConfig(), peers); err != nil {
+	if err := gatewayNamesNeedNewNodes(nil, core.NewDaemonConfig(), peers); err != nil {
 		t.Fatalf("no names: %v", err)
 	}
 }

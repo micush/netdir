@@ -20,6 +20,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
+	"netdir/internal/mcp"
 )
 
 // The troubleshooting bundle: everything about a node (and, through the cluster, every node) that helps to find out why
@@ -30,67 +34,17 @@ import (
 //	  README.txt           what is in it, which nodes answered, what was removed
 //	  <node>/…             one folder per node (see tshootNode)
 
-const (
-	tshootNodeMax  = 3 << 20          // one node's compressed bundle must fit the peer channel
-	tshootCmdMax   = 512 << 10        // the most one command's output may add
-	tshootCmdTime  = 8 * time.Second  // the longest any command may run
-	tshootLogLines = 20000            // newest log lines
-	tshootNodeTime = 60 * time.Second // the most one node may take
-	tshootCapSecs  = 8                // seconds of ARP / neighbor-discovery capture per interface (when asked for)
-	tshootRedacted = "<removed>"
-)
+const tshootNodeMax = 3 << 20
 
-// A key whose value is a secret: passwords, the gateway key, tokens, join codes, private keys.
-var tshootSecretKey = regexp.MustCompile(`(?i)(^|_)(pass|passwd|password|secret|token|key|psk|private|cookie|csrf|code|auth|community|communities|keys)($|_)`)
+const tshootCmdMax = 512 << 10
 
-// A secret written in free text (an FRR configuration, a command's output).
-var tshootSecretText = regexp.MustCompile(`(?i)\b(password|passwd|secret|md5|community|key|auth-key)([ =:]+)(?:[0-9] )?(\S+)`)
+const tshootCmdTime = 8 * time.Second
 
-// redactJSON returns v with the value of every secret key replaced, however deep.
-func redactJSON(v any) (any, int) {
-	n := 0
-	var walk func(any) any
-	walk = func(x any) any {
-		switch t := x.(type) {
-		case map[string]any:
-			for k, val := range t {
-				if tshootSecretKey.MatchString(k) {
-					switch tv := val.(type) {
-					case nil:
-					case string:
-						if tv != "" {
-							t[k], n = tshootRedacted, n+1
-						}
-					case bool, float64:
-					default:
-						t[k], n = tshootRedacted, n+1
-					}
-					continue
-				}
-				t[k] = walk(val)
-			}
-			return t
-		case []any:
-			for i := range t {
-				t[i] = walk(t[i])
-			}
-			return t
-		}
-		return x
-	}
-	return walk(v), n
-}
+const tshootLogLines = 20000
 
-// redactText removes the secrets written in free text.
-func redactText(s string) (string, int) {
-	n := 0
-	out := tshootSecretText.ReplaceAllStringFunc(s, func(m string) string {
-		n++
-		p := tshootSecretText.FindStringSubmatch(m)
-		return p[1] + p[2] + tshootRedacted
-	})
-	return out, n
-}
+const tshootNodeTime = 60 * time.Second
+
+const tshootCapSecs = 8
 
 // tshootBundle collects one node's files.
 type tshootBundle struct {
@@ -123,7 +77,7 @@ func (b *tshootBundle) putJSON(name string, v any) {
 		b.put(name, raw)
 		return
 	}
-	red, n := redactJSON(generic)
+	red, n := core.RedactJSON(generic)
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -140,7 +94,7 @@ func (b *tshootBundle) putJSON(name string, v any) {
 }
 
 func (b *tshootBundle) putText(name, text string) {
-	t, n := redactText(text)
+	t, n := core.RedactText(text)
 	b.mu.Lock()
 	b.removed += n
 	b.mu.Unlock()
@@ -196,7 +150,7 @@ func tshootSysctl() string {
 // TshootNode collects this node's bundle as a .tgz (see the layout in tshootFiles).  capture adds a short capture of ARP and
 // neighbor-discovery traffic on every gateway interface.
 func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
-	warnf("troubleshooting bundle: collected on this node for %s", actor)
+	core.Warnf("troubleshooting bundle: collected on this node for %s", actor)
 	ctx, cancel := context.WithTimeout(context.Background(), tshootNodeTime)
 	defer cancel()
 	b := &tshootBundle{files: map[string][]byte{}}
@@ -268,14 +222,14 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	})
 	do(func() {
 		if m.gwFn != nil {
-			b.putJSON("netdir/gateways-reported-to-the-cluster.json", m.localGateways())
+			b.putJSON("netdir/gateways-reported-to-the-cluster.json", m.LocalGateways())
 		}
 	})
 	do(func() { b.putJSON("netdir/update.json", m.UpdateStatus()) })
 	do(func() { b.putJSON("netdir/update-history.json", m.upd.History(30)) })
 	do(func() { b.putJSON("netdir/virtual-mac-tests.json", vmacAll()) })
 	do(func() {
-		b.putJSON("netdir/host-last-hour.json", hoststats.Query(time.Now().Add(-time.Hour), time.Now()))
+		b.putJSON("netdir/host-last-hour.json", core.Hoststats.Query(time.Now().Add(-time.Hour), time.Now()))
 	})
 	do(func() {
 		if m.tshootFn != nil {
@@ -285,7 +239,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		}
 	})
 	do(func() {
-		res, err := ReadLog(LogQuery{Limit: tshootLogLines})
+		res, err := core.ReadLog(core.LogQuery{Limit: tshootLogLines})
 		if err != nil {
 			b.fail("netdir/log.txt", err)
 			return
@@ -303,7 +257,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		if dc, _, err := m.LiveConfig(); err == nil {
 			on = dc.Settings.MCPLog
 		}
-		data, n := tshootContentLog(m.stateDir, on)
+		data, n := mcp.TshootContentLog(m.stateDir, on)
 		b.mu.Lock()
 		b.removed += n
 		b.mu.Unlock()
@@ -314,7 +268,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	do(func() {
 		var sb strings.Builder
 		host, _ := os.Hostname()
-		fmt.Fprintf(&sb, "collected %s\nhost %s\nnetdir v%s\ngo %s %s/%s\nstate dir %s\nconfig %s\n\n", time.Now().Format(time.RFC3339), host, version(), runtime.Version(), runtime.GOOS, runtime.GOARCH, m.stateDir, m.confPath)
+		fmt.Fprintf(&sb, "collected %s\nhost %s\nnetdir v%s\ngo %s %s/%s\nstate dir %s\nconfig %s\n\n", time.Now().Format(time.RFC3339), host, core.Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH, m.stateDir, m.confPath)
 		sb.WriteString("# uname -a\n" + tshootRun("uname", "-a"))
 		sb.WriteString("\n# /etc/os-release\n" + tshootFile("/etc/os-release"))
 		sb.WriteString("\n# virtualization\n" + tshootRun("systemd-detect-virt"))
@@ -424,7 +378,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 	sort.Strings(names)
 	host, _ := os.Hostname()
 	var rd strings.Builder
-	fmt.Fprintf(&rd, "Troubleshooting bundle of %s, netdir v%s, collected %s.\n", host, version(), time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&rd, "Troubleshooting bundle of %s, netdir v%s, collected %s.\n", host, core.Version(), time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&rd, "%d secrets were removed (passwords, the gateway key, tokens, join codes, private keys).\n\nFiles:\n", b.removed)
 	for _, n := range names {
 		fmt.Fprintf(&rd, "  %-45s %d bytes\n", n, len(b.files[n]))
@@ -460,7 +414,7 @@ func (m *Mgmt) TshootNode(capture bool, actor string) ([]byte, error) {
 		if name == "netdir/log.txt" {
 			files[name] = append([]byte("(older lines cut to fit)\n"), cur[len(cur)/2:]...)
 		} else {
-			files[name] = tshootHalve(cur)
+			files[name] = mcp.TshootHalve(cur)
 		}
 	}
 }
@@ -521,7 +475,7 @@ func untarFiles(tgz []byte) (map[string][]byte, error) {
 // TshootCluster collects the bundle of every node (this one directly, the others through the cluster relay, all at once)
 // into one .tgz with a folder per node; a node that cannot be reached has a file saying why.
 func (m *Mgmt) TshootCluster(capture bool, actor string) ([]byte, error) {
-	targets := clusterTargets(m)
+	targets := cluster.ClusterTargets(m.cl)
 	type res struct {
 		files map[string][]byte
 		err   error
@@ -549,7 +503,7 @@ func (m *Mgmt) TshootCluster(capture bool, actor string) ([]byte, error) {
 				ctx, cancel := context.WithTimeout(context.Background(), tshootNodeTime+15*time.Second)
 				defer cancel()
 				body, _ := json.Marshal(map[string]any{"enabled": capture})
-				resp, err := m.cl.Relay(ctx, t.Addr, proxyReq{User: actor, Method: "POST", Path: "/api/tshoot/node", CT: "application/json", Body: body})
+				resp, err := m.cl.Relay(ctx, t.Addr, core.ProxyReq{User: actor, Method: "POST", Path: "/api/tshoot/node", CT: "application/json", Body: body})
 				if err != nil {
 					results[i].err = err
 					return
@@ -562,7 +516,7 @@ func (m *Mgmt) TshootCluster(capture bool, actor string) ([]byte, error) {
 					Error string `json:"error"`
 				}
 				if json.Unmarshal(resp.Body, &env) != nil || resp.Status != http.StatusOK || !env.OK {
-					msg := firstNonEmpty(env.Error, fmt.Sprintf("answered %d", resp.Status))
+					msg := core.FirstNonEmpty(env.Error, fmt.Sprintf("answered %d", resp.Status))
 					if resp.Status == http.StatusNotFound || strings.Contains(msg, "always acts on the node you are logged in to") {
 						msg = "this node's version has no troubleshooting bundle: update it"
 					}
@@ -581,7 +535,7 @@ func (m *Mgmt) TshootCluster(capture bool, actor string) ([]byte, error) {
 	used := map[string]int{}
 	ok := 0
 	for i, t := range targets {
-		name := strings.Trim(capNameRe.ReplaceAllString(t.Name, "_"), "_")
+		name := strings.Trim(core.CapNameRe.ReplaceAllString(t.Name, "_"), "_")
 		if name == "" {
 			name = "node"
 		}
@@ -610,43 +564,15 @@ func (m *Mgmt) TshootCluster(capture bool, actor string) ([]byte, error) {
 }
 
 // vmacAll lists the last virtual-MAC test of every gateway.
-func vmacAll() []VmacResult {
-	vmacResults.Lock()
-	defer vmacResults.Unlock()
-	out := make([]VmacResult, 0, len(vmacResults.m))
-	for _, r := range vmacResults.m {
+func vmacAll() []core.VmacResult {
+	core.VmacResults.Lock()
+	defer core.VmacResults.Unlock()
+	out := make([]core.VmacResult, 0, len(core.VmacResults.M))
+	for _, r := range core.VmacResults.M {
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].GroupID < out[j].GroupID })
 	return out
-}
-
-// ── the web side ─────────────────────────────────────────────────────────────
-
-func (w *WebServer) registerTshoot(mux *http.ServeMux) {
-	// this node's own bundle (what the cluster-wide one asks of every other node)
-	mux.HandleFunc("POST /api/tshoot/node", w.authed(w.op("tshoot.node", nil)))
-	// the bundle of every node, asked of the node you are logged in to: it asks the others itself
-	mux.HandleFunc("GET /api/tshoot/download", w.authed(w.handleTshootDownload))
-}
-
-func (w *WebServer) handleTshootDownload(rw http.ResponseWriter, r *http.Request, s *session) {
-	capture := r.URL.Query().Get("capture") != "0" // the capture is always part of it unless a caller asks otherwise
-	var b []byte
-	var err error
-	if r.URL.Query().Get("all") == "0" {
-		b, err = w.mg.TshootNode(capture, s.user)
-	} else {
-		b, err = w.mg.TshootCluster(capture, s.user)
-	}
-	if err != nil {
-		jsonError(rw, http.StatusInternalServerError, err.Error())
-		return
-	}
-	host, _ := hostnameShort()
-	rw.Header().Set("Content-Type", "application/gzip")
-	rw.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "netdir-tshoot-"+host+"-"+time.Now().Format("20060102-150405")+".tgz"))
-	rw.Write(b)
 }
 
 // tshootTop lists the 30 biggest processes by name (never their command lines).

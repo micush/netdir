@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 type oauthT struct {
@@ -24,12 +27,12 @@ const oauthRedir = "http://localhost:53682/callback"
 
 func newOAuthT(t *testing.T, users ...string) *oauthT {
 	e, f := ssoEnv(t, users...)
-	p := *e.ws.policy.Load()
+	p := *e.ws.Policy.Load()
 	p.MCPSignIn = true
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	e.mg.webH = e.ws.Handler()
 	o := &oauthT{t: t, e: e, f: f}
 	r := o.do("POST", "/oauth/register", `{"redirect_uris":["`+oauthRedir+`"],"client_name":"Test <b>client</b>"}`, "Content-Type", "application/json")
@@ -84,7 +87,7 @@ func (o *oauthT) authorize(provider, verifier, state string, mut func(claims, hd
 	o.f.nonce, o.f.challnge, o.f.redirect, o.f.mut = aq.Get("nonce"), aq.Get("code_challenge"), aq.Get("redirect_uri"), mut
 	var ck string
 	for _, c := range (&http.Response{Header: r.hdr}).Cookies() {
-		if c.Name == ssoCookie {
+		if c.Name == web.SsoCookie {
 			if !c.HttpOnly || !c.Secure {
 				o.t.Fatalf("cookie flags: %+v", c)
 			}
@@ -140,7 +143,7 @@ func (o *oauthT) tools(tok string) string {
 func TestMCPOAuthSignIn(t *testing.T) {
 	o := newOAuthT(t, "alice@example.com rw")
 	for _, p := range []string{"google", "entra", "oidc"} { // every kind of provider signs in
-		v := randToken()
+		v := web.RandToken()
 		q := o.signIn(p, v, nil)
 		tr := o.token(q.Get("code"), v)
 		if tr.code != 200 || tr.body["token_type"] != "Bearer" || tr.body["access_token"] == "" || tr.body["refresh_token"] == "" || tr.hdr.Get("Cache-Control") != "no-store" {
@@ -159,17 +162,17 @@ func TestMCPOAuthSignIn(t *testing.T) {
 
 func TestMCPOAuthReadOnlyAndRevocation(t *testing.T) {
 	o := newOAuthT(t, "alice@example.com ro")
-	v := randToken()
+	v := web.RandToken()
 	tr := o.token(o.signIn("google", v, nil).Get("code"), v)
 	at, rt := tr.body["access_token"].(string), tr.body["refresh_token"].(string)
 	if names := o.tools(at); strings.Contains(names, "device_change_raw") || !strings.Contains(names, "list_devices") {
 		t.Fatalf("read-only tools: %s", names)
 	}
 	// the list changes: the access follows at once, with no new sign-in
-	p := *o.e.ws.policy.Load()
+	p := *o.e.ws.Policy.Load()
 	p.Users = []string{"alice@example.com rw"}
 	p.Validate()
-	o.e.ws.policy.Store(&p)
+	o.e.ws.Policy.Store(&p)
 	if !strings.Contains(o.tools(at), "device_change_raw") {
 		t.Fatal("a promotion did not reach the token")
 	}
@@ -181,7 +184,7 @@ func TestMCPOAuthReadOnlyAndRevocation(t *testing.T) {
 	// removing the person ends both the token and the refresh
 	p.Users = []string{"bob@example.com ro"}
 	p.Validate()
-	o.e.ws.policy.Store(&p)
+	o.e.ws.Policy.Store(&p)
 	r := o.mcp(at, `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 	if r.code != 401 || !strings.Contains(r.hdr.Get("WWW-Authenticate"), `error="invalid_token"`) {
 		t.Fatalf("removed person: %d %v", r.code, r.hdr)
@@ -193,7 +196,7 @@ func TestMCPOAuthReadOnlyAndRevocation(t *testing.T) {
 	p.Users = []string{"alice@example.com rw"}
 	p.MCPSignIn = false
 	p.Validate()
-	o.e.ws.policy.Store(&p)
+	o.e.ws.Policy.Store(&p)
 	if r := o.mcp(at, `{"jsonrpc":"2.0","id":1,"method":"ping"}`); r.code != 401 { // it is only an unknown key now
 		t.Fatalf("feature off: %d", r.code)
 	}
@@ -216,7 +219,7 @@ func TestMCPOAuthChallengeAndMetadata(t *testing.T) {
 		t.Fatalf("pkce: %v", m)
 	}
 	// with several providers and none picked, the person chooses
-	q := url.Values{"response_type": {"code"}, "client_id": {o.cid}, "redirect_uri": {oauthRedir}, "code_challenge": {pkce(randToken())}, "code_challenge_method": {"S256"}}
+	q := url.Values{"response_type": {"code"}, "client_id": {o.cid}, "redirect_uri": {oauthRedir}, "code_challenge": {pkce(web.RandToken())}, "code_challenge_method": {"S256"}}
 	ch := o.do("GET", "/oauth/authorize?"+q.Encode(), "")
 	if ch.code != 200 || !strings.Contains(string(ch.raw), "Company SSO") || !strings.Contains(string(ch.raw), "p=google") || strings.Contains(string(ch.raw), "<b>client</b>") {
 		t.Fatalf("chooser: %d %s", ch.code, ch.raw)
@@ -225,10 +228,10 @@ func TestMCPOAuthChallengeAndMetadata(t *testing.T) {
 		t.Fatalf("page headers: %v", ch.hdr)
 	}
 	// off: nothing is there, and the old refusal stays a 403
-	p := *o.e.ws.policy.Load()
+	p := *o.e.ws.Policy.Load()
 	p.MCPSignIn = false
 	p.Validate()
-	o.e.ws.policy.Store(&p)
+	o.e.ws.Policy.Store(&p)
 	for _, path := range []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/oauth/authorize?" + q.Encode()} {
 		if r := o.do("GET", path, ""); r.code != 404 {
 			t.Fatalf("%s while off: %d", path, r.code)
@@ -256,7 +259,7 @@ func TestMCPOAuthRefusals(t *testing.T) {
 		t.Fatalf("register: %d %s", r.code, r.raw)
 	}
 	// authorize: an unknown client, a foreign redirect address and a missing challenge are not sent anywhere
-	base := url.Values{"response_type": {"code"}, "client_id": {o.cid}, "redirect_uri": {oauthRedir}, "code_challenge": {pkce(randToken())}, "code_challenge_method": {"S256"}, "p": {"google"}}
+	base := url.Values{"response_type": {"code"}, "client_id": {o.cid}, "redirect_uri": {oauthRedir}, "code_challenge": {pkce(web.RandToken())}, "code_challenge_method": {"S256"}, "p": {"google"}}
 	with := func(k, v string) string {
 		q := url.Values{}
 		for a, b := range base {
@@ -292,7 +295,7 @@ func TestMCPOAuthRefusals(t *testing.T) {
 		}
 	}
 	// a person who is not on the list never gets the allow page
-	page := o.authorize("google", randToken(), "s", func(c, h map[string]any) { c["email"] = "mallory@example.com" })
+	page := o.authorize("google", web.RandToken(), "s", func(c, h map[string]any) { c["email"] = "mallory@example.com" })
 	if page.code != 403 || consentRE.Match(page.raw) {
 		t.Fatalf("not listed: %d %s", page.code, page.raw)
 	}
@@ -302,11 +305,11 @@ func TestMCPOAuthRefusals(t *testing.T) {
 	if r := o.do("GET", "/api/sso/callback?code=good-code&state="+url.QueryEscape(loc.Query().Get("state")), ""); r.code != 400 {
 		t.Fatalf("no cookie: %d", r.code)
 	}
-	if r := o.do("GET", "/api/sso/callback?code=x&state=nds1.garbage", "", "Cookie", ssoCookie+"=nds1.garbage"); r.code != 400 {
+	if r := o.do("GET", "/api/sso/callback?code=x&state=nds1.garbage", "", "Cookie", web.SsoCookie+"=nds1.garbage"); r.code != 400 {
 		t.Fatalf("garbage state: %d", r.code)
 	}
 	// the person says no
-	page = o.authorize("google", randToken(), "st-9", nil)
+	page = o.authorize("google", web.RandToken(), "st-9", nil)
 	m := consentRE.FindSubmatch(page.raw)
 	if m == nil || !strings.Contains(string(page.raw), "alice@example.com") || !strings.Contains(string(page.raw), "localhost:53682") || strings.Contains(string(page.raw), "<b>client</b>") {
 		t.Fatalf("consent page: %s", page.raw)
@@ -330,7 +333,7 @@ func TestMCPOAuthRefusals(t *testing.T) {
 
 func TestMCPOAuthTokenRules(t *testing.T) {
 	o := newOAuthT(t, "alice@example.com rw")
-	v := randToken()
+	v := web.RandToken()
 	code := o.signIn("google", v, nil).Get("code")
 	bad := func(what string, r resp, want string) {
 		t.Helper()
@@ -338,7 +341,7 @@ func TestMCPOAuthTokenRules(t *testing.T) {
 			t.Fatalf("%s: %d %s", what, r.code, r.raw)
 		}
 	}
-	bad("wrong verifier", o.token(code, randToken()), "invalid_grant")
+	bad("wrong verifier", o.token(code, web.RandToken()), "invalid_grant")
 	bad("short verifier", o.token(code, "abc"), "invalid_grant")
 	bad("another redirect", o.form("/oauth/token", url.Values{"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {v}, "client_id": {o.cid}, "redirect_uri": {"http://localhost:1/x"}}), "invalid_grant")
 	bad("unknown client", o.form("/oauth/token", url.Values{"grant_type": {"authorization_code"}, "code": {code}, "code_verifier": {v}, "client_id": {"nd1.cid.a.b"}}), "invalid_client")
@@ -368,18 +371,18 @@ func TestMCPOAuthTokenRules(t *testing.T) {
 	if r := o.mcp(at[:len(at)-2]+"AA", `{"jsonrpc":"2.0","id":1,"method":"ping"}`); r.code != 401 {
 		t.Fatalf("tampered: %d", r.code)
 	}
-	old := o.e.ws.oauthSign("at", oauthTok{X: time.Now().Add(-time.Minute).Unix(), E: "alice@example.com", P: "google"})
+	old := o.e.ws.OauthSign("at", core.OauthTok{X: time.Now().Add(-time.Minute).Unix(), E: "alice@example.com", P: "google"})
 	r := o.mcp(old, `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 	if r.code != 401 || !strings.Contains(string(r.raw), "expired") {
 		t.Fatalf("expired: %d %s", r.code, r.raw)
 	}
 	// a person the list names for another provider only
-	odd := o.e.ws.oauthSign("at", oauthTok{X: time.Now().Add(time.Hour).Unix(), E: "alice@example.com", P: "nonesuch"})
+	odd := o.e.ws.OauthSign("at", core.OauthTok{X: time.Now().Add(time.Hour).Unix(), E: "alice@example.com", P: "nonesuch"})
 	if r := o.mcp(odd, `{"jsonrpc":"2.0","id":1,"method":"ping"}`); r.code != 401 {
 		t.Fatalf("unknown provider: %d", r.code)
 	}
 	// the chain ends 90 days after the sign-in
-	longAgo := o.e.ws.oauthSign("rt", oauthTok{X: time.Now().Add(time.Hour).Unix(), E: "alice@example.com", P: "google", C: oauthCID(o.cid), O: time.Now().Add(-91 * 24 * time.Hour).Unix()})
+	longAgo := o.e.ws.OauthSign("rt", core.OauthTok{X: time.Now().Add(time.Hour).Unix(), E: "alice@example.com", P: "google", C: core.OauthCID(o.cid), O: time.Now().Add(-91 * 24 * time.Hour).Unix()})
 	bad("old chain", o.form("/oauth/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {longAgo}, "client_id": {o.cid}}), "invalid_grant")
 }
 
@@ -387,16 +390,16 @@ func TestMCPOAuthTokenRules(t *testing.T) {
 func TestMCPOAuthKeepsKeysAndAddresses(t *testing.T) {
 	o := newOAuthT(t, "alice@example.com rw")
 	key := "nd1.this-is-a-key-with-more-than-thirty-two-chars"
-	sup := o.e.ws.status.sup
-	sup.mu.Lock()
-	keys, err := normMCPKeys([]MCPKey{{Name: "k", Access: "ro", Key: key}})
+	sup := o.e.ws.Status.Sup()
+	sup.Mu.Lock()
+	keys, err := core.NormMCPKeys([]core.MCPKey{{Name: "k", Access: "ro", Key: key}})
 	if err != nil {
-		sup.mu.Unlock()
+		sup.Mu.Unlock()
 		t.Fatal(err)
 	}
-	sup.dc.Settings.MCPKeys = keys
-	sup.dc.Settings.MCPACL = []string{"127.0.0.0/8"}
-	sup.mu.Unlock()
+	sup.Dc.Settings.MCPKeys = keys
+	sup.Dc.Settings.MCPACL = []string{"127.0.0.0/8"}
+	sup.Mu.Unlock()
 	if r := o.mcp(key, `{"jsonrpc":"2.0","id":1,"method":"ping"}`); r.code != 200 {
 		t.Fatalf("key: %d %s", r.code, r.raw)
 	}
@@ -405,31 +408,5 @@ func TestMCPOAuthKeepsKeysAndAddresses(t *testing.T) {
 	}
 	if r := o.mcp("wrong-key-wrong-key-wrong-key-wrong-key", `{"jsonrpc":"2.0","id":1,"method":"ping"}`); r.code != 401 {
 		t.Fatalf("wrong key: %d", r.code)
-	}
-}
-
-func TestMCPOAuthHelpers(t *testing.T) {
-	for s, want := range map[string]bool{
-		"https://claude.ai/api/mcp/auth_callback": true, "http://localhost:8080/cb": true, "http://127.0.0.1/cb": true, "http://[::1]:1/cb": true,
-		"com.example.app:/cb": true, "http://example.com/cb": false, "myapp://x": false, "javascript:alert(1)": false, "file:///etc/passwd": false,
-		"https://a/b#f": false, "https://u:p@a/b": false, "": false, "/relative": false, "https://a/b c": false,
-		"https://" + strings.Repeat("a", 400) + "/cb": false,
-	} {
-		if oauthRedirectOK(s) != want {
-			t.Errorf("oauthRedirectOK(%q) = %v", s, !want)
-		}
-	}
-	if !oauthRedirectMatches([]string{"http://localhost:1/cb"}, "http://localhost:2/cb") || oauthRedirectMatches([]string{"http://localhost:1/cb"}, "http://127.0.0.1:1/cb") ||
-		oauthRedirectMatches([]string{"https://a.example/cb"}, "https://a.example:444/cb") || !oauthRedirectMatches([]string{"https://a.example/cb"}, "https://a.example/cb") {
-		t.Error("oauthRedirectMatches")
-	}
-	if got := oauthCleanName("  <script>x</script>\x00" + strings.Repeat("é", 100)); strings.ContainsAny(got, "<>\x00") || len([]rune(got)) != 60 {
-		t.Errorf("oauthCleanName: %q", got)
-	}
-	if oauthCleanName(" \x01 ") != "an MCP client" {
-		t.Error("empty name")
-	}
-	if oauthBase(&http.Request{Host: "a.example:443"}) != "https://a.example:443" || oauthBase(&http.Request{Host: "a/b"}) != "" || oauthBase(&http.Request{}) != "" {
-		t.Error("oauthBase")
 	}
 }

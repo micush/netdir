@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 // A read-only MCP caller reaches device_mcp (the tool list and the tools a device marks read-only): the shared gate used to
@@ -19,7 +22,7 @@ func TestDeviceMCPReadOnlyCaller(t *testing.T) {
 		t.Fatalf("read-only tools: %s", names)
 	}
 	_, m = post(mcpCall("device_mcp", `{"target":"nosuchdevice"}`))
-	if txt, _ := toolResult(t, m); strings.Contains(txt, readOnlyMsg) || strings.Contains(txt, "read-only") {
+	if txt, _ := toolResult(t, m); strings.Contains(txt, web.ReadOnlyMsg) || strings.Contains(txt, "read-only") {
 		t.Fatalf("device_mcp was refused at the gate: %s", txt)
 	}
 	_, m = post(mcpCall("device_mcp_write", `{"target":"nosuchdevice","tool":"files_delete"}`))
@@ -37,10 +40,10 @@ func TestDeviceMCPRouteReadOnlySession(t *testing.T) {
 	} {
 		req := httptest.NewRequest("POST", "/api/devices/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		ctx := context.WithValue(req.Context(), proxyCtxKey{}, &session{user: "u", readOnly: true, created: time.Now()})
+		ctx := context.WithValue(req.Context(), web.ProxyCtxKey{}, &core.Session{User: "u", ReadOnly: true, Created: time.Now()})
 		rec := httptest.NewRecorder()
 		e.ws.Handler().ServeHTTP(rec, req.WithContext(ctx))
-		refused := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), readOnlyMsg)
+		refused := rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), web.ReadOnlyMsg)
 		if refused != (want == http.StatusForbidden) {
 			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
 		}

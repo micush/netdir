@@ -1,19 +1,14 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-)
 
-func TestNumericTagLess(t *testing.T) {
-	if !numericTagLess("v215", "v1000") || numericTagLess("v1000", "v215") || !numericTagLess("1.2", "1.10") || numericTagLess("v5", "v5") {
-		t.Fatal("tags are not ordered by number")
-	}
-}
+	"netdir/internal/web"
+)
 
 // fakeGitHub serves the two places fetchRelease asks: the API (release/tag lists) and the archive.
 func fakeGitHub(t *testing.T, release string, tags string, archives map[string][]byte) *atomic.Int32 {
@@ -41,25 +36,10 @@ func fakeGitHub(t *testing.T, release string, tags string, archives map[string][
 			http.NotFound(w, r)
 		}
 	}))
-	oa, oh := ghAPI, ghHost
-	ghAPI, ghHost = srv.URL, srv.URL
-	t.Cleanup(func() { srv.Close(); ghAPI, ghHost = oa, oh })
+	oa, oh := web.GhAPI, web.GhHost
+	web.GhAPI, web.GhHost = srv.URL, srv.URL
+	t.Cleanup(func() { srv.Close(); web.GhAPI, web.GhHost = oa, oh })
 	return &n
-}
-
-func TestLatestTag(t *testing.T) {
-	fakeGitHub(t, "v300", `[]`, nil)
-	if tag, err := latestTag(context.Background(), ghRepo); err != nil || tag != "v300" {
-		t.Fatalf("release: %q %v", tag, err)
-	}
-	fakeGitHub(t, "", `[{"name":"v99"},{"name":"v1000"},{"name":"nightly"},{"name":"v215"}]`, nil)
-	if tag, err := latestTag(context.Background(), ghRepo); err != nil || tag != "v1000" {
-		t.Fatalf("tags: %q %v", tag, err)
-	}
-	fakeGitHub(t, "", `[{"name":"nightly"}]`, nil)
-	if _, err := latestTag(context.Background(), ghRepo); err == nil {
-		t.Fatal("no usable tag was accepted")
-	}
 }
 
 func TestUpdateFetchFromGitHub(t *testing.T) {
@@ -85,52 +65,5 @@ func TestUpdateFetchFromGitHub(t *testing.T) {
 	fakeGitHub(t, "v9", `[]`, map[string][]byte{"v9": []byte("not an archive")})
 	if r := e.do("POST", "/api/update/fetch", map[string]any{}, withAuth(e, true)); r.code != 422 {
 		t.Fatalf("junk archive: %d %s", r.code, r.raw)
-	}
-}
-
-func TestNormalizeRepo(t *testing.T) {
-	good := map[string]string{
-		"":                                       "",
-		"default":                                "",
-		"https://github.com/micush/netdir":       "", // the default is stored as empty
-		"https://github.com/micush/netdir/":      "",
-		"github.com/micush/netdir.git":           "",
-		"micush/netdir":                          "",
-		"https://github.com/someone/netdir-fork": "someone/netdir-fork",
-		"  https://www.github.com/a.b/c_d.git ":  "a.b/c_d",
-		"someone/fork":                           "someone/fork",
-	}
-	for in, want := range good {
-		got, err := normalizeRepo(in)
-		if err != nil || got != want {
-			t.Errorf("normalizeRepo(%q) = %q, %v; want %q", in, got, err, want)
-		}
-	}
-	for _, in := range []string{
-		"https://gitlab.com/a/b", "https://example.com/a/b", "a", "a/b/c", "https://github.com/a", "https://github.com/a/b/c",
-		"https://github.com/../b", "a/..", "a b/c", "https://github.com/a/b?x=1", "-a/b", "git@github.com:a/b",
-	} {
-		if got, err := normalizeRepo(in); err == nil {
-			t.Errorf("normalizeRepo(%q) = %q, want an error", in, got)
-		}
-	}
-}
-
-// The repository is part of the shared update settings: set on the primary, kept in the intent, used by the fetch.
-func TestUpdateRepoSetting(t *testing.T) {
-	u, err := NewUpdater(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u.Repo() != ghRepo {
-		t.Fatalf("default repo = %q", u.Repo())
-	}
-	u.SetRepo("someone/fork", "tester", "n1")
-	if u.Repo() != "someone/fork" || u.Intent().Repo != "someone/fork" {
-		t.Fatalf("repo not set: %q", u.Repo())
-	}
-	u.SetRepo("", "tester", "n1")
-	if u.Repo() != ghRepo {
-		t.Fatalf("empty must go back to the default: %q", u.Repo())
 	}
 }

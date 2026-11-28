@@ -6,6 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 // gateAuth makes every Authenticate wait until the gate is opened, so a test can hold many logins "inside PAM".
@@ -25,8 +28,8 @@ func (g *gateAuth) Authenticate(service, user, pass string) error {
 func TestLoginParallelGuessesAreBounded(t *testing.T) {
 	e := newWebEnv(t)
 	g := &gateAuth{gate: make(chan struct{})}
-	e.ws.auth = g
-	max := e.ws.policy.Load().MaxFailedLogins
+	e.ws.Auth = g
+	max := e.ws.Policy.Load().MaxFailedLogins
 
 	const n = 20
 	var wg sync.WaitGroup
@@ -63,52 +66,52 @@ func TestLoginParallelGuessesAreBounded(t *testing.T) {
 // Failing logins for a name from one address must not lock that name out for everyone else.
 func TestLoginLockoutIsNotPerUserName(t *testing.T) {
 	e := newWebEnv(t)
-	max := e.ws.policy.Load().MaxFailedLogins
-	attacker := loginKeys("203.0.113.9", "alice")
+	max := e.ws.Policy.Load().MaxFailedLogins
+	attacker := web.LoginKeys("203.0.113.9", "alice")
 	for i := 0; i < max; i++ {
-		if _, ok := e.ws.reserve(attacker...); !ok {
+		if _, ok := e.ws.Reserve(attacker...); !ok {
 			t.Fatalf("attempt %d refused too early", i)
 		}
-		e.ws.release(true, attacker...)
+		e.ws.Release(true, attacker...)
 	}
-	if _, locked := e.ws.throttled(attacker...); !locked {
+	if _, locked := e.ws.Throttled(attacker...); !locked {
 		t.Fatal("the attacker's address and name pair is not locked")
 	}
-	admin := loginKeys("198.51.100.7", "alice")
-	if _, locked := e.ws.throttled(admin...); locked {
+	admin := web.LoginKeys("198.51.100.7", "alice")
+	if _, locked := e.ws.Throttled(admin...); locked {
 		t.Fatal("a failure storm from one address locked the user out for another address")
 	}
-	if _, ok := e.ws.reserve(admin...); !ok {
+	if _, ok := e.ws.Reserve(admin...); !ok {
 		t.Fatal("the real user was refused")
 	}
-	e.ws.release(false, admin...)
+	e.ws.Release(false, admin...)
 }
 
 func TestLoginFailureTableIsCapped(t *testing.T) {
 	e := newWebEnv(t)
 	now := time.Now()
-	e.ws.mu.Lock()
-	for i := 0; i < maxFailKeys; i++ {
-		e.ws.fails["ipuser:x|"+itoa(i)] = &failRec{first: now, count: 1}
+	e.ws.Mu.Lock()
+	for i := 0; i < web.MaxFailKeys; i++ {
+		e.ws.Fails["ipuser:x|"+core.Itoa(i)] = &core.FailRec{First: now, Count: 1}
 	}
-	e.ws.mu.Unlock()
-	keys := loginKeys("192.0.2.1", "newname")
-	if _, ok := e.ws.reserve(keys...); !ok {
+	e.ws.Mu.Unlock()
+	keys := web.LoginKeys("192.0.2.1", "newname")
+	if _, ok := e.ws.Reserve(keys...); !ok {
 		t.Fatal("a login was refused because the table is full")
 	}
-	e.ws.release(true, keys...)
-	e.ws.mu.Lock()
-	n := len(e.ws.fails)
-	e.ws.mu.Unlock()
-	if n > maxFailKeys+1 { // the per-address record is always kept
+	e.ws.Release(true, keys...)
+	e.ws.Mu.Lock()
+	n := len(e.ws.Fails)
+	e.ws.Mu.Unlock()
+	if n > web.MaxFailKeys+1 { // the per-address record is always kept
 		t.Fatalf("failure table grew to %d", n)
 	}
 }
 
 func TestLoginQueueFullIsTurnedAway(t *testing.T) {
 	e := newWebEnv(t)
-	for i := 0; i < maxLoginQueue; i++ {
-		e.ws.loginQ <- struct{}{}
+	for i := 0; i < web.MaxLoginQueue; i++ {
+		e.ws.LoginQ <- struct{}{}
 	}
 	r := e.do("POST", "/api/login", map[string]string{"username": "alice", "password": "pw"})
 	if r.code != http.StatusServiceUnavailable || r.hdr.Get("Retry-After") == "" {

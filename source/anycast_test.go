@@ -1,89 +1,18 @@
 package main
 
 import (
-	"context"
 	"net"
 	"strings"
 	"sync"
 	"testing"
-	"time"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
 )
 
-func TestNormalizeAnycast(t *testing.T) {
-	for in, want := range map[string]string{
-		"203.0.113.53": "203.0.113.53", "203.0.113.53/32": "203.0.113.53", " 2001:DB8::53 ": "2001:db8::53",
-		"2001:db8::53/128": "2001:db8::53", "::ffff:203.0.113.53": "203.0.113.53",
-	} {
-		got, err := normalizeAnycast(in)
-		if err != nil || got != want {
-			t.Errorf("%q → %q, %v (want %q)", in, got, err, want)
-		}
-	}
-	for _, bad := range []string{"", "x", "203.0.113.0/24", "2001:db8::/64", "127.0.0.1", "::1", "0.0.0.0", "224.0.0.1", "fe80::1", "ff02::1", "1.2.3"} {
-		if got, err := normalizeAnycast(bad); err == nil {
-			t.Errorf("%q accepted as %q", bad, got)
-		}
-	}
-}
-
-func TestAnycastConfigRules(t *testing.T) {
-	g := defaultGroup()
-	g.ExtraVIPs = []string{"203.0.113.53/32", "2001:db8:53::1"}
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{g}
-	if err := dc.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if got := dc.Groups[0].ExtraVIPs; got[0] != "203.0.113.53" || got[1] != "2001:db8:53::1" {
-		t.Fatalf("not normalised: %v", got)
-	}
-	// the same anycast address on two gateways is how an anycast service is run; equal to a shared address, or listed twice, is refused
-	g2 := defaultGroup()
-	g2.GroupID, g2.VIP4, g2.ExtraVIPs = 2, "10.9.0.1/24", []string{"203.0.113.53"}
-	dc.Groups = append(dc.Groups, g2)
-	if err := dc.Validate(); err != nil {
-		t.Fatalf("the same anycast address on two gateways must be allowed: %v", err)
-	}
-	g2.ExtraVIPs = []string{"10.0.0.1"} // = group 1's vip4
-	dc.Groups[1] = g2
-	if err := dc.Validate(); err == nil {
-		t.Fatal("anycast address equal to a shared address accepted")
-	}
-	// the list is applied in place: it never restarts the gateway (election)
-	a, b := defaultGroup(), defaultGroup()
-	b.ExtraVIPs = []string{"203.0.113.53"}
-	if restartDiffers(&a, &b) {
-		t.Fatal("changing the anycast list restarts the gateway")
-	}
-	if !sameList(nil, []string{}) || sameList(a.ExtraVIPs, b.ExtraVIPs) {
-		t.Fatal("sameList")
-	}
-}
-
-func TestAnycastSharedAcrossCluster(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{defaultGroup()}
-	plain := sharedOf(dc).hash()
-	dc.Groups[0].ExtraVIPs = []string{}
-	if sharedOf(dc).hash() != plain {
-		t.Fatal("an empty list changes the cluster hash (rolling updates would disagree)")
-	}
-	dc.Groups[0].ExtraVIPs = []string{"203.0.113.53"}
-	sh := sharedOf(dc)
-	if sh.hash() == plain {
-		t.Fatal("anycast addresses are not part of the shared config")
-	}
-	rep := newDaemonConfig()
-	rep.Groups = []GroupConfig{defaultGroup()}
-	changed, err := mergeShared(rep, sh, nil)
-	if err != nil || !changed || len(rep.Groups[0].ExtraVIPs) != 1 || rep.Groups[0].ExtraVIPs[0] != "203.0.113.53" {
-		t.Fatalf("replica did not receive it: %v %v %v", changed, err, rep.Groups[0].ExtraVIPs)
-	}
-}
-
 func TestAnycastCanvasEdit(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{defaultGroup()}
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 	if _, err := applyCanvasEdit(dc, canvasEdit{Action: "set", Kind: "gateway", Group: 1, Anycast: "203.0.113.53, 2001:db8:53::1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +48,8 @@ func freeUDPPort(t *testing.T) int {
 }
 
 func TestAnycastCanvasAddDel(t *testing.T) {
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{defaultGroup()}
+	dc := core.NewDaemonConfig()
+	dc.Groups = []core.GroupConfig{core.DefaultGroup()}
 	ed := func(action, addr string) error {
 		_, err := applyCanvasEdit(dc, canvasEdit{Action: action, Kind: "anycast", Group: 1, Address: addr})
 		return err
@@ -153,10 +82,10 @@ func TestAnycastCanvasAddDel(t *testing.T) {
 
 // The canvas edit, the cluster split between "this node" and "all nodes", and what deleting an address does to its pause.
 func TestAnycastPauseConfig(t *testing.T) {
-	dc := newDaemonConfig()
-	g := defaultGroup()
+	dc := core.NewDaemonConfig()
+	g := core.DefaultGroup()
 	g.ExtraVIPs = []string{"203.0.113.53", "203.0.113.54"}
-	dc.Groups = []GroupConfig{g}
+	dc.Groups = []core.GroupConfig{g}
 	edit := func(action, scope, addr string) (string, error) {
 		return applyCanvasEdit(dc, canvasEdit{Action: action, Kind: "anycast", Group: 1, Address: addr, Scope: scope})
 	}
@@ -175,20 +104,20 @@ func TestAnycastPauseConfig(t *testing.T) {
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	got := dc.Groups[0].pausedAnycast()
+	got := dc.Groups[0].PausedAnycast()
 	if got["203.0.113.53"] != "node" || got["203.0.113.54"] != "all" {
 		t.Fatalf("paused: %v", got)
 	}
 	// only "all" is shared: a replica gets that one and keeps its own list
-	sh := sharedOf(dc)
+	sh := core.SharedOf(dc)
 	if len(sh.Groups[0].PausedVIPs) != 1 || sh.Groups[0].PausedVIPs[0] != "203.0.113.54" {
 		t.Fatalf("shared: %+v", sh.Groups[0].PausedVIPs)
 	}
-	rep := newDaemonConfig()
-	rg := defaultGroup()
+	rep := core.NewDaemonConfig()
+	rg := core.DefaultGroup()
 	rg.PausedVIPsHere = []string{"203.0.113.54"} // its own pause of something else is not touched by a merge
-	rep.Groups = []GroupConfig{rg}
-	if _, err := mergeShared(rep, sh, nil); err != nil {
+	rep.Groups = []core.GroupConfig{rg}
+	if _, err := cluster.MergeShared(rep, sh, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(rep.Groups[0].PausedVIPs) != 1 || len(rep.Groups[0].PausedVIPsHere) != 1 {
@@ -208,24 +137,24 @@ func TestAnycastPauseConfig(t *testing.T) {
 	if err := dc.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if len(dc.Groups[0].PausedVIPs) != 0 || len(dc.Groups[0].pausedAnycast()) != 0 {
+	if len(dc.Groups[0].PausedVIPs) != 0 || len(dc.Groups[0].PausedAnycast()) != 0 {
 		t.Fatalf("pause outlived its address: %v", dc.Groups[0].PausedVIPs)
 	}
-	plain := newDaemonConfig()
-	plain.Groups = []GroupConfig{defaultGroup()}
-	h0 := sharedOf(plain).hash()
+	plain := core.NewDaemonConfig()
+	plain.Groups = []core.GroupConfig{core.DefaultGroup()}
+	h0 := core.SharedOf(plain).Hash()
 	plain.Groups[0].PausedVIPs = []string{}
-	if sharedOf(plain).hash() != h0 {
+	if core.SharedOf(plain).Hash() != h0 {
 		t.Fatal("an empty paused list changes the cluster hash")
 	}
 }
 
 func hookLo(t *testing.T) *fakeLo {
-	resetAnycast()
-	t.Cleanup(resetAnycast)
+	core.ResetAnycast()
+	t.Cleanup(core.ResetAnycast)
 	f := &fakeLo{on: map[string]bool{}}
-	oa, od := anycastAddFn, anycastDelFn
-	anycastAddFn = func(a string) bool {
+	oa, od := core.AnycastAddFn, core.AnycastDelFn
+	core.AnycastAddFn = func(a string) bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if f.failA {
@@ -235,171 +164,13 @@ func hookLo(t *testing.T) *fakeLo {
 		f.adds++
 		return true
 	}
-	anycastDelFn = func(a string) { f.mu.Lock(); delete(f.on, a); f.dels++; f.mu.Unlock() }
-	t.Cleanup(func() { anycastAddFn, anycastDelFn = oa, od })
-	og := anycastGateFn // these tests are not about BGP: the gate is open unless a test closes it
-	anycastGateFn = func(*BGPConfig, string) string { return "" }
-	t.Cleanup(func() { anycastGateFn = og })
-	oc := serviceUpFn
-	serviceUpFn = func() bool { return true }
-	t.Cleanup(func() { serviceUpFn = oc })
+	core.AnycastDelFn = func(a string) { f.mu.Lock(); delete(f.on, a); f.dels++; f.mu.Unlock() }
+	t.Cleanup(func() { core.AnycastAddFn, core.AnycastDelFn = oa, od })
+	og := core.AnycastGateFn // these tests are not about BGP: the gate is open unless a test closes it
+	core.AnycastGateFn = func(*core.BGPConfig, string) string { return "" }
+	t.Cleanup(func() { core.AnycastGateFn = og })
+	oc := core.ServiceUpFn
+	core.ServiceUpFn = func() bool { return true }
+	t.Cleanup(func() { core.ServiceUpFn = oc })
 	return f
-}
-
-// Pausing an anycast address withdraws it (on this node, or on every node) and resuming announces it again.
-func TestAnycastPause(t *testing.T) {
-	lo := hookLo(t)
-	const addr = "127.0.0.9"
-	a := newAnycastSet(1, []string{addr})
-	scope := ""
-	a.paused = func() map[string]string {
-		if scope == "" {
-			return nil
-		}
-		return map[string]string{addr: scope}
-	}
-	a.step()
-	if !lo.has(addr) {
-		t.Fatal("not announced")
-	}
-	scope = "node"
-	a.step()
-	if lo.has(addr) || a.state()[0].Up || a.state()[0].Reason != pausedHereWhy {
-		t.Fatalf("paused on this node but announced: %+v", a.state())
-	}
-	scope = "all"
-	a.step()
-	if lo.has(addr) || a.state()[0].Reason != pausedAllWhy {
-		t.Fatalf("paused on all nodes but announced: %+v", a.state())
-	}
-	scope = ""
-	a.step()
-	if !lo.has(addr) || !a.state()[0].Up {
-		t.Fatalf("not announced after resume: %+v", a.state())
-	}
-	a.cancel = func() {}
-	a.done = make(chan struct{})
-	close(a.done)
-	a.stop()
-}
-
-// The listener stopping withdraws every address; serving again brings them back.
-func TestAnycastFollowsServiceHealth(t *testing.T) {
-	lo := hookLo(t)
-	const addr = "127.0.0.9"
-	a := newAnycastSet(1, []string{addr})
-	a.step()
-	if !lo.has(addr) {
-		t.Fatal("not announced while the service is up")
-	}
-	serviceUpFn = func() bool { return false }
-	a.step()
-	if lo.has(addr) || a.state()[0].Up || a.state()[0].Reason == "" {
-		t.Fatalf("announced while the service is down: %+v", a.state())
-	}
-	serviceUpFn = func() bool { return true }
-	a.step()
-	if !lo.has(addr) {
-		t.Fatal("not announced again once the service is back")
-	}
-}
-
-// The supervisor holds the addresses with the gateway and drops them when it stops.
-func TestSupervisorHoldsAnycastWithGateway(t *testing.T) {
-	lo := hookLo(t)
-	g := defaultGroup()
-	g.Interface = "netdirnone0"
-	g.ExtraVIPs = []string{"127.0.0.9"}
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{g}
-	s := NewSupervisor(context.Background(), dc)
-	t.Cleanup(s.StopAll)
-	s.mu.Lock()
-	s.startGroupLocked(dc.Groups[0])
-	s.mu.Unlock()
-	if !lo.has("127.0.0.9") {
-		t.Fatalf("not held after the gateway started: %+v", s.AnycastStates(1))
-	}
-	s.mu.Lock()
-	s.stopGroupLocked(1)
-	s.mu.Unlock()
-	if lo.has("127.0.0.9") || s.AnycastStates(1) != nil {
-		t.Fatal("still held after the gateway stopped")
-	}
-	// a paused gateway holds nothing
-	g.Paused = true
-	s.mu.Lock()
-	s.startGroupLocked(g)
-	s.mu.Unlock()
-	if lo.has("127.0.0.9") {
-		t.Fatal("a paused gateway holds its anycast address")
-	}
-}
-
-// Editing the list through a reload changes the addresses in place: no restart
-// of the gateway, the new address appears, the removed one goes.
-func TestReloadChangesAnycastInPlace(t *testing.T) {
-	lo := hookLo(t)
-	g := defaultGroup()
-	g.Interface = "netdirnone0"
-	g.ExtraVIPs = []string{"127.0.0.9"}
-	dc := newDaemonConfig()
-	dc.Groups = []GroupConfig{g}
-	s := NewSupervisor(context.Background(), dc)
-	t.Cleanup(s.StopAll)
-	s.mu.Lock()
-	s.startGroupLocked(dc.Groups[0])
-	s.mu.Unlock()
-	eng := s.engineList()
-	nu := newDaemonConfig()
-	g2 := g
-	g2.ExtraVIPs = []string{"127.0.0.10"}
-	nu.Groups = []GroupConfig{g2}
-	s.Reload(nu)
-	if lo.has("127.0.0.9") || !lo.has("127.0.0.10") {
-		t.Fatalf("addresses not swapped: %v", lo.on)
-	}
-	now := s.engineList()
-	if len(now) != len(eng) || (len(eng) > 0 && now[0] != eng[0]) {
-		t.Fatal("the gateway was restarted by an anycast change")
-	}
-}
-
-// An address is held only while BGP is configured, enabled and at least one neighbor of its family is established;
-// otherwise it is off lo and nothing answers on it.
-func TestAnycastDownWithoutEstablishedBGP(t *testing.T) {
-	lo := hookLo(t)
-	anycastGateFn = anycastBGPGate
-	oldDir, oldBGP := frrDir, vtyshBGP
-	frrDir = t.TempDir()
-	t.Cleanup(func() { frrDir, vtyshBGP = oldDir, oldBGP; bgpLive.at = time.Time{} })
-	state := "Established"
-	vtyshBGP = func() ([]byte, error) {
-		return []byte(`{"ipv4Unicast":{"peers":{"10.0.0.1":{"remoteAs":65001,"state":"` + state + `"}}}}`), nil
-	}
-	const addr = "127.0.0.9"
-	var cfg *BGPConfig
-	a := newAnycastSet(1, []string{addr})
-	a.bgp = func() (*BGPConfig, bool) { return cfg, true }
-	step := func() { bgpLive.at = time.Time{}; a.step() }
-	step()
-	if lo.has(addr) || a.state()[0].Up || a.state()[0].Reason == "" {
-		t.Fatalf("held with BGP not configured: %+v", a.state())
-	}
-	cfg = &BGPConfig{ASN: 65000, Neighbors: []BGPNeighbor{{Peer: "10.0.0.1", RemoteAS: 65001}}}
-	step()
-	if !lo.has(addr) {
-		t.Fatalf("not held with an established neighbor: %+v", a.state())
-	}
-	state = "Active"
-	step()
-	if lo.has(addr) || a.state()[0].Up {
-		t.Fatalf("held with no neighbor established: %+v", a.state())
-	}
-	state = "Established"
-	cfg.Disabled = true
-	step()
-	if lo.has(addr) {
-		t.Fatal("held while BGP is disabled")
-	}
 }

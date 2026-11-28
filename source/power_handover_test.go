@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"netdir/internal/cluster"
+	"netdir/internal/core"
 )
 
 // A scheduled restart or shut down hands the primary role over a minute before it fires, not before.
@@ -16,29 +19,29 @@ func TestScheduledPowerHandsOverThePrimary(t *testing.T) {
 		a.sync()
 		b.sync()
 	}
-	old := powerScheduledFile
-	defer func() { powerScheduledFile = old }()
-	powerScheduledFile = filepath.Join(t.TempDir(), "scheduled")
+	old := core.PowerScheduledFile
+	defer func() { core.PowerScheduledFile = old }()
+	core.PowerScheduledFile = filepath.Join(t.TempDir(), "scheduled")
 	write := func(in time.Duration) {
 		body := fmt.Sprintf("USEC=%d\nWARN_WALL=1\nMODE=reboot\n", time.Now().Add(in).UnixMicro())
-		if err := os.WriteFile(powerScheduledFile, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(core.PowerScheduledFile, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write(time.Hour) // an hour away: too early
-	a.mg.powerHandoverTick()
-	if a.mg.cl.node.Snapshot().Role != RolePrimary {
+	a.mg.PowerHandoverTick()
+	if a.mg.cl.Node.Snapshot().Role != core.RolePrimary {
 		t.Fatal("handed over an hour early")
 	}
-	os.Remove(powerScheduledFile) // cancelled or none
-	a.mg.powerHandoverTick()
-	if a.mg.cl.node.Snapshot().Role != RolePrimary {
+	os.Remove(core.PowerScheduledFile) // cancelled or none
+	a.mg.PowerHandoverTick()
+	if a.mg.cl.Node.Snapshot().Role != core.RolePrimary {
 		t.Fatal("handed over with nothing scheduled")
 	}
 	write(30 * time.Second) // inside the last minute
-	a.mg.powerHandoverTick()
-	if a.mg.cl.node.Snapshot().Role != RoleReplica || b.mg.cl.node.Snapshot().Role != RolePrimary {
-		t.Fatalf("not handed over: A %s, B %s", a.mg.cl.node.Snapshot().Role, b.mg.cl.node.Snapshot().Role)
+	a.mg.PowerHandoverTick()
+	if a.mg.cl.Node.Snapshot().Role != cluster.RoleReplica || b.mg.cl.Node.Snapshot().Role != core.RolePrimary {
+		t.Fatalf("not handed over: A %s, B %s", a.mg.cl.Node.Snapshot().Role, b.mg.cl.Node.Snapshot().Role)
 	}
 }
 
@@ -70,18 +73,18 @@ func TestPausingThePrimaryHandsItOver(t *testing.T) {
 		*paused[n] = true
 		settle()
 	}
-	role := func(n *tnode) Role { return n.mg.cl.node.Snapshot().Role }
+	role := func(n *tnode) core.Role { return n.mg.cl.Node.Snapshot().Role }
 	settle()
 	pause(b)
-	if role(a) != RolePrimary {
+	if role(a) != core.RolePrimary {
 		t.Fatalf("pausing a replica moved the role")
 	}
 	pause(a) // B is paused: only C is in service
-	if role(c) != RolePrimary || role(a) != RoleReplica {
+	if role(c) != core.RolePrimary || role(a) != cluster.RoleReplica {
 		t.Fatalf("the role must go to C, the node in service: A %s, B %s, C %s", role(a), role(b), role(c))
 	}
 	pause(c) // everyone else is paused: nowhere to go, so it stays
-	if role(c) != RolePrimary || role(a) == RolePrimary || role(b) == RolePrimary {
+	if role(c) != core.RolePrimary || role(a) == core.RolePrimary || role(b) == core.RolePrimary {
 		t.Fatalf("the role moved to a paused node: A %s, B %s, C %s", role(a), role(b), role(c))
 	}
 	if _, err := c.mg.NodePause(false, "test"); err != nil {
@@ -89,7 +92,7 @@ func TestPausingThePrimaryHandsItOver(t *testing.T) {
 	}
 	*paused[c] = false
 	settle()
-	if role(c) != RolePrimary {
+	if role(c) != core.RolePrimary {
 		t.Fatalf("resuming moved the role: C %s", role(c))
 	}
 }

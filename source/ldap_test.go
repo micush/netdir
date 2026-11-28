@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"net"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // A small directory server that speaks enough LDAP for the client: simple bind, search (and, or, not, equality and the
@@ -79,7 +80,7 @@ func newFakeLDAP(t *testing.T, tlsFirst bool) *fakeLDAP {
 		t.Fatal(err)
 	}
 	f.ln = ln
-	t.Cleanup(f.stop)
+	t.Cleanup(f.Stop)
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -92,7 +93,7 @@ func newFakeLDAP(t *testing.T, tlsFirst bool) *fakeLDAP {
 	return f
 }
 
-func (f *fakeLDAP) stop() { f.ln.Close() }
+func (f *fakeLDAP) Stop() { f.ln.Close() }
 
 func (f *fakeLDAP) addr() string {
 	s := "ldap://"
@@ -102,13 +103,13 @@ func (f *fakeLDAP) addr() string {
 	return s + f.ln.Addr().String()
 }
 
-func (f *fakeLDAP) config() LDAPConfig {
-	return LDAPConfig{LDAPServers: []string{f.addr()}, LDAPSkipVerify: true, LDAPBindDN: f.svcDN, LDAPBindPassword: f.svcPW,
+func (f *fakeLDAP) config() core.LDAPConfig {
+	return core.LDAPConfig{LDAPServers: []string{f.addr()}, LDAPSkipVerify: true, LDAPBindDN: f.svcDN, LDAPBindPassword: f.svcPW,
 		LDAPBaseDN: "DC=example,DC=lan", LDAPRWGroup: fakeRW, LDAPROGroup: "dns-readers"}
 }
 
 func lresult(tag byte, code int, diag string) []byte {
-	return tlv(tag, berInt(0x0a, code), berOctet(""), berOctet(diag))
+	return core.Tlv(tag, core.BerInt(0x0a, code), core.BerOctet(""), core.BerOctet(diag))
 }
 
 type fakeEntry struct {
@@ -138,26 +139,26 @@ func (f *fakeLDAP) entries() []*fakeEntry {
 	return out
 }
 
-func evalFilter(n *berNode, e *fakeEntry) bool {
-	switch n.tag {
+func evalFilter(n *core.BerNode, e *fakeEntry) bool {
+	switch n.Tag {
 	case 0xA0:
-		for _, k := range n.kids {
+		for _, k := range n.Kids {
 			if !evalFilter(k, e) {
 				return false
 			}
 		}
 		return true
 	case 0xA1:
-		for _, k := range n.kids {
+		for _, k := range n.Kids {
 			if evalFilter(k, e) {
 				return true
 			}
 		}
 		return false
 	case 0xA2:
-		return !evalFilter(n.kids[0], e)
+		return !evalFilter(n.Kids[0], e)
 	case 0xA3:
-		attr, val := strings.ToLower(string(n.kids[0].val)), string(n.kids[1].val)
+		attr, val := strings.ToLower(string(n.Kids[0].Val)), string(n.Kids[1].Val)
 		switch attr {
 		case "objectclass":
 			for _, c := range e.classes {
@@ -173,14 +174,14 @@ func evalFilter(n *berNode, e *fakeEntry) bool {
 		return false
 	case 0xA9:
 		var rule, attr, val string
-		for _, k := range n.kids {
-			switch k.tag {
+		for _, k := range n.Kids {
+			switch k.Tag {
 			case 0x81:
-				rule = string(k.val)
+				rule = string(k.Val)
 			case 0x82:
-				attr = string(k.val)
+				attr = string(k.Val)
 			case 0x83:
-				val = string(k.val)
+				val = string(k.Val)
 			}
 		}
 		return rule == "1.2.840.113556.1.4.1941" && strings.EqualFold(attr, "memberOf") && e.chain[strings.ToLower(val)]
@@ -196,14 +197,14 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 	}
 	br := bufio.NewReader(c)
 	bound := false
-	send := func(id int, op []byte) { c.Write(tlv(0x30, berInt(0x02, id), op)) }
+	send := func(id int, op []byte) { c.Write(core.Tlv(0x30, core.BerInt(0x02, id), op)) }
 	for {
-		id, op, err := readMessage(br)
+		id, op, err := core.ReadMessage(br)
 		if err != nil {
 			return
 		}
 		f.mu.Lock()
-		switch op.tag {
+		switch op.Tag {
 		case 0x77: // StartTLS
 			f.mu.Unlock()
 			if f.refuseStartTLS {
@@ -215,7 +216,7 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 			br = bufio.NewReader(c)
 			continue
 		case 0x60: // bind
-			dn, pw := string(op.kids[1].val), string(op.kids[2].val)
+			dn, pw := string(op.Kids[1].Val), string(op.Kids[2].Val)
 			ok := false
 			if dn == f.svcDN {
 				f.svcBinds++
@@ -251,10 +252,10 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 				send(id, lresult(0x65, 50, "bind first"))
 				break
 			}
-			base, scope, limit, filter, attrs := string(op.kids[0].val), berToInt(op.kids[1]), berToInt(op.kids[3]), op.kids[6], op.kids[7]
+			base, scope, limit, filter, attrs := string(op.Kids[0].Val), core.BerToInt(op.Kids[1]), core.BerToInt(op.Kids[3]), op.Kids[6], op.Kids[7]
 			var hits []*fakeEntry
 			for _, e := range f.entries() {
-				if scope == ldapScopeBase && !strings.EqualFold(e.dn, base) {
+				if scope == core.LdapScopeBase && !strings.EqualFold(e.dn, base) {
 					continue
 				}
 				if evalFilter(filter, e) {
@@ -267,18 +268,18 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 			}
 			for _, e := range hits {
 				var as [][]byte
-				for _, a := range attrs.kids {
-					if strings.EqualFold(string(a.val), "sAMAccountName") && e.sam != "" {
-						as = append(as, tlv(0x30, berOctet("sAMAccountName"), tlv(0x31, berOctet(e.sam))))
+				for _, a := range attrs.Kids {
+					if strings.EqualFold(string(a.Val), "sAMAccountName") && e.sam != "" {
+						as = append(as, core.Tlv(0x30, core.BerOctet("sAMAccountName"), core.Tlv(0x31, core.BerOctet(e.sam))))
 					}
-					if strings.EqualFold(string(a.val), "userPrincipalName") && e.upn != "" {
-						as = append(as, tlv(0x30, berOctet("userPrincipalName"), tlv(0x31, berOctet(e.upn))))
+					if strings.EqualFold(string(a.Val), "userPrincipalName") && e.upn != "" {
+						as = append(as, core.Tlv(0x30, core.BerOctet("userPrincipalName"), core.Tlv(0x31, core.BerOctet(e.upn))))
 					}
-					if strings.EqualFold(string(a.val), "userAccountControl") && e.uac != "" && e.sam != "" && !strings.Contains(strings.Join(e.classes, ","), "group") {
-						as = append(as, tlv(0x30, berOctet("userAccountControl"), tlv(0x31, berOctet(e.uac))))
+					if strings.EqualFold(string(a.Val), "userAccountControl") && e.uac != "" && e.sam != "" && !strings.Contains(strings.Join(e.classes, ","), "group") {
+						as = append(as, core.Tlv(0x30, core.BerOctet("userAccountControl"), core.Tlv(0x31, core.BerOctet(e.uac))))
 					}
 				}
-				send(id, tlv(0x64, berOctet(e.dn), tlv(0x30, as...)))
+				send(id, core.Tlv(0x64, core.BerOctet(e.dn), core.Tlv(0x30, as...)))
 			}
 			send(id, lresult(0x65, code, ""))
 		case 0x42:
@@ -289,105 +290,16 @@ func (f *fakeLDAP) serve(raw net.Conn) {
 	}
 }
 
-func TestLDAPFind(t *testing.T) {
-	f := newFakeLDAP(t, true)
-	// erin is in the group through another group, which the chain rule sees (the fake keeps the flattened set)
-	cfg := f.config()
-	for _, c := range []struct {
-		user, pw string
-		ok, ro   bool
-	}{
-		{"alice", "alicepw", true, false},
-		{"EXAMPLE\\alice", "alicepw", true, false}, // DOMAIN\name
-		{"alice@example.lan", "alicepw", true, false},
-		{"ALICE", "alicepw", true, false},
-		{"bob", "bobpw", true, true},
-		{"erin", "erinpw", true, false},
-		{"alice", "wrong", false, false},
-		{"carol", "carolpw", false, false},      // in no group
-		{"dave", "davepw", false, false},        // disabled
-		{"pc1$", "pcpw", false, false},          // a computer account is not a person
-		{"twin", "twinpw", false, false},        // two accounts with the name
-		{"nobody", "x", false, false},           // no such account
-		{"*)(objectClass=*", "x", false, false}, // filter characters are only a name that does not exist
-		{"alice", "", false, false},             // an empty password is never a login
-	} {
-		before := f.userBinds
-		o := cfg.ldapFind(c.user, c.pw, true)
-		if o.OK != c.ok || (c.ok && o.ReadOnly != c.ro) {
-			t.Errorf("%q: ok=%v ro=%v, want ok=%v ro=%v (%v)", c.user, o.OK, o.ReadOnly, c.ok, c.ro, o.Steps)
-		}
-		if o.Failed {
-			t.Errorf("%q: reported as a directory failure: %v", c.user, o.Steps)
-		}
-		if c.pw == "" && f.userBinds != before {
-			t.Errorf("an empty password was sent to the server")
-		}
-	}
-	// the recheck of a session asks without a password
-	if o := cfg.ldapFind("bob", "", false); !o.OK || !o.ReadOnly {
-		t.Errorf("recheck: %v", o.Steps)
-	}
-	// a disabled account is refused by the lookup itself (a recheck has no password to fail)
-	if o := cfg.ldapFind("dave", "", false); o.OK {
-		t.Errorf("a disabled account passed the recheck: %v", o.Steps)
-	}
-	// a wrong service account is a settings problem, not an answer about a person
-	bad := cfg
-	bad.LDAPBindPassword = "nope"
-	if o := bad.ldapFind("alice", "alicepw", true); o.OK || !o.Failed {
-		t.Errorf("wrong bind password: %v", o.Steps)
-	}
-	// a server that is gone is a failure too (the session stays)
-	f.stop()
-	if o := cfg.ldapFind("alice", "", false); o.OK || !o.Failed {
-		t.Errorf("server down: %v", o.Steps)
-	}
-}
-
-func TestLDAPStartTLSAndCertificates(t *testing.T) {
-	// ldap:// with StartTLS
-	f := newFakeLDAP(t, false)
-	cfg := f.config()
-	if o := cfg.ldapFind("alice", "alicepw", true); !o.OK {
-		t.Fatalf("StartTLS: %v", o.Steps)
-	}
-	// a server that will not start TLS is not given the password, or the service account's
-	g := newFakeLDAP(t, false)
-	g.refuseStartTLS = true
-	c2 := g.config()
-	if o := c2.ldapFind("alice", "alicepw", true); o.OK || g.svcBinds != 0 || g.userBinds != 0 {
-		t.Fatalf("StartTLS refused: ok=%v binds=%d/%d %v", o.OK, g.svcBinds, g.userBinds, o.Steps)
-	}
-	// certificate checking: a self-signed certificate is refused unless the checkbox is on
-	h := newFakeLDAP(t, true)
-	c3 := h.config()
-	c3.LDAPSkipVerify = false
-	if o := c3.ldapFind("alice", "alicepw", true); o.OK || !o.Failed || h.svcBinds != 0 {
-		t.Fatalf("self-signed certificate was accepted: %v", o.Steps)
-	}
-	c3.LDAPSkipVerify = true
-	if o := c3.ldapFind("alice", "alicepw", true); !o.OK {
-		t.Fatalf("with the checkbox on: %v", o.Steps)
-	}
-	// the first server is down: the second answers
-	c4 := h.config()
-	c4.LDAPServers = []string{"ldaps://127.0.0.1:1", h.addr()}
-	if o := c4.ldapFind("alice", "alicepw", true); !o.OK {
-		t.Fatalf("fallback server: %v", o.Steps)
-	}
-}
-
 func TestLDAPWebLogin(t *testing.T) {
 	f := newFakeLDAP(t, true)
 	e := newWebEnv(t)
-	p := defaultWeb()
+	p := core.DefaultWeb()
 	p.MaxFailedLogins = 50
 	p.LDAPConfig = f.config()
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	// a directory account that the host does not know
 	if r := e.login("dora", "dorapw"); r.code != 200 || r.body["read_only"] != false {
 		t.Fatalf("dora: %d %v", r.code, r.body)
@@ -397,11 +309,11 @@ func TestLDAPWebLogin(t *testing.T) {
 		t.Fatalf("session: %d %v", r.code, r.body)
 	}
 	age := func() {
-		e.ws.mu.Lock()
-		for _, s := range e.ws.sessions {
-			s.checked = time.Now().Add(-time.Hour)
+		e.ws.Mu.Lock()
+		for _, s := range e.ws.Sessions {
+			s.Checked = time.Now().Add(-time.Hour)
 		}
-		e.ws.mu.Unlock()
+		e.ws.Mu.Unlock()
 	}
 	// the read-only group gives a read-only session
 	if r := e.login("rob", "robpw"); r.code != 200 || r.body["read_only"] != true {
@@ -432,7 +344,7 @@ func TestLDAPWebLogin(t *testing.T) {
 		t.Fatalf("after removal: %d", r.code)
 	}
 	e.login("rob", "robpw")
-	f.stop()
+	f.Stop()
 	age()
 	if r := session(); r.code != 200 {
 		t.Fatalf("directory down: %d", r.code)
@@ -440,9 +352,9 @@ func TestLDAPWebLogin(t *testing.T) {
 	// the Test button: needs a full-access session, says what happened
 	e.login("alice", "pw")
 	f2 := newFakeLDAP(t, true)
-	q := *e.ws.policy.Load()
+	q := *e.ws.Policy.Load()
 	q.LDAPConfig = f2.config()
-	e.ws.policy.Store(&q)
+	e.ws.Policy.Store(&q)
 	r := e.do("POST", "/api/ldap/test", map[string]string{"username": "bob", "password": "bobpw"}, withAuth(e, true))
 	d, _ := r.body["data"].(map[string]any)
 	if r.code != 200 || d["ok"] != true || d["read_only"] != true || len(d["steps"].([]any)) < 3 {
@@ -456,173 +368,17 @@ func TestLDAPWebLogin(t *testing.T) {
 	}
 }
 
-func TestLDAPConfigRules(t *testing.T) {
-	c := LDAPConfig{LDAPServers: []string{"ldaps://dc1.example.lan, ldap://dc2.example.lan:389/"}, LDAPBindDN: " CN=svc,DC=x ", LDAPBindPassword: "p"}
-	if err := c.validateLDAP(); err != nil || strings.Join(c.LDAPServers, "|") != "ldaps://dc1.example.lan|ldap://dc2.example.lan:389" || c.LDAPBindDN != "CN=svc,DC=x" {
-		t.Fatalf("%v %+v", err, c)
-	}
-	for _, bad := range []LDAPConfig{
-		{LDAPServers: []string{"http://dc1"}}, {LDAPServers: []string{"dc1.example.lan"}}, {LDAPServers: []string{"ldaps://u:p@dc1"}},
-		{LDAPServers: []string{"ldaps://dc1/base"}}, {LDAPBaseDN: "DC=x\nDC=y"}, {LDAPRWGroup: strings.Repeat("x", 600)},
-		{LDAPServers: strings.Fields("ldap://a ldap://b ldap://c ldap://d ldap://e ldap://f ldap://g ldap://h ldap://i")},
-	} {
-		if err := bad.validateLDAP(); err == nil {
-			t.Errorf("%+v was accepted", bad)
-		}
-	}
-	// half set up is not an error and is not enabled
-	h := LDAPConfig{LDAPServers: []string{"ldaps://dc1"}, LDAPBindDN: "x"}
-	if err := h.validateLDAP(); err != nil || h.enabled() {
-		t.Fatalf("half set up: %v", err)
-	}
-	// shared by the cluster only when set; read-only accounts are not shown the password
-	dc := newDaemonConfig()
-	if sharedOf(dc).LDAP != nil {
-		t.Fatal("an empty LDAP block appears in the shared document")
-	}
-	dc.Web.LDAPConfig = LDAPConfig{LDAPServers: []string{"ldaps://dc1"}, LDAPBindDN: "svc", LDAPBindPassword: "hunter2", LDAPBaseDN: "DC=x", LDAPRWGroup: "g"}
-	sc := sharedOf(dc)
-	if sc.LDAP == nil || sc.LDAP.LDAPBindDN != "svc" {
-		t.Fatal("not shared")
-	}
-	b, _ := json.Marshal(dc)
-	var back DaemonConfig
-	if err := json.Unmarshal(b, &back); err != nil || back.Web.LDAPBindPassword != "hunter2" || !back.Web.LDAPConfig.enabled() {
-		t.Fatalf("round trip: %v %+v", err, back.Web.LDAPConfig)
-	}
-	red, _ := json.Marshal(redactSecrets(dc.Web))
-	if strings.Contains(string(red), "hunter2") {
-		t.Fatalf("the bind password is shown: %s", red)
-	}
-	_ = fmt.Sprint
-}
-
-// Without a service account each person binds as themselves.
-func TestLDAPNoServiceAccount(t *testing.T) {
-	f := newFakeLDAP(t, true)
-	cfg := f.config()
-	cfg.LDAPBindDN, cfg.LDAPBindPassword = "", ""
-	if !cfg.enabled() || cfg.hasBind() {
-		t.Fatal("a configuration without a bind account is not enabled")
-	}
-	for _, c := range []struct {
-		user, pw string
-		ok, ro   bool
-	}{
-		{"alice", "alicepw", true, false},
-		{"EXAMPLE\\alice", "alicepw", true, false},
-		{"alice@example.lan", "alicepw", true, false},
-		{"bob", "bobpw", true, true},
-		{"erin", "erinpw", true, false},
-		{"alice", "wrong", false, false},
-		{"carol", "carolpw", false, false}, // in no group
-		{"dave", "davepw", false, false},   // disabled: the directory refuses the bind
-		{"pc1$", "pcpw", false, false},     // a computer account
-		{"twin", "twinpw", false, false},   // two accounts with the name
-		{"nobody", "x", false, false},
-		{"alice", "", false, false},
-	} {
-		before := f.userBinds
-		o := cfg.ldapFind(c.user, c.pw, true)
-		if o.OK != c.ok || (c.ok && o.ReadOnly != c.ro) {
-			t.Errorf("%q: ok=%v ro=%v, want ok=%v ro=%v (%v)", c.user, o.OK, o.ReadOnly, c.ok, c.ro, o.Steps)
-		}
-		if o.Failed {
-			t.Errorf("%q: reported as a directory failure: %v", c.user, o.Steps)
-		}
-		if c.pw == "" && f.userBinds != before {
-			t.Errorf("an empty password was sent to the server")
-		}
-	}
-	if f.svcBinds != 0 {
-		t.Errorf("the service account was used %d times", f.svcBinds)
-	}
-	// a session cannot be rechecked: asking without a password is refused, and says why
-	if o := cfg.ldapFind("alice", "", false); o.OK || !o.Failed {
-		t.Errorf("recheck without a service account: %v", o.Steps)
-	}
-	// a service account without its password (or the reverse) is half set up, so off
-	half := cfg
-	half.LDAPBindDN = "CN=svc,DC=x"
-	if half.enabled() {
-		t.Error("a bind account without a password is enabled")
-	}
-	// the entry read back must be the account that signed in: twin2 shares a name but not the bind identity
-	tw := newFakeLDAP(t, true)
-	for _, u := range tw.users {
-		if u.dn == "CN=twin2,OU=People,DC=example,DC=lan" {
-			u.sam, u.upn = "other", "other@example.lan"
-		}
-	}
-	tc := tw.config()
-	tc.LDAPBindDN, tc.LDAPBindPassword = "", ""
-	if o := tc.ldapFind("twin", "twinpw", true); !o.OK {
-		t.Errorf("a unique twin should sign in: %v", o.Steps)
-	}
-	// somebody else's password must not sign in as the account the name finds: "alice" binds as alice@example.lan, which
-	// here belongs to another account (ally) than the one whose account name is alice
-	for _, u := range tw.users {
-		if u.sam == "alice" {
-			u.upn = "alice2@example.lan"
-		}
-	}
-	tw.users = append(tw.users, &fakeUser{dn: "CN=ally,OU=People,DC=example,DC=lan", sam: "ally", upn: "alice@example.lan", pw: "allypw",
-		groups: map[string]bool{strings.ToLower(fakeRW): true}})
-	if o := tc.ldapFind("alice", "allypw", true); o.OK {
-		t.Errorf("a different account signed in under alice's name: %v", o.Steps)
-	}
-}
-
-// An account whose user principal name is not name@domain still signs in by its account name (mcc -> mcc@example.lan) when no
-// other account has that UPN; when one has, it is the one that signed in and the entry found is refused.
-func TestLDAPAccountNameWithDifferentUPN(t *testing.T) {
-	f := newFakeLDAP(t, true)
-	f.users = append(f.users, &fakeUser{dn: "CN=Michael,OU=People,DC=example,DC=lan", sam: "mcc", upn: "michael.cushard@example.com", pw: "mccpw",
-		groups: map[string]bool{strings.ToLower(fakeRW): true}})
-	cfg := f.config()
-	cfg.LDAPBindDN, cfg.LDAPBindPassword = "", ""
-	for _, user := range []string{"mcc", "EXAMPLE\\mcc"} {
-		if o := cfg.ldapFind(user, "mccpw", true); !o.OK || o.Failed {
-			t.Errorf("%q should sign in: %v", user, o.Steps)
-		}
-	}
-	if o := cfg.ldapFind("mcc", "wrong", true); o.OK {
-		t.Errorf("a wrong password signed in: %v", o.Steps)
-	}
-	// another account owns mcc@example.lan as its UPN: the server signs that one in, not the account named mcc
-	f.users = append(f.users, &fakeUser{dn: "CN=Other,OU=People,DC=example,DC=lan", sam: "other", upn: "mcc@example.lan", pw: "otherpw",
-		groups: map[string]bool{strings.ToLower(fakeRW): true}})
-	if o := cfg.ldapFind("mcc", "otherpw", true); o.OK {
-		t.Errorf("a different account signed in under mcc's name: %v", o.Steps)
-	}
-	if o := cfg.ldapFind("mcc", "mccpw", true); o.OK {
-		t.Errorf("mcc's own password cannot sign in while another account owns the UPN: %v", o.Steps)
-	}
-}
-
-func TestLDAPBindName(t *testing.T) {
-	c := LDAPConfig{LDAPBaseDN: "OU=x,DC=example,DC=lan"}
-	for in, want := range map[string]string{"alice": "alice@example.lan", "a@b.c": "a@b.c", `EX\a`: `EX\a`} {
-		if got := c.ldapBindName(in); got != want {
-			t.Errorf("%q: %q, want %q", in, got, want)
-		}
-	}
-	if got := (LDAPConfig{LDAPBaseDN: "O=x"}).ldapBindName("alice"); got != "alice" {
-		t.Errorf("no DC parts: %q", got)
-	}
-}
-
 func TestLDAPWebNoServiceAccount(t *testing.T) {
 	f := newFakeLDAP(t, true)
 	e := newWebEnv(t)
-	p := defaultWeb()
+	p := core.DefaultWeb()
 	p.MaxFailedLogins = 50
 	p.LDAPConfig = f.config()
 	p.LDAPBindDN, p.LDAPBindPassword = "", ""
 	if err := p.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	e.ws.policy.Store(&p)
+	e.ws.Policy.Store(&p)
 	if r := e.login("dora", "dorapw"); r.code != 200 || r.body["read_only"] != false {
 		t.Fatalf("dora: %d %v", r.code, r.body)
 	}
@@ -635,11 +391,11 @@ func TestLDAPWebNoServiceAccount(t *testing.T) {
 			u.disabled = true
 		}
 	}
-	e.ws.mu.Lock()
-	for _, s := range e.ws.sessions {
-		s.checked = time.Now().Add(-time.Hour)
+	e.ws.Mu.Lock()
+	for _, s := range e.ws.Sessions {
+		s.Checked = time.Now().Add(-time.Hour)
 	}
-	e.ws.mu.Unlock()
+	e.ws.Mu.Unlock()
 	if r := e.do("GET", "/api/session", nil, withAuth(e, false)); r.code != 200 {
 		t.Fatalf("session was ended without a service account: %d", r.code)
 	}

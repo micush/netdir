@@ -5,9 +5,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
 )
 
-func mustTask(t *testing.T, s SchedTask) SchedTask {
+func mustTask(t *testing.T, s core.SchedTask) core.SchedTask {
 	t.Helper()
 	if s.Name == "" {
 		s.Name = "t"
@@ -15,7 +17,7 @@ func mustTask(t *testing.T, s SchedTask) SchedTask {
 	if s.Action == "" {
 		s.Action = "stats_clear"
 	}
-	if err := s.validate(); err != nil {
+	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -57,7 +59,7 @@ type schedHarness struct {
 	ran []string
 }
 
-func newHarness(t *testing.T, tasks ...SchedTask) *schedHarness {
+func newHarness(t *testing.T, tasks ...core.SchedTask) *schedHarness {
 	h := &schedHarness{now: time.Date(2026, 10, 17, 9, 0, 0, 0, time.UTC)}
 	h.s = newScheduler(nil, t.TempDir())
 	h.s.now = func() time.Time { h.mu.Lock(); defer h.mu.Unlock(); return h.now }
@@ -87,12 +89,12 @@ func waitFor(t *testing.T, f func() bool) {
 
 func TestSchedulerShellCommand(t *testing.T) {
 	h := newHarness(t)
-	ok := mustTask(t, SchedTask{ID: "s1", Name: "echo", Action: "shell", Command: "echo hello; echo oops >&2", Freq: "daily"})
-	slow := mustTask(t, SchedTask{ID: "s2", Name: "slow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, Freq: "daily"})
-	bad := mustTask(t, SchedTask{ID: "s3", Name: "bad", Action: "shell", Command: "exit 3", Freq: "daily"})
-	ign := mustTask(t, SchedTask{ID: "s4", Name: "ign", Action: "shell", Command: "echo stopped; exit 3", IgnoreExit: true, Freq: "daily"})
-	ignSlow := mustTask(t, SchedTask{ID: "s5", Name: "ignslow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, IgnoreExit: true, Freq: "daily"})
-	h.s.SetTasks([]SchedTask{ok, slow, bad, ign, ignSlow})
+	ok := mustTask(t, core.SchedTask{ID: "s1", Name: "echo", Action: "shell", Command: "echo hello; echo oops >&2", Freq: "daily"})
+	slow := mustTask(t, core.SchedTask{ID: "s2", Name: "slow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, Freq: "daily"})
+	bad := mustTask(t, core.SchedTask{ID: "s3", Name: "bad", Action: "shell", Command: "exit 3", Freq: "daily"})
+	ign := mustTask(t, core.SchedTask{ID: "s4", Name: "ign", Action: "shell", Command: "echo stopped; exit 3", IgnoreExit: true, Freq: "daily"})
+	ignSlow := mustTask(t, core.SchedTask{ID: "s5", Name: "ignslow", Action: "shell", Command: "sleep 30", TimeoutSec: 1, IgnoreExit: true, Freq: "daily"})
+	h.s.SetTasks([]core.SchedTask{ok, slow, bad, ign, ignSlow})
 	idle := func() bool {
 		for _, r := range h.s.Status().History {
 			if r.Status == "running" {
@@ -151,12 +153,12 @@ func TestSchedEnvHasTheUsualPaths(t *testing.T) {
 
 // With auto-update on, the online update task is for one node of a cluster; alone, or with auto-update off, it is not asked.
 func TestOnlineUpdateNeedsOneNode(t *testing.T) {
-	every := SchedTask{Action: "update_online"}
-	one := SchedTask{Action: "update_online", Nodes: []string{"a"}}
-	two := SchedTask{Action: "update_online", Nodes: []string{"a", "b"}}
-	other := SchedTask{Action: "stats_clear"}
+	every := core.SchedTask{Action: "update_online"}
+	one := core.SchedTask{Action: "update_online", Nodes: []string{"a"}}
+	two := core.SchedTask{Action: "update_online", Nodes: []string{"a", "b"}}
+	other := core.SchedTask{Action: "stats_clear"}
 	for _, c := range []struct {
-		t       SchedTask
+		t       core.SchedTask
 		auto    bool
 		cluster bool
 		want    bool

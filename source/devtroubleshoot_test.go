@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
 
 // troubleEnv is mcpEnv with one stub serving Entra (token and Graph) and a Meraki dashboard: Joe has two devices, the newer one
@@ -224,32 +225,6 @@ func TestMCPTroubleshootReadOnly(t *testing.T) {
 	}
 }
 
-func TestShortCommand(t *testing.T) {
-	for in, want := range map[string]string{
-		"tshoot msmith":    "--troubleshoot-user msmith",
-		"tshoot msmith 12": "--troubleshoot-user msmith --troubleshoot-hours 12",
-		"tshoot joe@contoso.com 3 --log-level debug": "--troubleshoot-user joe@contoso.com --troubleshoot-hours 3 --log-level debug",
-		"--tshoot":                   "--tshoot",
-		"tshoot":                     "tshoot",
-		"tshoot user msmith":         "--troubleshoot-user msmith",
-		"tshoot user msmith 12":      "--troubleshoot-user msmith --troubleshoot-hours 12",
-		"tshoot host PC-123":         "--troubleshoot-host PC-123",
-		"troubleshoot host PC-123 3": "--troubleshoot-host PC-123 --troubleshoot-hours 3",
-		"troubleshoot user msmith":   "--troubleshoot-user msmith",
-		"troubleshoot msmith 12":     "--troubleshoot-user msmith --troubleshoot-hours 12",
-		"tshoot host":                "--troubleshoot-user host",
-		"tshoot user --yes":          "--troubleshoot-user user --yes",
-		"troubleshoot":               "troubleshoot",
-		"troubleshoot --all-nodes":   "troubleshoot --all-nodes",
-		"tshoot --all-nodes":         "tshoot --all-nodes",
-		"--tshoot --all-nodes":       "--tshoot --all-nodes",
-	} {
-		if got := strings.Join(shortCommand(strings.Fields(in)), " "); got != want {
-			t.Errorf("%q -> %q, want %q", in, got, want)
-		}
-	}
-}
-
 // tsAnswer is the answer of device.troubleshoot as JSON text and as a tree.
 func tsAnswer(t *testing.T, e *webEnv, args string) (string, map[string]any) {
 	t.Helper()
@@ -344,27 +319,6 @@ func TestTroubleshootHostOverMCPReadOnly(t *testing.T) {
 	}
 }
 
-func TestTroubleshootNames(t *testing.T) {
-	for in, want := range map[string]string{"joe.smith@contoso.com": "joe.smith", `CORP\msmith`: "msmith", "msmith": "msmith", "Joe Smith": "", "11111111-2222-3333-4444-555555555555": "", "a'b": ""} {
-		if got := tsShortUser(in); got != want {
-			t.Errorf("tsShortUser(%q) = %q, want %q", in, got, want)
-		}
-	}
-	devs := []device.Device{{Name: "fw1", Platform: "panos"}, {Name: "fw2", Platform: "panos"}, {Name: "pano", Platform: "panorama"}, {Name: "old", Platform: "panorama", Disabled: true}}
-	if d, err := pickLogDevice(devs, ""); err != nil || d.Name != "pano" {
-		t.Errorf("the Panorama comes first: %v %v", d.Name, err)
-	}
-	if d, err := pickLogDevice(devs, "fw2"); err != nil || d.Name != "fw2" {
-		t.Errorf("a named firewall: %v %v", d.Name, err)
-	}
-	if _, err := pickLogDevice(devs[:2], ""); err == nil {
-		t.Error("two firewalls and no name: one was picked")
-	}
-	if _, err := pickLogDevice(nil, ""); err == nil || !strings.Contains(err.Error(), "no enabled panorama or panos") {
-		t.Errorf("none: %v", err)
-	}
-}
-
 // A read of a device keeps its driver, and with it the sign-in, for the next read: over MCP, and for the troubleshooting.
 func TestDeviceReadsShareOneSignIn(t *testing.T) {
 	if !device.ReuseDrivers {
@@ -375,10 +329,10 @@ func TestDeviceReadsShareOneSignIn(t *testing.T) {
 	// the query route reads the inventory the supervisor holds
 	inventory := func() {
 		dc, _, _ := e.mg.LiveConfig()
-		sup := e.ws.status.sup
-		sup.mu.Lock()
-		sup.dc.Settings.Devices, sup.dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
-		sup.mu.Unlock()
+		sup := e.ws.Status.Sup()
+		sup.Mu.Lock()
+		sup.Dc.Settings.Devices, sup.Dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
+		sup.Mu.Unlock()
 	}
 	inventory()
 	facts := func() string {
@@ -429,10 +383,10 @@ func TestDeviceAnswerCache(t *testing.T) {
 	device.CacheFlush()
 	device.Answers.Flush()
 	dc, _, _ := e.mg.LiveConfig()
-	sup := e.ws.status.sup
-	sup.mu.Lock()
-	sup.dc.Settings.Devices, sup.dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
-	sup.mu.Unlock()
+	sup := e.ws.Status.Sup()
+	sup.Mu.Lock()
+	sup.Dc.Settings.Devices, sup.Dc.Settings.DeviceCredentials = dc.Settings.Devices, dc.Settings.DeviceCredentials
+	sup.Mu.Unlock()
 	read := func(args string) string {
 		_, m := post(mcpCall("device_api_get", args))
 		txt, isErr := toolResult(t, m)
@@ -456,12 +410,12 @@ func TestDeviceAnswerCache(t *testing.T) {
 		op, cmd string
 		want    bool
 	}{{"facts", "", true}, {"config", "", false}, {"show", "show version", false}, {"api", "/api/?type=log&log-type=traffic", false}, {"api", "/x/jobs/1", false}, {"api", "/organizations", true}} {
-		got := answerCacheable(&session{mcp: true}, c.op, c.cmd, "")
+		got := core.AnswerCacheable(&core.Session{Mcp: true}, c.op, c.cmd, "")
 		if got != c.want {
 			t.Errorf("%s %q cacheable = %v", c.op, c.cmd, got)
 		}
 	}
-	if answerCacheable(&session{}, "facts", "", "") || answerCacheable(&session{mcp: true, raw: true}, "facts", "", "") || answerCacheable(&session{mcp: true}, "facts", "", "1") {
+	if core.AnswerCacheable(&core.Session{}, "facts", "", "") || core.AnswerCacheable(&core.Session{Mcp: true, Raw: true}, "facts", "", "") || core.AnswerCacheable(&core.Session{Mcp: true}, "facts", "", "1") {
 		t.Error("the GUI, a raw caller or a fresh read was answered from memory")
 	}
 }

@@ -66,7 +66,14 @@
       {"name": "entraapp", "username": "application-client-id", "password": "client-secret"},
       {"name": "entrabrowser", "token": "rt:"},
       {"name": "afcuser", "username": "admin", "password": "change-me"},
-      {"name": "pvetoken", "token": "netdir@pve!netdir=00000000-0000-0000-0000-000000000000"}
+      {"name": "pvetoken", "token": "netdir@pve!netdir=00000000-0000-0000-0000-000000000000"},
+      {"name": "vcenterlogin", "username": "netdir@vsphere.local", "password": "change-me"},
+      {"name": "ns1key", "token": "an-ns1-api-key"},
+      {"name": "rc0token", "token": "an-rcodezero-api-token"},
+      {"name": "d42ro", "username": "netdir-ro", "password": "change-me"},
+      {"name": "smaxuser", "username": "netdir", "password": "change-me"},
+      {"name": "centkey", "token": "a-centreon-api-token"},
+      {"name": "lab", "username": "netdir", "password": "change-me"}
     ]
   },
   "web": {

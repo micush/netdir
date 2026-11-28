@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"netdir/device"
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 type rawSwitch struct {
@@ -116,7 +118,7 @@ func TestDeviceRawRouteReadOnlySession(t *testing.T) {
 	for _, ro := range []bool{true, false} {
 		req := httptest.NewRequest("POST", "/api/devices/raw", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		ctx := context.WithValue(req.Context(), proxyCtxKey{}, &session{user: "u", readOnly: ro, created: time.Now()})
+		ctx := context.WithValue(req.Context(), web.ProxyCtxKey{}, &core.Session{User: "u", ReadOnly: ro, Created: time.Now()})
 		rec := httptest.NewRecorder()
 		e.ws.Handler().ServeHTTP(rec, req.WithContext(ctx))
 		if ro && (rec.Code != http.StatusForbidden || len(sw.calls) != 0) {

@@ -9,99 +9,16 @@ import (
 	"time"
 
 	"netdir/device"
+	"netdir/internal/cluster"
+	"netdir/internal/core"
+	"netdir/internal/devices"
+	"netdir/internal/mcp"
 )
-
-// The canvas is a picture of the configuration: one circle per gateway group (its shared address) with the cluster's
-// nodes beside it.  Both the web GUI and the CLI (--canvas) show the same view built here, with the same colours:
-//
-//	ok    green   working
-//	warn  yellow  degraded (works, but something underneath it does not)
-//	bad   red     down
-//	idle  grey    not known yet (not applied, or not running here)
-//	alert purple  a device only: a monitoring system (Observium, Centreon) that answers and holds alerts
-//
-// CanvasDevice is one managed device of a gateway, as a square under its circle.
-type CanvasDevice struct {
-	Name     string        `json:"name"`
-	Platform string        `json:"platform"`
-	Address  string        `json:"address"`
-	Tags     []string      `json:"tags,omitempty"`
-	Status   string        `json:"status"`
-	Detail   string        `json:"detail"`
-	Health   device.Health `json:"health"`
-}
-
-// CanvasFamily is the state of one address family of a gateway (a gateway with
-// both an IPv4 and an IPv6 address runs one engine per family).
-type CanvasFamily struct {
-	AF     string `json:"af"` // v4 | v6
-	VIP    string `json:"vip"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
-}
-
-type CanvasGateway struct {
-	Name      string         `json:"name"`
-	GroupID   int            `json:"group_id"`
-	Interface string         `json:"interface"`
-	WeakKey   bool           `json:"weak_key,omitempty"` // the gateway's HMAC key is well known or short (gkey.go)
-	VIP4      string         `json:"vip4"`
-	VIP6      string         `json:"vip6"`
-	Anycast   []AnycastState `json:"anycast,omitempty"`
-	// MCPClients is how many different callers used the MCP endpoint on this gateway's addresses in the last 5 minutes (all serving nodes, see addPeerClients).
-	MCPClients int            `json:"mcp_clients"`
-	MCPCallers []string       `json:"mcp_callers,omitempty"` // the callers behind MCPClients, as hashes, so the nodes can be added up without counting one twice
-	Status     string         `json:"status"`
-	Detail     string         `json:"detail"`
-	Families   []CanvasFamily `json:"families"`
-	// Vmac is the last virtual-MAC test on this node (see vmactest.go); absent until one has run.
-	Vmac    *VmacResult    `json:"vmac,omitempty"`
-	Members []CanvasMember `json:"members"`
-	// Devices are the gateway's managed devices (GroupConfig.Devices) with their health as this node sees it.
-	Devices []CanvasDevice `json:"devices"`
-	Paused  bool           `json:"paused"`
-	// NodePaused says the pause comes from the whole node being paused, not from this gateway.
-	NodePaused bool `json:"node_paused,omitempty"`
-	// PausedScope says where this gateway is paused by its own setting: "all" (every node) or "node" (this one).
-	PausedScope string `json:"paused_scope,omitempty"`
-	// Excluded says this node has been removed from the gateway (shared setting); ExcludedNodes lists the node IDs removed.
-	// ClusterStatus / ClusterDetail are the gateway's state for the whole cluster, from its nodes (the sidebar's dot): the same
-	// whichever node is asked.  Absent without a cluster, where Status is it.
-	ClusterStatus string `json:"cluster_status,omitempty"`
-	ClusterDetail string `json:"cluster_detail,omitempty"`
-	// ClusterUpSec is how long the gateway has been served without a break by the cluster as a whole (see clusterUpSec).
-	ClusterUpSec int64 `json:"cluster_up_sec,omitempty"`
-	// Via names the node whose picture of the gateway this is, when this node does not serve it itself (see viaServing).
-	Via           string   `json:"via,omitempty"`
-	ViaAddr       string   `json:"via_addr,omitempty"`
-	Excluded      bool     `json:"excluded,omitempty"`
-	ExcludedNodes []string `json:"excluded_nodes,omitempty"`
-	Uptime        *UpInfo  `json:"uptime,omitempty"`
-	// Nodes are the cluster's nodes and how each stands for this gateway (empty without a cluster); this node first.
-	Nodes []CanvasNode `json:"nodes,omitempty"`
-}
-
-// CanvasMember is one cluster node currently serving the gateway: it holds an
-// address-forwarding slot (AFN) and is still sending hellos.
-type CanvasMember struct {
-	// ViaLocal marks the entry of the node whose picture this is, in a gateway the signed-in node does not serve (Local is
-	// cleared there, as it would point at the signed-in node)
-	ViaLocal bool   `json:"via_local,omitempty"`
-	IP       string `json:"ip"`
-	Local    bool   `json:"local"`
-	AGC      bool   `json:"agc"`
-	// AGCAFs is the address families this node is the controller for ("v4", "v6" or "v4+v6"), empty when it is not.  A
-	// dual-stack gateway elects its controllers separately, so they may be two nodes.
-	AGCAFs string `json:"agc_afs,omitempty"`
-	AfnID  int    `json:"afn_id"`
-	Weight int    `json:"weight"`
-	AFs    string `json:"afs"`
-}
 
 // membersOf lists the nodes serving group gid, one entry per node even when
 // both address families are running.
-func membersOf(rows []SnapshotRow, gid int) []CanvasMember {
-	out := []CanvasMember{}
+func membersOf(rows []core.SnapshotRow, gid int) []core.CanvasMember {
+	out := []core.CanvasMember{}
 	idx := map[string]int{}
 	for _, r := range rows {
 		if r.GroupID != gid || r.AfnID == 0 || r.State == "expired" || r.PeerIP == "" {
@@ -111,7 +28,7 @@ func membersOf(rows []SnapshotRow, gid int) []CanvasMember {
 		if !ok {
 			i = len(out)
 			idx[r.PeerIP] = i
-			out = append(out, CanvasMember{IP: r.PeerIP, Local: r.Local, AfnID: r.AfnID, Weight: r.Weight})
+			out = append(out, core.CanvasMember{IP: r.PeerIP, Local: r.Local, AfnID: r.AfnID, Weight: r.Weight})
 		}
 		if out[i].AFs != "" {
 			out[i].AFs += "+"
@@ -136,16 +53,16 @@ func membersOf(rows []SnapshotRow, gid int) []CanvasMember {
 // when two nodes share a host name); members with the same name are one node.  An address that is not in the map stays
 // its own member.  The IPv4 address is kept as the member's address (the node's addresses on the Nodes page are
 // matched against it), and the families are joined.
-func mergeFamilyMembers(gs []CanvasGateway, names map[string]string) {
+func mergeFamilyMembers(gs []core.CanvasGateway, names map[string]string) {
 	for i := range gs {
 		ms := gs[i].Members
 		if len(ms) < 2 {
 			continue
 		}
-		out := make([]CanvasMember, 0, len(ms))
+		out := make([]core.CanvasMember, 0, len(ms))
 		at := map[string]int{}
 		for _, m := range ms {
-			name := names[normIP(m.IP)]
+			name := names[core.NormIP(m.IP)]
 			if name == "" {
 				out = append(out, m)
 				continue
@@ -167,7 +84,7 @@ func mergeFamilyMembers(gs []CanvasGateway, names map[string]string) {
 			o.Local = o.Local || m.Local
 			o.AGC = o.AGC || m.AGC
 			for _, af := range strings.Split(m.AGCAFs, "+") {
-				if af != "" && !containsStr(strings.Split(o.AGCAFs, "+"), af) {
+				if af != "" && !core.ContainsStr(strings.Split(o.AGCAFs, "+"), af) {
 					if o.AGCAFs != "" {
 						o.AGCAFs += "+"
 					}
@@ -181,14 +98,14 @@ func mergeFamilyMembers(gs []CanvasGateway, names map[string]string) {
 }
 
 // buildCanvas combines the running configuration with what the engines currently report.
-func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
-	health := deviceHealth(true)
-	out := make([]CanvasGateway, 0, len(dc.Groups))
+func buildCanvas(dc *core.DaemonConfig, rows []core.SnapshotRow) []core.CanvasGateway {
+	health := devices.DeviceHealth(true)
+	out := make([]core.CanvasGateway, 0, len(dc.Groups))
 	for i := range dc.Groups {
 		g := &dc.Groups[i]
-		callers := mcpSeen.callers(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...)...)
-		cg := CanvasGateway{Name: g.Name, GroupID: g.GroupID, Interface: g.Interface, VIP4: g.VIP4, VIP6: g.VIP6,
-			Families: []CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), MCPCallers: callers, MCPClients: len(callers), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: isWeakKey(g.Key)}
+		callers := mcp.McpSeen.Callers(append(append([]string{g.VIP4, g.VIP6}, g.MoreVIP4...), g.MoreVIP6...)...)
+		cg := core.CanvasGateway{Name: g.Name, GroupID: g.GroupID, Interface: g.Interface, VIP4: g.VIP4, VIP6: g.VIP6,
+			Families: []core.CanvasFamily{}, Devices: canvasDevices(dc, g, health), Members: membersOf(rows, g.GroupID), MCPCallers: callers, MCPClients: len(callers), Paused: g.Paused, NodePaused: dc.NodePaused, ExcludedNodes: append([]string(nil), g.ExcludedNodes...), WeakKey: core.IsWeakKey(g.Key)}
 		// the gateway itself, one state per address family
 		for _, f := range []struct{ af, vip string }{{"v4", g.VIP4}, {"v6", g.VIP6}} {
 			if f.vip == "" {
@@ -212,7 +129,7 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
 					answering = true
 				}
 			}
-			cf := CanvasFamily{AF: f.af, VIP: f.vip}
+			cf := core.CanvasFamily{AF: f.af, VIP: f.vip}
 			switch {
 			case !running:
 				cf.Status, cf.Detail = "idle", "not running"
@@ -255,12 +172,12 @@ func buildCanvas(dc *DaemonConfig, rows []SnapshotRow) []CanvasGateway {
 }
 
 // canvasDevices lists a gateway's devices, in its order, with the health devHealth has for each.
-func canvasDevices(dc *DaemonConfig, g *GroupConfig, health map[string]device.Health) []CanvasDevice {
+func canvasDevices(dc *core.DaemonConfig, g *core.GroupConfig, health map[string]device.Health) []core.CanvasDevice {
 	byName := map[string]device.Device{}
 	for _, d := range dc.Settings.Devices {
 		byName[d.Name] = d
 	}
-	out := []CanvasDevice{}
+	out := []core.CanvasDevice{}
 	for _, n := range g.Devices {
 		d, ok := byName[n]
 		if !ok {
@@ -276,7 +193,7 @@ func canvasDevices(dc *DaemonConfig, g *GroupConfig, health map[string]device.He
 		if h.Status == "ok" && h.AlertCount > 0 { // answering, with alerts of its own: its own colour (purple), not a fault of the device
 			h.Status = "alert"
 		}
-		out = append(out, CanvasDevice{Name: d.Name, Platform: d.Platform, Address: d.Address, Tags: d.Tags, Status: h.Status, Detail: h.Detail, Health: h})
+		out = append(out, core.CanvasDevice{Name: d.Name, Platform: d.Platform, Address: d.Address, Tags: d.Tags, Status: h.Status, Detail: h.Detail, Health: h})
 	}
 	return out
 }
@@ -284,7 +201,7 @@ func canvasDevices(dc *DaemonConfig, g *GroupConfig, health map[string]device.He
 // combineFamilies folds the per-family states into the gateway's own: the worst
 // one wins, and a family that is not running while the other is counts as
 // degraded.  The detail names the family when there is more than one.
-func combineFamilies(fs []CanvasFamily) (status, detail string) {
+func combineFamilies(fs []core.CanvasFamily) (status, detail string) {
 	if len(fs) == 0 {
 		return "idle", "no address"
 	}
@@ -319,32 +236,25 @@ func combineFamilies(fs []CanvasFamily) (status, detail string) {
 	return worst, strings.Join(parts, "; ")
 }
 
-// config returns the supervisor's current configuration.
-func (s *Supervisor) config() *DaemonConfig {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.dc
-}
-
 // canvasGroups is the picture as the GUI and CLI show it, with the uptimes noted.
-func (s *StatusServer) canvasGroups() []CanvasGateway {
-	groups := buildCanvas(s.sup.config(), s.snapshot())
-	mergeFamilyMembers(groups, s.ipNames())
-	markOffnet(groups, s.sup.offnetGroups())
-	cfg := s.sup.config()
+func (s *StatusServer) CanvasGroups() []core.CanvasGateway {
+	groups := buildCanvas(s.sup.Config(), s.Snapshot())
+	mergeFamilyMembers(groups, s.IPNames())
+	markOffnet(groups, s.sup.OffnetGroups())
+	cfg := s.sup.Config()
 	real := map[int]bool{}
 	for _, g := range cfg.Groups {
 		real[g.GroupID] = g.RealMACs
 	}
-	markVmac(groups, real)
+	core.MarkVmac(groups, real)
 	s.markAnycast(groups)
 	s.markNodes(groups)
-	s.up.annotate(groups, time.Now())
-	storeAnycastLocal(groups)
+	s.up.Annotate(groups, time.Now())
+	cluster.StoreAnycastLocal(groups)
 	if s.mg != nil {
 		for i := range groups {
 			for j := range groups[i].Anycast {
-				groups[i].Anycast[j].ClusterUpSec = s.mg.anyUpSeconds(groups[i].Anycast[j].Addr)
+				groups[i].Anycast[j].ClusterUpSec = s.mg.cl.AnyUpSeconds(groups[i].Anycast[j].Addr)
 			}
 		}
 	}
@@ -352,13 +262,13 @@ func (s *StatusServer) canvasGroups() []CanvasGateway {
 }
 
 func (s *StatusServer) canvasView() map[string]any {
-	return map[string]any{"ok": true, "data": s.canvasGroups(), "dnsdir": dnsdirInfo()}
+	return map[string]any{"ok": true, "data": s.CanvasGroups(), "dnsdir": core.DnsdirInfo()}
 }
 
 // markAnycast lists each gateway's anycast addresses and whether this node
 // announces them now.
-func (s *StatusServer) markAnycast(groups []CanvasGateway) {
-	cfg := s.sup.config()
+func (s *StatusServer) markAnycast(groups []core.CanvasGateway) {
+	cfg := s.sup.Config()
 	for i := range groups {
 		st := s.sup.AnycastStates(groups[i].GroupID)
 		if st == nil {
@@ -367,27 +277,27 @@ func (s *StatusServer) markAnycast(groups []CanvasGateway) {
 					continue
 				}
 				why := "gateway not running on this node"
-				paused := g.pausedAnycast()
+				paused := g.PausedAnycast()
 				for _, a := range g.ExtraVIPs {
-					st = append(st, AnycastState{Addr: a, Reason: why, Paused: paused[a]})
+					st = append(st, core.AnycastState{Addr: a, Reason: why, Paused: paused[a]})
 				}
 			}
 		}
 		switch {
 		case cfg.BGP.Active() || cfg.OSPF.Active():
-			var bp []BGPPeer
+			var bp []core.BGPPeer
 			var bok bool
 			if cfg.BGP.Active() {
-				bp, bok = liveBGPPeers()
+				bp, bok = core.LiveBGPPeers()
 			}
-			var op []OSPFPeer
+			var op []core.OSPFPeer
 			var ook bool
 			if cfg.OSPF.Active() {
-				op, ook = liveOSPFPeers()
+				op, ook = core.LiveOSPFPeers()
 			}
 			for j := range st {
 				if st[j].Up && st[j].Paused == "" && !st[j].External {
-					st[j].Status, st[j].Detail, st[j].BGP = anycastRouteStatus(cfg, st[j].Addr, bp, bok, op, ook)
+					st[j].Status, st[j].Detail, st[j].BGP = core.AnycastRouteStatus(cfg, st[j].Addr, bp, bok, op, ook)
 				}
 			}
 		case cfg.BGP.Configured() || cfg.OSPF.Configured(): // routing is disabled here (Operate ▸ Anycast): nothing is announced
@@ -407,7 +317,7 @@ func (s *StatusServer) markAnycast(groups []CanvasGateway) {
 
 // markOffnet shows the gateways this node does not run because it has no address
 // in their subnet: grey, with the reason.  The other members are unaffected.
-func markOffnet(groups []CanvasGateway, off map[int]string) {
+func markOffnet(groups []core.CanvasGateway, off map[int]string) {
 	for i := range groups {
 		why, ok := off[groups[i].GroupID]
 		if !ok {
@@ -462,7 +372,7 @@ func moveTo[T any](list []T, from, to int) []T {
 
 // setVIPs assigns the shared addresses: vip may be IPv4 or IPv6, vip6 is IPv6.
 // An empty argument leaves that family as it is.
-func setVIPs(g *GroupConfig, vip, vip6 string) {
+func setVIPs(g *core.GroupConfig, vip, vip6 string) {
 	for _, v := range []string{vip, vip6} {
 		if v == "" {
 			continue
@@ -483,7 +393,7 @@ func parseAnycastList(v string) ([]string, error) {
 	}
 	var out []string
 	for _, f := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' }) {
-		n, err := normalizeAnycast(f)
+		n, err := core.NormalizeAnycast(f)
 		if err != nil {
 			return nil, err
 		}
@@ -492,7 +402,7 @@ func parseAnycastList(v string) ([]string, error) {
 	return out, nil
 }
 
-func findGroup(dc *DaemonConfig, id int) (*GroupConfig, error) {
+func findGroup(dc *core.DaemonConfig, id int) (*core.GroupConfig, error) {
 	for i := range dc.Groups {
 		if dc.Groups[i].GroupID == id {
 			return &dc.Groups[i], nil
@@ -502,7 +412,7 @@ func findGroup(dc *DaemonConfig, id int) (*GroupConfig, error) {
 }
 
 // applyCanvasEdit changes dc as asked.  The caller validates and saves.
-func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
+func applyCanvasEdit(dc *core.DaemonConfig, e canvasEdit) (string, error) {
 	switch e.Kind {
 	case "gateway":
 		switch e.Action {
@@ -558,7 +468,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				for _, g := range dc.Groups {
 					used[g.GroupID] = true
 				}
-				for id = firstGroupID; used[id] && id < 256; id++ {
+				for id = core.FirstGroupID; used[id] && id < 256; id++ {
 				}
 			}
 			for _, g := range dc.Groups {
@@ -566,7 +476,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 					return "", fmt.Errorf("gateway %d already exists", id)
 				}
 			}
-			g := newGatewayGroup()
+			g := core.NewGatewayGroup()
 			g.GroupID = id
 			g.VIP4, g.VIP6 = "", ""
 			if e.Label != "-" {
@@ -586,13 +496,13 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				g.Interface = dc.Groups[0].Interface
 			}
 			dc.Groups = append(dc.Groups, g)
-			return fmt.Sprintf("added gateway %d (%s)", id, orDefault(e.VIP, e.VIP6)), nil
+			return fmt.Sprintf("added gateway %d (%s)", id, core.OrDefault(e.VIP, e.VIP6)), nil
 		case "pause", "resume":
 			g, err := findGroup(dc, e.Group)
 			if err != nil {
 				return "", err
 			}
-			scope := orDefault(e.Scope, "node") // this node unless said otherwise
+			scope := core.OrDefault(e.Scope, "node") // this node unless said otherwise
 			if scope != "node" && scope != "all" {
 				return "", errors.New("--scope must be node (this node only) or all (every node)")
 			}
@@ -642,7 +552,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				}
 				var kept []string
 				for _, id := range g.ExcludedNodes {
-					if containsStr(members, id) {
+					if core.ContainsStr(members, id) {
 						kept = append(kept, id)
 					} else {
 						did = append(did, fmt.Sprintf("%s from gateway %d", shortID(id), g.GroupID))
@@ -662,8 +572,8 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 		if e.nodeID == "" {
 			return "", errors.New("--node is required: the node's address, host name or node ID (see --cluster)")
 		}
-		who := orDefault(e.Node, e.nodeID)
-		out := containsStr(g.ExcludedNodes, e.nodeID)
+		who := core.OrDefault(e.Node, e.nodeID)
+		out := core.ContainsStr(g.ExcludedNodes, e.nodeID)
 		switch e.Action {
 		case "del": // removed from the gateway
 			if out {
@@ -672,7 +582,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			if e.members != "" {
 				left := 0
 				for _, id := range strings.Split(e.members, ",") {
-					if id != e.nodeID && !containsStr(g.ExcludedNodes, id) {
+					if id != e.nodeID && !core.ContainsStr(g.ExcludedNodes, id) {
 						left++
 					}
 				}
@@ -698,7 +608,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 		return "", fmt.Errorf("a node can be added to or removed from a gateway: --canvas-add|--canvas-del node --group N --node NODE")
 	case "device":
 		if e.Action == "pause" || e.Action == "resume" { // all nodes: the inventory's switch (a disabled device is never contacted); node: only this node
-			scope := orDefault(e.Scope, "all")
+			scope := core.OrDefault(e.Scope, "all")
 			if scope != "node" && scope != "all" {
 				return "", errors.New("--scope must be node (this node) or all (every node)")
 			}
@@ -712,7 +622,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 				}
 				pause := e.Action == "pause"
 				if scope == "node" {
-					if containsStr(dc.PausedDevicesHere, d.Name) == pause {
+					if core.ContainsStr(dc.PausedDevicesHere, d.Name) == pause {
 						return "", errNoChange
 					}
 					if pause {
@@ -795,13 +705,13 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 		if e.Address == "" {
 			return "", errors.New("--address is required")
 		}
-		addr, err := normalizeAnycast(e.Address)
+		addr, err := core.NormalizeAnycast(e.Address)
 		if err != nil {
 			return "", err
 		}
 		idx := -1
 		for i, a := range g.ExtraVIPs {
-			if n, _ := normalizeAnycast(a); n == addr {
+			if n, _ := core.NormalizeAnycast(a); n == addr {
 				idx = i
 			}
 		}
@@ -832,7 +742,7 @@ func applyCanvasEdit(dc *DaemonConfig, e canvasEdit) (string, error) {
 			if e.Scope == "all" {
 				list, where = &g.PausedVIPs, "all nodes"
 			}
-			have := containsStr(*list, addr)
+			have := core.ContainsStr(*list, addr)
 			if e.Action == "pause" {
 				if have {
 					return fmt.Sprintf("anycast address %s is already paused on %s", addr, where), nil
@@ -886,7 +796,7 @@ func (m *Mgmt) CanvasEdit(e canvasEdit, actor string) (string, error) {
 			return "", err
 		}
 	}
-	known := groupIDSet(dc)
+	known := cluster.GroupIDSet(dc)
 	msg, err := applyCanvasEdit(dc, e)
 	if errors.Is(err, errNoChange) {
 		return "nothing to change", nil
@@ -894,7 +804,7 @@ func (m *Mgmt) CanvasEdit(e canvasEdit, actor string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	m.holdBackFromNewGateways(dc, known)
+	m.HoldBackFromNewGateways(dc, known)
 	if err := m.PutConfig(dc, actor, "canvas: "+e.Action+" "+e.Kind); err != nil {
 		return "", err
 	}

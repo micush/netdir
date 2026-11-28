@@ -3,18 +3,20 @@ package main
 import (
 	"testing"
 	"time"
+
+	"netdir/internal/core"
 )
 
 // A node that joins is left out of every gateway until an administrator adds it.
 func TestNewNodeIsNotAddedToTheGateways(t *testing.T) {
 	a, b := twoNodeCluster(t)
-	id := b.mg.cl.node.Snapshot().NodeID
+	id := b.mg.cl.Node.Snapshot().NodeID
 	dc, _, err := a.mg.LiveConfig()
 	if err != nil || len(dc.Groups) == 0 {
 		t.Fatalf("no gateways to check: %v", err)
 	}
 	for _, g := range dc.Groups {
-		if !containsStr(g.ExcludedNodes, id) {
+		if !core.ContainsStr(g.ExcludedNodes, id) {
 			t.Fatalf("gateway %d: the node that joined is not left out: %v", g.GroupID, g.ExcludedNodes)
 		}
 	}
@@ -24,7 +26,7 @@ func TestNewNodeIsNotAddedToTheGateways(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, g := range db.Groups {
-		if !containsStr(g.ExcludedNodes, id) {
+		if !core.ContainsStr(g.ExcludedNodes, id) {
 			t.Fatalf("on the joiner, gateway %d does not carry the exclusion: %v", g.GroupID, g.ExcludedNodes)
 		}
 	}
@@ -43,7 +45,7 @@ func TestNodeJoiningThroughAReplicaIsNotAddedToTheGateways(t *testing.T) {
 	a, b := twoNodeCluster(t)
 	c := newTNode(t, "c")
 	c.join(b) // b is a replica
-	id := c.mg.cl.node.Snapshot().NodeID
+	id := c.mg.cl.Node.Snapshot().NodeID
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		dc, _, err := a.mg.LiveConfig()
@@ -52,7 +54,7 @@ func TestNodeJoiningThroughAReplicaIsNotAddedToTheGateways(t *testing.T) {
 		}
 		ok := len(dc.Groups) > 0
 		for _, g := range dc.Groups {
-			ok = ok && containsStr(g.ExcludedNodes, id)
+			ok = ok && core.ContainsStr(g.ExcludedNodes, id)
 		}
 		if ok {
 			return

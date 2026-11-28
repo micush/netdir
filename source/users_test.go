@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 type usersCall struct {
@@ -24,21 +27,21 @@ func usersFixture(t *testing.T, group, passwd, shadow string) (*Mgmt, *[]usersCa
 		}
 		return p
 	}
-	oldG, oldP, oldS, oldR, oldN, oldSh, oldL := usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells, usersLookup
+	oldG, oldP, oldS, oldR, oldN, oldSh, oldL := web.UsersGroupFile, web.UsersPasswdFile, web.UsersShadowFile, core.UsersRun, web.UsersNow, web.NologinShells, web.UsersLookup
 	t.Cleanup(func() {
-		usersGroupFile, usersPasswdFile, usersShadowFile, usersRun, usersNow, nologinShells, usersLookup = oldG, oldP, oldS, oldR, oldN, oldSh, oldL
+		web.UsersGroupFile, web.UsersPasswdFile, web.UsersShadowFile, core.UsersRun, web.UsersNow, web.NologinShells, web.UsersLookup = oldG, oldP, oldS, oldR, oldN, oldSh, oldL
 	})
-	usersLookup = func(string) bool { return false } // no directory unless a test makes one
-	usersGroupFile, usersPasswdFile, usersShadowFile = w("group", group), w("passwd", passwd), w("shadow", shadow)
-	nologinShells = []string{"/definitely/missing", "/bin/false"}
-	usersNow = func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) }
+	web.UsersLookup = func(string) bool { return false } // no directory unless a test makes one
+	web.UsersGroupFile, web.UsersPasswdFile, web.UsersShadowFile = w("group", group), w("passwd", passwd), w("shadow", shadow)
+	web.NologinShells = []string{"/definitely/missing", "/bin/false"}
+	web.UsersNow = func() time.Time { return time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) }
 	var calls []usersCall
-	usersRun = func(stdin, name string, args ...string) (string, error) {
+	core.UsersRun = func(stdin, name string, args ...string) (string, error) {
 		calls = append(calls, usersCall{stdin, name, args})
 		return "", nil
 	}
 	m := &Mgmt{}
-	m.webPolicy.Store(&WebConfig{Group: "netdir"})
+	m.webPolicy.Store(&core.WebConfig{Group: "netdir"})
 	return m, &calls
 }
 
@@ -47,19 +50,6 @@ const (
 	fxPasswd = "root:x:0:0::/root:/bin/bash\nalice:x:1000:1000::/home/alice:/bin/bash\nbob:x:1002:1000::/:/usr/sbin/nologin\ncarol:x:1003:1001::/:/usr/sbin/nologin\n"
 )
 
-func TestValidUserName(t *testing.T) {
-	for _, n := range []string{"alice", "_svc", "a-b_c9", strings.Repeat("a", 32)} {
-		if !validUserName(n) {
-			t.Errorf("%q should be valid", n)
-		}
-	}
-	for _, n := range []string{"", "Alice", "-a", "9a", "a:b", "a b", "a;b", "a/b", "a\nb", "root:x", strings.Repeat("a", 33), "é"} {
-		if validUserName(n) {
-			t.Errorf("%q should be refused", n)
-		}
-	}
-}
-
 func TestUsersList(t *testing.T) {
 	// bob expires on day 20000 (2024-10-04), long past; alice never; carol has the group as primary group.
 	m, _ := usersFixture(t, fxGroup, fxPasswd, "alice:x:1::::::\nbob:x:1:::::20000:\ncarol:x:1:::::21000\n")
@@ -67,7 +57,7 @@ func TestUsersList(t *testing.T) {
 	if v.Group != "netdir" || len(v.Users) != 3 {
 		t.Fatalf("view: %+v", v)
 	}
-	by := map[string]UserInfo{}
+	by := map[string]web.UserInfo{}
 	for _, u := range v.Users {
 		by[u.Name] = u
 	}
@@ -126,7 +116,7 @@ func TestUserAddRefusals(t *testing.T) {
 
 func TestUserAddRollsBackWithoutPassword(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
-	usersRun = func(stdin, name string, args ...string) (string, error) {
+	core.UsersRun = func(stdin, name string, args ...string) (string, error) {
 		*calls = append(*calls, usersCall{stdin, name, args})
 		if name == "chpasswd" {
 			return "bad password", errors.New("exit 1")
@@ -226,7 +216,7 @@ func TestRootIsNeverListedOrManaged(t *testing.T) {
 	if len(*calls) != 0 {
 		t.Errorf("%+v", *calls)
 	}
-	if err := m.usersPeer(usersMsg{Op: "delete", Name: "root"}, "x"); err == nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "delete", Name: "root"}, "x"); err == nil {
 		t.Error("a peer must not be able to touch root")
 	}
 }
@@ -237,7 +227,7 @@ func TestUsersFromAnotherNode(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
 	exp := time.Date(2027, 1, 2, 12, 0, 0, 0, time.UTC).Unix()
 	// A new account is created, given the hash (on stdin, with -e) and the expiry.
-	if err := m.usersPeer(usersMsg{Op: "apply", Name: "dave", Hash: testHash, Expires: exp}, "alice via n1"); err != nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "apply", Name: "dave", Hash: testHash, Expires: exp}, "alice via n1"); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -255,7 +245,7 @@ func TestUsersFromAnotherNode(t *testing.T) {
 	}
 	// An existing member just gets the new hash.
 	*calls = nil
-	if err := m.usersPeer(usersMsg{Op: "password", Name: "bob", Hash: testHash}, "x"); err != nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "password", Name: "bob", Hash: testHash}, "x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) != 1 || (*calls)[0].name != "chpasswd" {
@@ -265,7 +255,7 @@ func TestUsersFromAnotherNode(t *testing.T) {
 
 func TestUsersFromAnotherNodeRefusals(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
-	bad := []usersMsg{
+	bad := []core.UsersMsg{
 		{Op: "apply", Name: "dave", Hash: "plaintext"},           // not a hash
 		{Op: "apply", Name: "dave", Hash: "!"},                   // a locked entry is not a password
 		{Op: "apply", Name: "dave", Hash: testHash + "\nroot:x"}, // line break
@@ -278,16 +268,16 @@ func TestUsersFromAnotherNodeRefusals(t *testing.T) {
 		{Op: "bogus", Name: "bob"},
 	}
 	for _, b := range bad {
-		if err := m.usersPeer(b, "x"); err == nil {
+		if err := m.UsersPeer(b, "x"); err == nil {
 			t.Errorf("%+v should be refused", b)
 		}
 	}
 	// An account that exists here but is not in the group is never taken over.
-	if err := m.usersPeer(usersMsg{Op: "apply", Name: "bob2", Hash: testHash}, "x"); err != nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "apply", Name: "bob2", Hash: testHash}, "x"); err != nil {
 		t.Fatal(err) // a name that does not exist is created
 	}
 	*calls = nil
-	if err := m.usersPeer(usersMsg{Op: "apply", Name: "root", Hash: testHash}, "x"); err == nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "apply", Name: "root", Hash: testHash}, "x"); err == nil {
 		t.Error("root must be refused")
 	}
 	for _, c := range *calls {
@@ -299,17 +289,17 @@ func TestUsersFromAnotherNodeRefusals(t *testing.T) {
 
 func TestPeerDelete(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
-	if err := m.usersPeer(usersMsg{Op: "delete", Name: "ghost"}, "x"); err != nil || len(*calls) != 0 {
+	if err := m.UsersPeer(core.UsersMsg{Op: "delete", Name: "ghost"}, "x"); err != nil || len(*calls) != 0 {
 		t.Errorf("deleting an account that is already gone must succeed quietly: %v %+v", err, *calls)
 	}
-	if err := m.usersPeer(usersMsg{Op: "delete", Name: "carol"}, "x"); err != nil || len(*calls) != 1 || (*calls)[0].name != "userdel" {
+	if err := m.UsersPeer(core.UsersMsg{Op: "delete", Name: "carol"}, "x"); err != nil || len(*calls) != 1 || (*calls)[0].name != "userdel" {
 		t.Errorf("%v %+v", err, *calls)
 	}
 }
 
 func TestPeerNeverTakesOverAnExistingAccount(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd+"svc:x:999:999::/:/bin/bash\n", "")
-	if err := m.usersPeer(usersMsg{Op: "apply", Name: "svc", Hash: testHash}, "x"); err == nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "apply", Name: "svc", Hash: testHash}, "x"); err == nil {
 		t.Fatal("an existing account outside the group must not be taken over")
 	}
 	if len(*calls) != 0 {
@@ -321,7 +311,7 @@ func TestUsersSeedOnJoin(t *testing.T) {
 	// this node already has alice (member), carol (not a member) and svc
 	m, calls := usersFixture(t, fxGroup, fxPasswd+"svc:x:999:999::/:/bin/bash\n", "")
 	exp := time.Date(2027, 1, 2, 12, 0, 0, 0, time.UTC).Unix()
-	list := []usersMsg{
+	list := []core.UsersMsg{
 		{Op: "apply", Name: "alice", Hash: testHash},
 		{Op: "apply", Name: "carol", Hash: testHash},
 		{Op: "apply", Name: "svc", Hash: testHash},
@@ -346,7 +336,7 @@ func TestUsersSeedOnJoin(t *testing.T) {
 func TestUsersExport(t *testing.T) {
 	shadow := "alice:" + testHash + ":19000:0:99999:7:::\nbob:!:19000::::::\n"
 	m, _ := usersFixture(t, fxGroup, fxPasswd, shadow)
-	got := m.usersExport()
+	got := m.UsersExport()
 	if len(got) != 1 || got[0].Name != "alice" || got[0].Hash != testHash || got[0].Op != "apply" {
 		t.Fatalf("%+v", got)
 	}
@@ -405,33 +395,33 @@ func TestUserRevokeKeepsTheAccount(t *testing.T) {
 
 func TestPeerGrantAndRevoke(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd2, "")
-	if err := m.usersPeer(usersMsg{Op: "grant", Name: "dave"}, "x"); err != nil || (*calls)[0].name != "usermod" {
+	if err := m.UsersPeer(core.UsersMsg{Op: "grant", Name: "dave"}, "x"); err != nil || (*calls)[0].name != "usermod" {
 		t.Fatalf("existing account: %v %+v", err, *calls)
 	}
 	*calls = nil
 	hash := "$6$salt$abcdefghijklmnop"
-	if err := m.usersPeer(usersMsg{Op: "grant", Name: "erin", Hash: hash}, "x"); err != nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "grant", Name: "erin", Hash: hash}, "x"); err != nil {
 		t.Fatal(err)
 	}
 	if len(*calls) < 2 || (*calls)[0].name != "useradd" || (*calls)[1].name != "chpasswd" || !strings.Contains((*calls)[1].stdin, hash) {
 		t.Fatalf("a missing account must be created with the hash: %+v", *calls)
 	}
-	if err := m.usersPeer(usersMsg{Op: "grant", Name: "frank"}, "x"); err == nil {
+	if err := m.UsersPeer(core.UsersMsg{Op: "grant", Name: "frank"}, "x"); err == nil {
 		t.Error("a missing account without a hash cannot be made")
 	}
 	*calls = nil
-	if err := m.usersPeer(usersMsg{Op: "revoke", Name: "bob"}, "x"); err != nil || (*calls)[0].name != "gpasswd" {
+	if err := m.UsersPeer(core.UsersMsg{Op: "revoke", Name: "bob"}, "x"); err != nil || (*calls)[0].name != "gpasswd" {
 		t.Fatalf("revoke: %v %+v", err, *calls)
 	}
 	*calls = nil
-	if err := m.usersPeer(usersMsg{Op: "revoke", Name: "dave"}, "x"); err != nil || len(*calls) != 0 {
+	if err := m.UsersPeer(core.UsersMsg{Op: "revoke", Name: "dave"}, "x"); err != nil || len(*calls) != 0 {
 		t.Fatalf("revoking a non-member is a no-op: %v %+v", err, *calls)
 	}
 }
 
 func TestUserGrantDirectoryAccount(t *testing.T) {
 	m, calls := usersFixture(t, fxGroup, fxPasswd, "")
-	usersLookup = func(n string) bool { return n == "Mcc.Smith" || n == "EX\\bob" }
+	web.UsersLookup = func(n string) bool { return n == "Mcc.Smith" || n == "EX\\bob" }
 	if _, _, err := m.UserGrant("Mcc.Smith", false, "alice"); err != nil {
 		t.Fatalf("grant of a directory account: %v", err)
 	}
@@ -447,8 +437,8 @@ func TestUserGrantDirectoryAccount(t *testing.T) {
 		}
 	}
 	// a directory account's password and expiry are not ours to change, even once it is in the group
-	b, _ := os.ReadFile(usersGroupFile)
-	os.WriteFile(usersGroupFile, []byte(strings.Replace(string(b), "alice,bob", "alice,bob,Mcc.Smith", 1)), 0o600)
+	b, _ := os.ReadFile(web.UsersGroupFile)
+	os.WriteFile(web.UsersGroupFile, []byte(strings.Replace(string(b), "alice,bob", "alice,bob,Mcc.Smith", 1)), 0o600)
 	*calls = nil
 	if _, _, err := m.UserPassword("Mcc.Smith", "longenough-pw1", "alice"); err == nil || !strings.Contains(err.Error(), "directory account") {
 		t.Fatalf("password: %v", err)

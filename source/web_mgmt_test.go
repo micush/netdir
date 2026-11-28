@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"netdir/device"
+	"netdir/internal/core"
 )
 
 var mgmtGETs = []string{
@@ -45,7 +46,7 @@ func (e *webEnv) rawPost(path string, body []byte, csrf bool) resp {
 	return resp{res.StatusCode, m, raw, res.Header}
 }
 
-func putCfg(e *webEnv, mut func(*DaemonConfig)) resp {
+func putCfg(e *webEnv, mut func(*core.DaemonConfig)) resp {
 	dc, _, _ := e.mg.LiveConfig()
 	if mut != nil {
 		mut(dc)
@@ -57,10 +58,10 @@ func putCfg(e *webEnv, mut func(*DaemonConfig)) resp {
 func TestWebVersionsFlow(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	if r := putCfg(e, func(d *DaemonConfig) { d.Groups = []GroupConfig{defaultGroup()} }); r.code != 200 {
+	if r := putCfg(e, func(d *core.DaemonConfig) { d.Groups = []core.GroupConfig{core.DefaultGroup()} }); r.code != 200 {
 		t.Fatalf("initial save: %d %s", r.code, r.raw)
 	}
-	if r := putCfg(e, func(d *DaemonConfig) { d.Groups[0].Priority = 77 }); r.code != 200 {
+	if r := putCfg(e, func(d *core.DaemonConfig) { d.Groups[0].Priority = 77 }); r.code != 200 {
 		t.Fatalf("second save: %d %s", r.code, r.raw)
 	}
 	r := e.do("GET", "/api/versions", nil, withAuth(e, false))
@@ -122,7 +123,7 @@ func TestWebTLSFlow(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
 	r := e.do("GET", "/api/tls", nil, withAuth(e, false))
-	if d := r.body["data"].(map[string]any); r.code != 200 || d["source"] != certSourceSelfSigned {
+	if d := r.body["data"].(map[string]any); r.code != 200 || d["source"] != core.CertSourceSelfSigned {
 		t.Fatalf("status: %d %s", r.code, r.raw)
 	}
 	ca := newTestCA(t)
@@ -134,7 +135,7 @@ func TestWebTLSFlow(t *testing.T) {
 		t.Fatalf("mismatched key: %d %s", r.code, r.raw)
 	}
 	r = e.do("POST", "/api/tls/install", map[string]any{"cert_pem": chain, "key_pem": string(ecKeyPEM(k))}, withAuth(e, true))
-	if r.code != 200 || r.body["data"].(map[string]any)["info"].(map[string]any)["source"] != certSourceInstalled {
+	if r.code != 200 || r.body["data"].(map[string]any)["info"].(map[string]any)["source"] != core.CertSourceInstalled {
 		t.Fatalf("install: %d %s", r.code, r.raw)
 	}
 	if strings.Contains(string(r.raw), "PRIVATE KEY") {
@@ -152,7 +153,7 @@ func TestWebTLSFlow(t *testing.T) {
 		t.Fatalf("csr cancel: %d", r.code)
 	}
 	if r := e.do("POST", "/api/tls/revert", map[string]any{}, withAuth(e, true)); r.code != 200 ||
-		r.body["data"].(map[string]any)["source"] != certSourceSelfSigned {
+		r.body["data"].(map[string]any)["source"] != core.CertSourceSelfSigned {
 		t.Fatalf("revert: %d %s", r.code, r.raw)
 	}
 	if r := e.do("POST", "/api/tls/regenerate", map[string]any{}, withAuth(e, true)); r.code != 200 {
@@ -183,7 +184,7 @@ func TestWebClusterAndUpdateBasics(t *testing.T) {
 		t.Fatalf("good archive: %d %s", r.code, r.raw)
 	}
 	st := e.do("GET", "/api/update", nil, withAuth(e, false))
-	if d := st.body["data"].(map[string]any); d["source_version"] != "1" || d["running"] != version() {
+	if d := st.body["data"].(map[string]any); d["source_version"] != "1" || d["running"] != core.Version() {
 		t.Fatalf("update status: %s", st.raw)
 	}
 	if r := e.do("POST", "/api/update/apply", map[string]any{}, withAuth(e, true)); r.code != 422 ||
@@ -209,7 +210,7 @@ func TestWebClusterAndUpdateBasics(t *testing.T) {
 func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 	e := newWebEnv(t)
 	e.login("alice", "pw")
-	if r := putCfg(e, func(d *DaemonConfig) { d.Groups = []GroupConfig{defaultGroup()} }); r.code != 200 {
+	if r := putCfg(e, func(d *core.DaemonConfig) { d.Groups = []core.GroupConfig{core.DefaultGroup()} }); r.code != 200 {
 		t.Fatalf("initial save: %d %s", r.code, r.raw)
 	}
 	g := e.do("GET", "/api/config", nil, withAuth(e, false))
@@ -217,7 +218,7 @@ func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 	if g.code != 200 || base0 == "" {
 		t.Fatalf("GET /api/config has no base: %d %s", g.code, g.raw)
 	}
-	put := func(base string, mut func(*DaemonConfig)) resp {
+	put := func(base string, mut func(*core.DaemonConfig)) resp {
 		dc, _, _ := e.mg.LiveConfig()
 		mut(dc)
 		b, _ := json.Marshal(dc)
@@ -228,7 +229,7 @@ func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 		return e.do("PUT", "/api/config", body, withAuth(e, true))
 	}
 	// a save made from what is current works and says what the saved configuration is now
-	r := put(base0, func(d *DaemonConfig) {
+	r := put(base0, func(d *core.DaemonConfig) {
 		d.Settings.Devices = []device.Device{{Name: "sw1", Platform: "iosxe", Address: "10.0.0.1", Disabled: true}}
 	})
 	base1, _ := r.body["base"].(string)
@@ -236,7 +237,7 @@ func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 		t.Fatalf("save with the current base: %d %s (base %q → %q)", r.code, r.raw, base0, base1)
 	}
 	// a page that still holds the first copy cannot save (it would drop sw1)
-	r = put(base0, func(d *DaemonConfig) { d.Settings.Devices = nil })
+	r = put(base0, func(d *core.DaemonConfig) { d.Settings.Devices = nil })
 	if r.code != http.StatusConflict {
 		t.Fatalf("a stale save: %d %s", r.code, r.raw)
 	}
@@ -244,18 +245,18 @@ func TestWebConfigSaveRefusesStaleBase(t *testing.T) {
 		t.Errorf("the refused save changed the configuration: %d devices", len(cur.Settings.Devices))
 	}
 	// the new base works, and so does a save with none
-	if r = put(base1, func(d *DaemonConfig) { d.Settings.Devices[0].Address = "10.0.0.2" }); r.code != 200 {
+	if r = put(base1, func(d *core.DaemonConfig) { d.Settings.Devices[0].Address = "10.0.0.2" }); r.code != 200 {
 		t.Fatalf("save with the new base: %d %s", r.code, r.raw)
 	}
 	// a save that says nothing about what it read (a tab from before the update, a script) is refused too
-	if r = put("", func(d *DaemonConfig) { d.Settings.Devices = nil }); r.code != http.StatusConflict || !strings.Contains(string(r.raw), "Ctrl+F5") {
+	if r = put("", func(d *core.DaemonConfig) { d.Settings.Devices = nil }); r.code != http.StatusConflict || !strings.Contains(string(r.raw), "Ctrl+F5") {
 		t.Fatalf("save without a base: %d %s", r.code, r.raw)
 	}
 	if cur, _, _ := e.mg.LiveConfig(); len(cur.Settings.Devices) != 1 {
 		t.Errorf("the save without a base changed the configuration: %d devices", len(cur.Settings.Devices))
 	}
 	// and a script that means it says "force"
-	if r = put("force", func(d *DaemonConfig) { d.Settings.Devices = nil }); r.code != 200 {
+	if r = put("force", func(d *core.DaemonConfig) { d.Settings.Devices = nil }); r.code != 200 {
 		t.Fatalf("save with force: %d %s", r.code, r.raw)
 	}
 }

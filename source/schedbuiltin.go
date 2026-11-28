@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"netdir/internal/core"
+	"netdir/internal/web"
 )
 
 // schedActionDelay lets the history entry be written before the host goes down (shortened in tests).
@@ -18,22 +21,22 @@ var schedActionDelay = 1500 * time.Millisecond
 // if the new version does not stay up.  Nothing is downloaded when this node already runs the newest.
 func (s *Scheduler) updateOnline(actor string) (string, error) {
 	m := s.m
-	ctx, cancel := context.WithTimeout(context.Background(), 2*fetchTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*web.FetchTimeout)
 	defer cancel()
 	repo := m.upd.Repo()
-	tag, err := latestTag(ctx, repo)
+	tag, err := web.LatestTag(ctx, repo)
 	if err != nil {
 		return "", err
 	}
-	run := version()
-	if n := strings.TrimPrefix(tag, "v"); !versionGreater(n, run) {
-		if _, perr := parseVer(n); perr == nil {
+	run := core.Version()
+	if n := strings.TrimPrefix(tag, "v"); !core.VersionGreater(n, run) {
+		if _, perr := core.ParseVer(n); perr == nil {
 			return fmt.Sprintf("up to date: running v%s, newest release %s", run, tag), nil
 		}
 	}
 	staged := m.upd.SourceVersion()
-	if !versionGreater(staged, run) || versionGreater(strings.TrimPrefix(tag, "v"), staged) {
-		body, got, err := fetchRelease(ctx, repo)
+	if !core.VersionGreater(staged, run) || core.VersionGreater(strings.TrimPrefix(tag, "v"), staged) {
+		body, got, err := web.FetchRelease(ctx, repo)
 		if err != nil {
 			return "", err
 		}
@@ -41,10 +44,10 @@ func (s *Scheduler) updateOnline(actor string) (string, error) {
 			return "", fmt.Errorf("%s: %w", got, err)
 		}
 	}
-	if !versionGreater(staged, run) {
+	if !core.VersionGreater(staged, run) {
 		return fmt.Sprintf("up to date: running v%s, newest release %s", run, releaseName(tag, staged)), nil
 	}
-	if err := m.UpdatePush([]string{m.cl.selfAddrForEvents()}, actor); err != nil {
+	if err := m.UpdatePush([]string{m.cl.SelfAddrForEvents()}, actor); err != nil {
 		return "", fmt.Errorf("v%s is staged but could not be queued: %w", staged, err)
 	}
 	return fmt.Sprintf("%s staged; this node is queued to update (running v%s)", releaseName(tag, staged), run), nil
@@ -65,8 +68,8 @@ func (s *Scheduler) rebootHost(actor string) (string, error) {
 	go func() {
 		time.Sleep(schedActionDelay) // let the history entry be written first
 		waitUntilSafe(m.updateSafe, false, restartRecheck, func(string) {})
-		if _, err := m.Power(PowerReq{Action: "restart", Force: true}, actor); err != nil {
-			errorf("scheduler: reboot: %v", err)
+		if _, err := m.Power(core.PowerReq{Action: "restart", Force: true}, actor); err != nil {
+			core.Errorf("scheduler: reboot: %v", err)
 		}
 	}()
 	return "rebooting the host once it is safe to go down", nil
